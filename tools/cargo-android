@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# cargo for aarch64-linux-android against python.org's Android CPython.
+#
+#   tools/cargo-android build -p ytmdl-smoke [--release]
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+pylib="$root/.deps/python/aarch64/prefix/lib"
+[ -f "$pylib/libpython3.14.so" ] || { echo "no Android Python in $pylib; run tools/fetch-deps" >&2; exit 1; }
+
+export PYO3_CROSS_LIB_DIR="$pylib"
+export PYO3_CROSS_PYTHON_VERSION=3.14
+# nixpkgs' python setup hook points this at the host's sysconfigdata, which PyO3 honours.
+export _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__android_aarch64-linux-android
+
+cmd="$1"
+shift
+exec cargo "$cmd" --target aarch64-linux-android "$@"

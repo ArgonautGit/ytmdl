@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# End-to-end check on arm64 Android: installs the APK, grants storage, launches
+# it with the debug autotest hook, and checks the result: the app's YTMDL_E2E
+# line, the file on shared storage, its MediaStore row, and its tags read on the
+# host.
+#
+# Runs against a phone over adb by default (USB debugging on; set ANDROID_SERIAL
+# if more than one device is attached), or the Cuttlefish device with --cf.
+#
+#   tools/device-e2e [--cf] [--build] [--url URL] [--timeout SECONDS]
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cf="$root/tools/cf"
+pkg=dev.nick.ytmdl
+activity=dev.dioxus.main.MainActivity
+apk="$root/target/ytmdl-arm64.apk"
+out="$root/.deps/device-e2e"
+# Kevin MacLeod, "Monkeys Spinning Monkeys" (CC BY 3.0).
+url="https://music.youtube.com/watch?v=NPdgPZ0u3zQ"
+target=phone
+build=0
+timeout=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --cf) target=cf ;;
+        --build) build=1 ;;
+        --url) url="$2"; shift ;;
+        --timeout) timeout="$2"; shift ;;
+        *) echo "unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+step() { echo "[e2e] $*" >&2; }
+fail() { echo "[e2e] FAIL: $*" >&2; exit 1; }
+
+if [ "$target" = cf ]; then
+    # Emulated arm64 is slow; a phone finishes in a minute or two.
+    timeout="${timeout:-1800}"
+    dev_adb() { "$cf" adb "$@"; }
+    dev_install() {
+        cp -f "$apk" "$root/.cuttlefish/xfer/ytmdl.apk"
+        "$cf" adb install -r -t /cf/xfer/ytmdl.apk >/dev/null
+        rm -f "$root/.cuttlefish/xfer/ytmdl.apk"
+    }
+    dev_pull() { "$cf" pull "$1" "$2" >/dev/null; }
+    [ "$("$cf" status | head -1)" = "state: ready" ] || fail "device not ready (tools/cf up; tools/cf wait)"
+    # A build next to the running emulator overflows a 16 GB host.
+    [ "$build" = 0 ] || fail "--build with --cf: run tools/build-apk before tools/cf up"
+else
+    timeout="${timeout:-600}"
+    dev_adb() { adb "$@"; }
+    dev_install() { adb install -r -t "$apk" >/dev/null; }
+    dev_pull() { adb pull "$1" "$2" >/dev/null; }
+    state="$(adb get-state 2>&1 || true)"
+    case "$state" in
+        device) ;;
+        *unauthorized*) fail "the phone has not authorized this computer: unlock it and accept 'Allow USB debugging?'" ;;
+        *"no permissions"*) fail "no USB permission for the phone (udev rules for Android devices are missing)" ;;
+        *) fail "no phone over adb (USB debugging on? 'adb devices' lists it?): $state" ;;
+    esac
+    abi="$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
+    [ "$abi" = arm64-v8a ] || fail "the APK is arm64-v8a only; this device is $abi"
+    step "device: $(adb shell getprop ro.product.model | tr -d '\r'), Android $(adb shell getprop ro.build.version.release | tr -d '\r')"
+fi
+
+[ "$build" = 1 ] && "$root/tools/build-apk"
+[ -f "$apk" ] || fail "$apk does not exist (tools/build-apk)"
+rm -rf "$out"
+mkdir -p "$out"
+
+step "installing $(du -h "$apk" | cut -f1) APK built $(date -r "$apk" '+%F %R')"
+dev_install
+dev_adb shell appops set "$pkg" MANAGE_EXTERNAL_STORAGE allow
+
+step "launching with autotest $url"
+dev_adb shell am force-stop "$pkg"
+dev_adb logcat -c
+start=$(date +%s)
+dev_adb shell am start -W -n "$pkg/$activity" --es ytmdl_autotest "'$url'" >/dev/null
+
+result=
+while [ $(($(date +%s) - start)) -lt "$timeout" ]; do
+    sleep 5
+    dev_adb logcat -d -v brief -s ytmdl:V AndroidRuntime:E DEBUG:F libc:F >"$out/logcat.txt" 2>/dev/null || true
+    result="$(grep -m1 -o 'YTMDL_E2E \(ok\|fail\) .*' "$out/logcat.txt" || true)"
+    [ -n "$result" ] && break
+    if ! dev_adb shell pidof "$pkg" >/dev/null 2>&1; then
+        sleep 5
+        dev_adb logcat -d >"$out/logcat-full.txt" 2>/dev/null || true
+        fail "app process died after $(($(date +%s) - start))s; see $out/logcat-full.txt"
+    fi
+done
+elapsed=$(($(date +%s) - start))
+dev_adb logcat -d >"$out/logcat-full.txt" 2>/dev/null || true
+[ -n "$result" ] || fail "no YTMDL_E2E line after ${elapsed}s; see $out/logcat.txt"
+case "$result" in
+    "YTMDL_E2E fail"*) fail "${result#YTMDL_E2E fail } (after ${elapsed}s)" ;;
+esac
+report="${result#YTMDL_E2E ok }"
+echo "$report" | jq . >"$out/report.json"
+path="$(jq -r .path "$out/report.json")"
+step "app reported success after ${elapsed}s: $path"
+
+dev_adb shell ls -l "'$path'" >/dev/null || fail "$path is not on the device"
+case "$path" in /storage/emulated/0/Music/*) ;; *) fail "saved outside the shared Music folder: $path" ;; esac
+
+step "waiting for MediaStore"
+id="$(basename "$path" | sed -n 's/.*\[\([^]]*\)\]\.[^.]*$/\1/p')"
+row=
+for _ in $(seq 1 30); do
+    row="$(dev_adb shell content query --uri content://media/external/audio/media \
+        --projection title:artist:album:duration:mime_type \
+        --where "\"_display_name LIKE '%$id%'\"" 2>/dev/null | grep '^Row' || true)"
+    [ -n "$row" ] && break
+    sleep 2
+done
+[ -n "$row" ] || fail "no MediaStore row for $id"
+echo "$row" >"$out/mediastore.txt"
+step "MediaStore: $row"
+
+step "pulling the file for a host-side tag check"
+dev_pull "$path" "$out/track.m4a"
+cargo run -q -p ytmdl-cli -- --json inspect "$out/track.m4a" >"$out/inspect.json"
+jq -e '.title != null and .artist != null and (.pictures | length) > 0' "$out/inspect.json" >/dev/null ||
+    fail "tags missing on the pulled file: $(cat "$out/inspect.json")"
+step "PASS in ${elapsed}s: $(jq -r '"\(.artist) - \(.title) (\(.album // "no album"), \(.duration_secs | floor)s, \(.pictures | length) cover)"' "$out/inspect.json")"
+jq '{startup_ms, resolve_ms, total_ms, yt_dlp, python}' "$out/report.json"

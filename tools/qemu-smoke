@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Layer 1: runs crates/smoke for aarch64-linux-android under qemu-user against the
+# real bionic from tools/arm64-sysroot, with python.org's arm64 CPython and the
+# NDK-built arm64 qjs. Offline only: bionic resolves DNS through netd, which does
+# not exist under qemu-user, so networked checks run on Cuttlefish (tools/cf-smoke).
+#
+#   tools/qemu-smoke [--release] [--no-build]
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+deps="$root/.deps"
+sysroot="$deps/arm64-sysroot"
+prefix="$deps/python/aarch64/prefix"
+qjs="$deps/qjs/arm64-v8a/qjs"
+run="$deps/qemu-smoke"
+
+profile=debug
+build=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --release) profile=release ;;
+        --no-build) build=0 ;;
+        *) echo "unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+need() { [ -e "$1" ] || { echo "missing $1 ($2)" >&2; exit 1; }; }
+need "$sysroot/system/bin/linker64" "run tools/arm64-sysroot"
+need "$prefix/lib/libpython3.14.so" "run tools/fetch-deps"
+need "$qjs" "run tools/build-qjs"
+need "$deps/yt-dlp/yt-dlp.zip" "run tools/fetch-deps"
+need "$deps/fixtures/challenges.json" "run: cargo run -p ytmdl-cli -- record-fixtures"
+command -v qemu-aarch64 >/dev/null || { echo "qemu-aarch64 not found (use the nix devshell)" >&2; exit 1; }
+
+if [ "$build" = 1 ]; then
+    flags=()
+    [ "$profile" = release ] && flags+=(--release)
+    "$root/tools/cargo-android" build -p ytmdl-smoke "${flags[@]}"
+fi
+bin="$root/target/aarch64-linux-android/$profile/ytmdl-smoke"
+need "$bin" "build failed?"
+
+# yt-dlp execs `qjs` from Python. qemu-user hands execve to the host kernel and no
+# aarch64 binfmt handler is registered here, so give it a host-side launcher that
+# runs the arm64 binary under the same emulated bionic.
+rm -rf "$run"
+mkdir -p "$run/bin"
+cat >"$run/bin/qjs" <<EOF
+#!/bin/sh
+exec qemu-aarch64 -L "$sysroot" "$qjs" "\$@"
+EOF
+chmod +x "$run/bin/qjs"
+
+# -E only reaches the guest; the host qemu binary itself must not see these libs.
+start=$(date +%s)
+set +e
+qemu-aarch64 -L "$sysroot" \
+    -E LD_LIBRARY_PATH="$prefix/lib" \
+    -E HOME="$run" \
+    -E RUST_LOG="${RUST_LOG:-warn,ytmdl=info}" \
+    -U PYTHONPATH -U PYTHONHOME -U SSL_CERT_FILE -U SSL_CERT_DIR \
+    "$bin" \
+    --python-home "$prefix" \
+    --ytdlp "$deps/yt-dlp/yt-dlp.zip" \
+    --qjs "$run/bin/qjs" \
+    --work "$run/work" \
+    --fixtures "$deps/fixtures" | tee "$run/report.json"
+status=${PIPESTATUS[0]}
+set -e
+echo "qemu-smoke: exit $status in $(($(date +%s) - start))s (report: $run/report.json)" >&2
+exit "$status"

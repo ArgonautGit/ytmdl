@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Layer 2: runs crates/smoke on the arm64 Cuttlefish device from adb shell (real
+# init, linker namespaces, SELinux enforcing, netd DNS), including one real
+# download. Needs a ready device (tools/cf up && tools/cf wait).
+#
+#   tools/cf-smoke [--release] [--no-build] [--offline] [--url URL]
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+deps="$root/.deps"
+prefix="$deps/python/aarch64/prefix"
+stage="$root/.cuttlefish/xfer/ytmdl-smoke"
+remote=/data/local/tmp/ytmdl
+cf="$root/tools/cf"
+
+profile=debug
+build=1
+# Kevin MacLeod, "Monkeys Spinning Monkeys" (CC BY 3.0).
+url="https://music.youtube.com/watch?v=NPdgPZ0u3zQ"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --release) profile=release ;;
+        --no-build) build=0 ;;
+        --offline) url= ;;
+        --url) url="$2"; shift ;;
+        *) echo "unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+[ "$("$cf" status | head -1)" = "state: ready" ] || { echo "device not ready (tools/cf up; tools/cf wait)" >&2; exit 1; }
+
+if [ "$build" = 1 ]; then
+    flags=()
+    [ "$profile" = release ] && flags+=(--release)
+    "$root/tools/cargo-android" build -p ytmdl-smoke "${flags[@]}"
+fi
+bin="$root/target/aarch64-linux-android/$profile/ytmdl-smoke"
+
+# Stage with preserved mtimes so `adb push --sync` only sends what changed.
+mkdir -p "$stage/bin" "$stage/python"
+# No symlinks (SELinux refuses them under /data/local/tmp, and jniLibs cannot hold
+# them either) and no build-only files.
+rsync -a --delete --no-links --exclude pkgconfig "$prefix/lib/" "$stage/python/lib/"
+rsync -a --delete "$deps/fixtures/" "$stage/fixtures/"
+rsync -a "$bin" "$deps/qjs/arm64-v8a/qjs" "$stage/bin/"
+rsync -a "$deps/yt-dlp/yt-dlp.zip" "$stage/"
+find "$stage" -type l -delete
+
+"$cf" adb shell "mkdir -p $remote"
+"$cf" adb push --sync "/cf/xfer/ytmdl-smoke/." "$remote/" | tr "\r" "\n" | tail -1
+
+online=()
+[ -n "$url" ] && online=(--online "$url")
+start=$(date +%s)
+set +e
+"$cf" adb shell "cd $remote && rm -rf work && \
+    LD_LIBRARY_PATH=$remote/python/lib RUST_LOG='${RUST_LOG:-warn,ytmdl=info}' \
+    ./bin/ytmdl-smoke --python-home $remote/python --ytdlp $remote/yt-dlp.zip \
+    --qjs $remote/bin/qjs --work $remote/work --fixtures $remote/fixtures ${online[*]}" |
+    tee "$deps/cf-smoke-report.json"
+status=${PIPESTATUS[0]}
+set -e
+echo "cf-smoke: exit $status in $(($(date +%s) - start))s (report: $deps/cf-smoke-report.json)" >&2
+exit "$status"

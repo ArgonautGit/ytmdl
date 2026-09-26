@@ -1,0 +1,23 @@
+[application]
+name = "ytmdl"
+# Keep native compilation and the generated manifest on the same minimum API.
+android_min_sdk_version = 28
+
+[bundle]
+identifier = "dev.nick.ytmdl"
+publisher = "nick"
+
+[android]
+min_sdk = 28
+# Targeting 35+ forces edge-to-edge on Android 15+, and the Dioxus activity does
+# not pad the WebView for the system bars; the UI would sit under the status bar.
+target_sdk = 34
+compile_sdk = 36
+
+# INTERNET is always added. Downloads go to the shared Music folder, which needs
+# all-files access on API 30+ (granted in Settings, or by appops in tests).
+[android.raw]
+manifest = """
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+"""

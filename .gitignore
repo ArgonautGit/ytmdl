@@ -1,0 +1,10 @@
+/target/
+/.deps/
+/.cuttlefish/
+/.direnv/
+result
+result-*
+**/local.properties
+*.jks
+*.keystore
+__pycache__/

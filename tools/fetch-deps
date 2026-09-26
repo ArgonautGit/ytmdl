@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Downloads the third-party runtime pieces into .deps/ and verifies them against
+# tools/deps.sha256 (created on first run; commit it to pin the exact bytes).
+#
+#   tools/fetch-deps            aarch64 only
+#   tools/fetch-deps --x86_64   also the x86_64 Android Python build
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+deps="$root/.deps"
+sums="$root/tools/deps.sha256"
+
+PYTHON_VERSION=3.14.7
+YTDLP_VERSION=2026.08.19
+QJS_VERSION=0.17.0
+
+abis=(aarch64)
+[ "${1:-}" = --x86_64 ] && abis+=(x86_64)
+
+mkdir -p "$deps/dl"
+touch "$sums"
+
+fetch() { # url file
+    local url="$1" out="$deps/dl/$2"
+    if [ ! -s "$out" ]; then
+        echo "fetch $2"
+        curl -fL --retry 3 -o "$out.part" "$url"
+        mv "$out.part" "$out"
+    fi
+    local have want
+    have="$(sha256sum "$out" | cut -d' ' -f1)"
+    want="$(awk -v f="$2" '$2 == f { print $1 }' "$sums")"
+    if [ -z "$want" ]; then
+        echo "$have  $2" >>"$sums"
+        echo "pinned $2 $have"
+    elif [ "$have" != "$want" ]; then
+        echo "checksum mismatch for $2: $have != $want" >&2
+        exit 1
+    fi
+}
+
+# CPython for Android (embed-only: libpython, lib*_python.so, stdlib).
+for abi in "${abis[@]}"; do
+    f="python-$PYTHON_VERSION-$abi-linux-android.tar.gz"
+    fetch "https://www.python.org/ftp/python/$PYTHON_VERSION/$f" "$f"
+    dest="$deps/python/$abi"
+    if [ ! -f "$dest/.version-$PYTHON_VERSION" ]; then
+        rm -rf "$dest" && mkdir -p "$dest"
+        tar -xzf "$deps/dl/$f" -C "$dest"
+        touch "$dest/.version-$PYTHON_VERSION"
+    fi
+done
+
+# yt-dlp zipimport build (pure Python, bundles the EJS challenge solver scripts).
+fetch "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP_VERSION/SHA2-256SUMS" "yt-dlp-$YTDLP_VERSION.SHA2-256SUMS"
+fetch "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP_VERSION/yt-dlp" "yt-dlp-$YTDLP_VERSION"
+want="$(awk '$2 == "yt-dlp" { print $1 }' "$deps/dl/yt-dlp-$YTDLP_VERSION.SHA2-256SUMS")"
+have="$(sha256sum "$deps/dl/yt-dlp-$YTDLP_VERSION" | cut -d' ' -f1)"
+[ "$want" = "$have" ] || { echo "yt-dlp does not match upstream SHA2-256SUMS" >&2; exit 1; }
+mkdir -p "$deps/yt-dlp"
+cp "$deps/dl/yt-dlp-$YTDLP_VERSION" "$deps/yt-dlp/yt-dlp.zip"
+echo "$YTDLP_VERSION" >"$deps/yt-dlp/VERSION"
+
+# QuickJS-NG source, built for Android by tools/build-qjs.
+fetch "https://github.com/quickjs-ng/quickjs/archive/refs/tags/v$QJS_VERSION.tar.gz" "quickjs-ng-$QJS_VERSION.tar.gz"
+if [ ! -d "$deps/src/quickjs-ng-$QJS_VERSION" ]; then
+    mkdir -p "$deps/src"
+    tar -xzf "$deps/dl/quickjs-ng-$QJS_VERSION.tar.gz" -C "$deps/src"
+    mv "$deps/src/quickjs-$QJS_VERSION" "$deps/src/quickjs-ng-$QJS_VERSION"
+fi
+
+echo "deps ready in $deps"

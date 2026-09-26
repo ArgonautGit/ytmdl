@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Builds .deps/arm64-sysroot: the arm64 bionic runtime (linker64, libc & co from
+# the com.android.runtime APEX, /system/lib64) taken from the same pinned Android
+# build that Cuttlefish boots, so qemu-user tests and the device share one bionic.
+#
+#   tools/arm64-sysroot            (after `tools/cf fetch`)
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+device="$root/.cuttlefish/device"
+out="$root/.deps/arm64-sysroot"
+work="$root/.deps/arm64-work"
+
+[ -s "$device/super.img" ] || { echo "no $device/super.img; run tools/cf fetch first" >&2; exit 1; }
+for tool in fsck.erofs debugfs unzip; do
+    command -v "$tool" >/dev/null || { echo "$tool not found (use the nix devshell)" >&2; exit 1; }
+done
+
+rm -rf "$work" "$out"
+mkdir -p "$work" "$out"
+trap 'rm -rf "$work"' EXIT
+
+# fs_extract IMAGE DEST: unpack an erofs or ext4 image.
+fs_extract() {
+    mkdir -p "$2"
+    if [ "$(od -An -tx4 -j1024 -N4 "$1" | tr -d ' ')" = e0f5e1e2 ]; then
+        fsck.erofs --extract="$2" --no-preserve "$1" >/dev/null
+    elif [ "$(od -An -tx2 -j1080 -N2 "$1" | tr -d ' ')" = ef53 ]; then
+        debugfs -R "rdump / $2" "$1" >/dev/null 2>&1
+    else
+        echo "unrecognized filesystem in $1" >&2
+        exit 1
+    fi
+}
+
+python3 "$root/tools/lpextract.py" "$device/super.img" system_a "$work/system.img"
+fs_extract "$work/system.img" "$work/system"
+rm "$work/system.img"
+sys="$work/system"
+[ -d "$sys/system" ] && sys="$sys/system" # system-as-root layout
+
+mkdir -p "$out/system/bin" "$out/apex/com.android.runtime"
+cp -a "$sys/lib64" "$out/system/lib64"
+cp -a "$sys/bin/linker64" "$out/system/bin/"
+cp -a "$sys/build.prop" "$out/system/" 2>/dev/null || true
+# The bridge builds its CA bundle from these on Android (conscrypt's APEX copy is
+# compressed; the system copy holds the same roots).
+mkdir -p "$out/system/etc/security"
+cp -a "$sys/etc/security/cacerts" "$out/system/etc/security/"
+
+apex="$sys/apex/com.android.runtime.apex"
+if [ ! -f "$apex" ]; then
+    echo "no com.android.runtime.apex in the system image" >&2
+    exit 1
+fi
+unzip -q -o "$apex" apex_payload.img -d "$work"
+fs_extract "$work/apex_payload.img" "$out/apex/com.android.runtime"
+
+# Devices get a generated /linkerconfig; without one linker64 warns on stderr at
+# every exec, and yt-dlp treats any stderr from its JS runtime as a failure. One
+# unisolated namespace is enough for binaries run from the workspace.
+mkdir -p "$out/linkerconfig"
+cat >"$out/linkerconfig/ld.config.txt" <<CONF
+dir.workspace = $root/
+[workspace]
+namespace.default.isolated = false
+namespace.default.search.paths = /system/\${LIB}
+CONF
+
+# qemu-user's -L prefix is applied to the paths a guest opens, but the kernel
+# resolves symlink targets itself; rewrite absolute links to stay in the sysroot.
+find "$out" -type l | while read -r link; do
+    target="$(readlink "$link")"
+    case "$target" in
+        /*)
+            rel="$(realpath -m --relative-to="$(dirname "$link")" "$out$target")"
+            ln -sfn "$rel" "$link"
+            ;;
+    esac
+done
+
+for f in system/bin/linker64 system/lib64/libc.so system/lib64/libm.so system/lib64/libdl.so system/lib64/liblog.so system/lib64/libz.so; do
+    [ -s "$out/$f" ] || { echo "sysroot is missing $f" >&2; exit 1; }
+done
+release="$(sed -n 's/^ro.build.version.release=//p' "$out/system/build.prop" 2>/dev/null || true)"
+sdk="$(sed -n 's/^ro.build.version.sdk=//p' "$out/system/build.prop" 2>/dev/null || true)"
+echo "arm64 sysroot: Android ${release:-?} (API ${sdk:-?}) -> $out ($(du -sh "$out" | cut -f1))"

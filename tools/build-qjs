@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Cross-compiles QuickJS-NG's `qjs` for Android with the NDK. Run inside `nix develop`.
+#
+#   tools/build-qjs [arm64-v8a|x86_64]   (default arm64-v8a)
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+abi="${1:-arm64-v8a}"
+src="$(ls -d "$root"/.deps/src/quickjs-ng-* | tail -1)"
+build="$root/target/qjs-build/$abi"
+out="$root/.deps/qjs/$abi"
+
+: "${ANDROID_NDK_ROOT:?run inside nix develop}"
+: "${YTMDL_ANDROID_API:?run inside nix develop}"
+
+cmake -S "$src" -B "$build" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI="$abi" \
+    -DANDROID_PLATFORM="android-$YTMDL_ANDROID_API" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DQJS_BUILD_EXAMPLES=OFF
+cmake --build "$build" --target qjs_exe
+
+mkdir -p "$out"
+bin="$(find "$build" -maxdepth 2 -type f -name qjs -perm -u+x | head -1)"
+"$ANDROID_NDK_ROOT"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o "$out/qjs" "$bin"
+file "$out/qjs"

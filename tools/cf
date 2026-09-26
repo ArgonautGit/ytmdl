@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Host-side control of the arm64 Cuttlefish device (see tools/cuttlefish/).
+#
+#   tools/cf build          build the container image
+#   tools/cf fetch          download device images only
+#   tools/cf up             start the container and boot the device (background)
+#   tools/cf wait           block until the device is ready (or failed)
+#   tools/cf status         print state and device info
+#   tools/cf logs           follow launcher and kernel logs
+#   tools/cf adb ARGS...    run adb against the device
+#   tools/cf push SRC DST   copy a host file onto the device
+#   tools/cf pull SRC DST   copy a device file to the host
+#   tools/cf down           stop the device and remove the container
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cf_dir="$root/.cuttlefish"
+image=ytmdl-cuttlefish
+name=ytmdl-cf
+serial=127.0.0.1:6520
+# Hard cap for the whole container (4 GB guest + QEMU's TCG code cache + host
+# tools), with no swap, so the emulator cannot push the desktop into swap thrash.
+# At 6g the guest reached the cap mid-boot and crawled on I/O (its RAM is
+# file-backed, so it is reclaimed to disk rather than OOM-killed): it protects
+# the host, but booting needs a larger CF_MEM_LIMIT and a mostly idle desktop.
+mem_limit="${CF_MEM_LIMIT:-6g}"
+
+run_container() {
+    mkdir -p "$cf_dir"
+    docker run --name "$name" --init "$@" \
+        --memory "$mem_limit" \
+        --memory-swap "$mem_limit" \
+        --device /dev/kvm \
+        --device /dev/net/tun \
+        --device /dev/vhost-net \
+        --device /dev/vhost-vsock \
+        --cap-add NET_ADMIN \
+        --security-opt seccomp=unconfined \
+        --env HOST_UID="$(id -u)" \
+        --volume "$cf_dir":/cf \
+        "$image"
+}
+
+as_cf() { docker exec -u cf -e HOME=/cf/home "$name" "$@"; }
+
+state() { cat "$cf_dir/state" 2>/dev/null || echo none; }
+
+cmd="${1:-status}"
+shift || true
+case "$cmd" in
+build)
+    docker build -t "$image" "$root/tools/cuttlefish"
+    ;;
+fetch)
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    run_container --rm --env CF_FETCH_ONLY=1
+    ;;
+up)
+    if docker ps --format '{{.Names}}' | grep -qx "$name"; then
+        echo "already running (state: $(state))"
+        exit 0
+    fi
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    run_container -d >/dev/null
+    echo "started; state: $(state). Follow with: tools/cf logs"
+    ;;
+wait)
+    while :; do
+        s="$(state)"
+        case "$s" in
+        ready) cat "$cf_dir/device-info"; exit 0 ;;
+        failed | stopped) echo "device $s" >&2; exit 1 ;;
+        esac
+        if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
+            echo "container exited (state: $s)" >&2
+            docker logs --tail 50 "$name" 2>&1 || true
+            exit 1
+        fi
+        sleep 10
+    done
+    ;;
+status)
+    echo "state: $(state)"
+    [ -f "$cf_dir/device-info" ] && [ "$(state)" = ready ] && cat "$cf_dir/device-info"
+    docker ps --filter "name=^${name}$" --format '{{.Names}} {{.Status}}'
+    ;;
+logs)
+    docker exec "$name" bash -c \
+        'i=$(find /var/tmp/cvd /cf/device -type d -path "*/instances/cvd-[0-9]" 2>/dev/null | head -1); tail -n 50 -F "$i/logs/launcher.log" "$i/kernel.log"'
+    ;;
+adb)
+    as_cf adb -s "$serial" "$@"
+    ;;
+push)
+    src="$1" dst="$2"
+    tmp="xfer/$(basename "$src")"
+    cp -r "$src" "$cf_dir/$tmp"
+    as_cf adb -s "$serial" push "/cf/$tmp" "$dst"
+    rm -rf "${cf_dir:?}/$tmp"
+    ;;
+pull)
+    src="$1" dst="$2"
+    tmp="xfer/pull-$$"
+    as_cf adb -s "$serial" pull "$src" "/cf/$tmp"
+    mv "$cf_dir/$tmp" "$dst"
+    ;;
+down)
+    docker stop -t 90 "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    echo "state: $(state)"
+    ;;
+*)
+    sed -n '2,15p' "$0"
+    exit 2
+    ;;
+esac

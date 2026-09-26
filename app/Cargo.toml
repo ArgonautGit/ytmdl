@@ -1,0 +1,26 @@
+[package]
+name = "ytmdl-app"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+dioxus = { version = "=0.7.9" }
+ytmdl-core.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]
+# Honour the `ytmdl_autotest` launch extra / YTMDL_AUTOTEST (test builds only).
+autotest = []

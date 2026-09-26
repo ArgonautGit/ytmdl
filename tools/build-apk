@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Builds the arm64-v8a APK: `dx build` for the app, then adds what dx does not know
+# about to its generated Gradle project and re-runs Gradle:
+#   jniLibs/arm64-v8a: libpython3.14.so, lib*_python.so, libqjs.so (QuickJS-NG)
+#   assets/ytmdl/runtime.zip: pruned CPython stdlib + seed yt-dlp
+#
+# Rust is built optimized and without DWARF by default: a debug libmain.so is
+# ~170 MB, and on emulated arm64 Cuttlefish system_server's finalizer watchdog
+# kills the whole framework while unmapping an APK that size. The APK itself is
+# always a debuggable, debug-signed build with the `autotest` hook compiled in.
+#
+#   tools/build-apk [--debug] [--no-autotest]   -> target/ytmdl-arm64.apk
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+deps="$root/.deps"
+prefix="$deps/python/aarch64/prefix"
+profile=release
+features=mobile,autotest
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --debug) profile=debug ;;
+        --no-autotest) features=mobile ;;
+        *) echo "unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+dx_flags=()
+if [ "$profile" = release ]; then
+    dx_flags+=(--release)
+    export CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_STRIP=debuginfo
+fi
+
+for f in "$prefix/lib/libpython3.14.so" "$deps/qjs/arm64-v8a/qjs" "$deps/yt-dlp/yt-dlp.zip"; do
+    [ -e "$f" ] || { echo "missing $f (tools/fetch-deps, tools/build-qjs)" >&2; exit 1; }
+done
+
+# Same cross settings as tools/cargo-android.
+export PYO3_CROSS_LIB_DIR="$prefix/lib"
+export PYO3_CROSS_PYTHON_VERSION=3.14
+export _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__android_aarch64-linux-android
+
+cd "$root"
+dx build --android --target aarch64-linux-android --package ytmdl-app \
+    --no-default-features --features "$features" "${dx_flags[@]}"
+
+project="$root/target/dx/ytmdl-app/$profile/android/app"
+main="$project/app/src/main"
+[ -d "$main" ] || { echo "dx did not produce $main" >&2; exit 1; }
+
+# dx labels the app after the crate ("YtmdlApp").
+sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">ytmdl</string>|' "$main/res/values/strings.xml"
+
+jni="$main/jniLibs/arm64-v8a"
+mkdir -p "$jni"
+cp -f "$prefix/lib/libpython3.14.so" "$prefix"/lib/lib*_python.so "$jni/"
+cp -f "$deps/qjs/arm64-v8a/qjs" "$jni/libqjs.so"
+
+mkdir -p "$main/assets/ytmdl"
+python3 - "$prefix/lib/python3.14" "$deps/yt-dlp/yt-dlp.zip" "$main/assets/ytmdl/runtime.zip" <<'EOF'
+import os, sys, zipfile
+stdlib, ytdlp, out = sys.argv[1:]
+# Not needed at runtime on a phone.
+skip_dirs = {"test", "idlelib", "tkinter", "turtledemo", "ensurepip", "pydoc_data", "__pycache__", "__phello__"}
+count = 0
+with zipfile.ZipFile(out + ".part", "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+    for dirpath, dirnames, filenames in os.walk(stdlib):
+        rel = os.path.relpath(dirpath, stdlib)
+        dirnames[:] = sorted(d for d in dirnames if d not in skip_dirs and not (rel == "." and d.startswith("config-")))
+        for name in sorted(filenames):
+            src = os.path.join(dirpath, name)
+            arc = os.path.normpath(os.path.join("python/lib/python3.14", rel, name))
+            z.write(src, arc)
+            count += 1
+    z.write(ytdlp, "yt-dlp.zip", compress_type=zipfile.ZIP_STORED)
+os.replace(out + ".part", out)
+print(f"runtime.zip: {count} stdlib files, {os.path.getsize(out) / 1e6:.1f} MB")
+EOF
+
+# dx only runs assembleRelease when a signing config exists; we never set one.
+apk="$project/app/build/outputs/apk/debug/app-debug.apk"
+# Incremental packaging rewrites the old APK in place and leaves the space of
+# replaced entries behind (~14 MB after a libmain.so change); start clean.
+rm -f "$apk"
+(cd "$project" && ./gradlew --quiet assembleDebug)
+out="$root/target/ytmdl-arm64.apk"
+cp -f "$apk" "$out"
+echo "$out ($(du -h "$out" | cut -f1))"
+unzip -l "$out" | grep -E "lib/arm64-v8a/|assets/ytmdl/" | awk '{printf "  %8d  %s\n", $1, $4}'
