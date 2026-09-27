@@ -320,6 +320,43 @@ fn scan_indexes_tagged_files_and_forgets_deleted_ones() {
     assert!(lib.tracks().unwrap().is_empty());
 }
 
+/// Needs `.deps/fixtures/tone.m4a`, like the test above.
+#[test]
+fn scan_keeps_artists_with_commas() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.deps/fixtures/tone.m4a");
+    if !fixture.exists() {
+        eprintln!("skipping: {} is missing", fixture.display());
+        return;
+    }
+    let tmp = TempDir::new("commas");
+    let music = tmp.0.join("Music");
+    let album = music.join("Tyler, The Creator/Record");
+    fs::create_dir_all(&album).unwrap();
+    let file = album.join("First [track000001].m4a");
+    fs::copy(&fixture, &file).unwrap();
+    let m = meta("track000001", "First", Some("Record"), &["Tyler, The Creator", "Kali Uchis"], Some(1));
+    write_tags(&file, &m, None).unwrap();
+    // Tagged the way ytmdl did before it wrote ARTISTS.
+    use lofty::prelude::*;
+    let mut tagged = lofty::read_from_path(&file).unwrap();
+    tagged.primary_tag_mut().unwrap().remove_key(lofty::tag::ItemKey::TrackArtists);
+    tagged.save_to_path(&file, lofty::config::WriteOptions::default()).unwrap();
+
+    // The index, filled from the download, has the right names.
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    lib.add_download(&Downloaded { path: file.clone(), meta: m, tagged: true }).unwrap();
+    // A scan writes them into the file, and doesn't count that as a change.
+    assert!(!lib.scan(std::slice::from_ref(&music)).unwrap().changed());
+    assert_eq!(ytmdl_core::tag::read_tags(&file).unwrap().artists, ["Tyler, The Creator", "Kali Uchis"]);
+
+    // An index rebuilt from the files keeps them.
+    let fresh = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    assert_eq!(fresh.scan(&[music]).unwrap().added, 1);
+    assert_eq!(fresh.tracks().unwrap()[0].artists, ["Tyler, The Creator", "Kali Uchis"]);
+    let names: Vec<String> = fresh.artists().unwrap().into_iter().map(|a| a.name).collect();
+    assert_eq!(names, ["Kali Uchis", "Tyler, The Creator"]);
+}
+
 #[test]
 fn imports_listens_and_counts_plays() {
     let tmp = TempDir::new("listens");

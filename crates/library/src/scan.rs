@@ -87,10 +87,49 @@ impl Library {
                 report.removed += 1;
             }
         }
+        self.add_artists_tags(&listed)?;
         if report.changed() {
             tracing::info!(target: "ytmdl", "library scan: {report:?}");
         }
         Ok(report)
+    }
+}
+
+impl Library {
+    /// Files tagged before ytmdl wrote each artist separately only have the
+    /// artists joined with ", ", which a scan would split inside a name like
+    /// "Tyler, The Creator". The index still knows the real names, so write
+    /// them into those files before the index is ever rebuilt from them.
+    fn add_artists_tags(&self, dirs: &[&PathBuf]) -> Result<()> {
+        let tracks: Vec<(i64, PathBuf, String)> = {
+            let db = self.db();
+            let mut stmt = db.prepare(
+                "SELECT id, path, artists FROM tracks t
+                 WHERE EXISTS (SELECT 1 FROM json_each(t.artists) WHERE value LIKE '%, %')",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, PathBuf::from(r.get::<_, String>(1)?), r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for (id, path, artists) in tracks {
+            if !dirs.iter().any(|d| path.starts_with(d)) {
+                continue;
+            }
+            let artists: Vec<String> = serde_json::from_str(&artists)?;
+            match ytmdl_core::tag::add_artists(&path, &artists) {
+                Ok(true) => {
+                    // Keep the scan from taking the new tag for a changed file.
+                    let (size, mtime) = file_stamp(&path)?;
+                    self.db().execute(
+                        "UPDATE tracks SET file_size = ?2, file_mtime = ?3 WHERE id = ?1",
+                        rusqlite::params![id, size as i64, mtime],
+                    )?;
+                    tracing::info!(target: "ytmdl", "wrote the artists of {}", path.display());
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!(target: "ytmdl", "writing the artists of {}: {e}", path.display()),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -139,8 +178,7 @@ fn read_file(path: &Path, video_id: String) -> Option<NewTrack> {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
         stem.rsplit_once(" [").map_or(stem, |(title, _)| title).to_owned()
     });
-    let artists: Vec<String> =
-        text(|t| t.artist()).map(|a| a.split(", ").map(str::to_owned).collect()).unwrap_or_default();
+    let artists = tag.map(ytmdl_core::tag::artists).unwrap_or_default();
     let album_artist = tag
         .and_then(|t| t.get_string(ItemKey::AlbumArtist))
         .map(|s| s.trim().to_owned())
