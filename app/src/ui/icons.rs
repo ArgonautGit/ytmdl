@@ -27,6 +27,19 @@ pub enum Icon {
     Person,
     Disc,
     ChevronDown,
+    More,
+    Trash,
+    Plus,
+    Pencil,
+    /// Add to playlist.
+    ListPlus,
+    /// Play next.
+    ListStart,
+    /// Add to queue.
+    ListEnd,
+    Playlist,
+    /// Remove from a list.
+    CircleMinus,
 }
 
 #[component]
@@ -114,6 +127,37 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         },
         Icon::ChevronDown => rsx! {
             path { d: "m6 9 6 6 6-6" }
+        },
+        Icon::More => rsx! {
+            circle { cx: "12", cy: "5", r: "1" }
+            circle { cx: "12", cy: "12", r: "1" }
+            circle { cx: "12", cy: "19", r: "1" }
+        },
+        Icon::Trash => rsx! {
+            path { d: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" }
+        },
+        Icon::Plus => rsx! {
+            path { d: "M5 12h14M12 5v14" }
+        },
+        Icon::Pencil => rsx! {
+            path { d: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" }
+        },
+        Icon::ListPlus => rsx! {
+            path { d: "M11 12H3M16 6H3M16 18H3M18 9v6M21 12h-6" }
+        },
+        Icon::ListStart => rsx! {
+            path { d: "M16 12H3M16 18H3M10 6H3M21 18V8a2 2 0 0 0-2-2h-5M16 8l-2-2 2-2" }
+        },
+        Icon::ListEnd => rsx! {
+            path { d: "M16 12H3M16 6H3M10 18H3M21 6v10a2 2 0 0 1-2 2h-5M16 16l-2 2 2 2" }
+        },
+        Icon::Playlist => rsx! {
+            path { d: "M21 15V6M12 12H3M16 6H3M12 18H3" }
+            circle { cx: "18.5", cy: "15.5", r: "2.5" }
+        },
+        Icon::CircleMinus => rsx! {
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M8 12h8" }
         },
     };
     rsx! {

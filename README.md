@@ -16,14 +16,19 @@ new APK.
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
-  tracks, the download queue (so it survives restarts) and the saved play
-  queue, plus cover art resized for the UI. The files stay the record: a scan
-  of the music folders re-indexes them from their tags and forgets deleted ones.
-- `app`: the Dioxus app (library, search, downloads, settings, player).
-- `app/android`: Kotlin for playback, a Media3 ExoPlayer service in its own
-  `:player` process (notification, lock screen and headset controls) driven
-  from Rust over JNI. `tools/patch-gradle-project` adds it to the Gradle
-  project dx generates.
+  tracks, playlists, the download queue (so it survives restarts) and the
+  saved play queue, plus cover art resized for the UI. The files stay the
+  record: a scan of the music folders re-indexes them from their tags and
+  forgets deleted ones.
+- `app`: the Dioxus app (library, playlists, search, downloads, settings,
+  player with A-B loops over part of a song or a run of the queue).
+- `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
+  ExoPlayer service in its own `:player` process (notification, lock screen and
+  headset controls), which also runs the A-B loops so they hold with the screen
+  off. Downloads get a data-sync foreground service so Android doesn't freeze
+  them in the background. `res/` has the launcher and notification icons.
+  `tools/patch-gradle-project` adds all of it to the Gradle project dx
+  generates.
 
 Files land in `Music/<Artist>/<Album>/<Title> [<id>].m4a` on shared storage
 (after the all-files access prompt) and are added to MediaStore.
@@ -31,6 +36,8 @@ Files land in `Music/<Artist>/<Album>/<Title> [<id>].m4a` on shared storage
 The Rust side can't start twice in one process, and tao starts it again for a
 second activity, so the app's process ends with its activity (music plays on
 in the `:player` process) and back on the root page only hides the app.
+Downloads live in the app's process, so swiping the app away stops them; they
+pick up again on the next start.
 
 ## Setup
 

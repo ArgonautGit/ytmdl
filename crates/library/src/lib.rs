@@ -6,6 +6,7 @@
 //! drops tracks whose files were deleted elsewhere.
 
 mod art;
+mod playlists;
 mod scan;
 
 use std::collections::HashSet;
@@ -20,6 +21,7 @@ use ytmdl_core::{Downloaded, Entry};
 
 pub use art::{ART_LARGE, ART_SMALL};
 use art::ArtCache;
+pub use playlists::{Playlist, PlaylistEntry};
 pub use scan::ScanReport;
 
 #[derive(Debug, thiserror::Error)]
@@ -72,9 +74,23 @@ CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+"#, r#"
+CREATE TABLE playlists (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE playlist_tracks (
+    id          INTEGER PRIMARY KEY,
+    playlist_id INTEGER NOT NULL REFERENCES playlists (id) ON DELETE CASCADE,
+    track_id    INTEGER NOT NULL REFERENCES tracks (id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL
+);
+CREATE INDEX playlist_tracks_order ON playlist_tracks (playlist_id, position);
+CREATE INDEX playlist_tracks_track ON playlist_tracks (track_id);
 "#];
 
-const TRACK_COLUMNS: &str =
+pub(crate) const TRACK_COLUMNS: &str =
     "id, video_id, url, path, title, artists, album, album_artist, track_number, disc_number, year, duration, art, added_at";
 
 /// A downloaded song.
@@ -178,6 +194,7 @@ impl Library {
 
     fn init(mut conn: Connection, art_dir: &Path) -> Result<Library> {
         conn.busy_timeout(Duration::from_secs(5))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         migrate(&mut conn)?;
         Ok(Library(Arc::new(Inner {
             db: Mutex::new(conn),
@@ -355,17 +372,24 @@ impl Library {
         Ok(ids)
     }
 
-    /// Forgets a track and deletes its file. The cover art stays cached (other
-    /// tracks of the album share it).
-    pub fn delete_track(&self, id: i64) -> Result<()> {
-        let Some(track) = self.track(id)? else { return Ok(()) };
+    /// Forgets a track (and its playlist entries) and deletes its file, then the
+    /// album and artist folders if that left them empty. The cover art stays
+    /// cached (other tracks of the album share it). Returns the deleted track.
+    pub fn delete_track(&self, id: i64) -> Result<Option<Track>> {
+        let Some(track) = self.track(id)? else { return Ok(None) };
         match fs::remove_file(&track.path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
         self.db().execute("DELETE FROM tracks WHERE id = ?1", [id])?;
-        Ok(())
+        // `<Artist>/<Album>/<file>`: remove_dir only succeeds on empty folders.
+        for dir in track.path.ancestors().skip(1).take(2) {
+            if fs::remove_dir(dir).is_err() {
+                break;
+            }
+        }
+        Ok(Some(track))
     }
 
     fn query_tracks(&self, sql: &str, params: impl rusqlite::Params) -> Result<Vec<Track>> {
@@ -484,7 +508,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-fn track_from_row(r: &Row) -> rusqlite::Result<Track> {
+pub(crate) fn track_from_row(r: &Row) -> rusqlite::Result<Track> {
     let artists: String = r.get(5)?;
     Ok(Track {
         id: r.get(0)?,
@@ -511,7 +535,7 @@ fn file_stamp(path: &Path) -> Result<(u64, i64)> {
     Ok((meta.len(), mtime))
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 

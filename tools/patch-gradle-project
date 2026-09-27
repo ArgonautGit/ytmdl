@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Adds playback to the Gradle project `dx build` generates (run by tools/build-apk).
+"""Adds our Android code to the Gradle project `dx build` generates (run by
+tools/build-apk).
 
   tools/patch-gradle-project <gradle project dir> <repo root>
 
-- app/android/*.kt: the Media3 playback service, its JNI bridge (YtmdlPlayer),
-  and a MainActivity replacing the generated one.
+- app/android/*.kt: the Media3 playback service and its JNI bridge
+  (YtmdlPlayer), the downloads foreground service, and a MainActivity replacing
+  the generated one.
+- app/android/res: the launcher and notification icons (overriding dx's).
 - Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
   generated project compiles with (1.10+ pulls in kotlin-stdlib 2.2).
-- The manifest: the service, in its own ":player" process, and every
-  configuration change handled by the activity. The Rust side can't survive the
-  activity being re-created in one process (see MainActivity.kt).
+- The manifest: the playback service, in its own ":player" process, the
+  downloads service, and every configuration change handled by the activity.
+  The Rust side can't survive the activity being re-created in one process
+  (see MainActivity.kt).
 
 Safe to run again on an already patched project.
 """
@@ -26,13 +30,15 @@ CONFIG_CHANGES = (
     "|uiMode|density|fontScale|locale|layoutDirection|colorMode|touchscreen|mcc|mnc"
 )
 
-SERVICE = """\
+SERVICES = """\
         <service android:name="dev.nick.ytmdl.PlaybackService" android:process=":player"
             android:exported="true" android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <service android:name="dev.nick.ytmdl.DownloadService"
+            android:exported="false" android:foregroundServiceType="dataSync" />
 """
 
 
@@ -45,8 +51,9 @@ def main() -> None:
     shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
     ours = kotlin / "dev/nick/ytmdl"
     ours.mkdir(parents=True, exist_ok=True)
-    for name in ("PlaybackService.kt", "YtmdlPlayer.kt"):
+    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt"):
         shutil.copy(sources / name, ours / name)
+    shutil.copytree(sources / "res", main_dir / "res", dirs_exist_ok=True)
 
     gradle = project / "app/build.gradle.kts"
     text = gradle.read_text()
@@ -64,8 +71,8 @@ def main() -> None:
     assert n == 1, "the activity's configChanges not found"
     if "PlaybackService" not in text:
         assert text.count("</application>") == 1
-        text = text.replace("    </application>", SERVICE + "    </application>")
-        assert "PlaybackService" in text, "could not place the service"
+        text = text.replace("    </application>", SERVICES + "    </application>")
+        assert "PlaybackService" in text, "could not place the services"
     manifest.write_text(text)
 
 

@@ -3,6 +3,7 @@ package dev.nick.ytmdl
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -12,6 +13,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import java.io.File
@@ -22,6 +24,9 @@ import org.json.JSONObject
  * The app's end of playback, called from Rust over JNI (src/platform/android.rs).
  * Commands go to [PlaybackService] through a MediaController on the main thread;
  * every change comes back to Rust as a JSON snapshot through [nativeChanged].
+ *
+ * Media ids are "<track id>.<n>", unique within the queue, so one song can be
+ * queued twice and loops can name queue entries.
  */
 object YtmdlPlayer {
     private const val TAG = "ytmdl"
@@ -43,7 +48,11 @@ object YtmdlPlayer {
             if (connecting) return@post
             connecting = true
             val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
-            val future = MediaController.Builder(app, token).buildAsync()
+            val future = MediaController.Builder(app, token)
+                .setListener(object : MediaController.Listener {
+                    override fun onExtrasChanged(controller: MediaController, extras: Bundle) = publish()
+                })
+                .buildAsync()
             future.addListener({
                 val c = try {
                     future.get()
@@ -82,14 +91,10 @@ object YtmdlPlayer {
         }
     }
 
-    /**
-     * Replaces the queue. [items] is a JSON array of
-     * `{id, path, title, artist, album, art}` (art: a cover file path or "").
-     */
-    @JvmStatic
-    fun setQueue(items: String, index: Int, positionMs: Long, play: Boolean) = command { c ->
-        val list = JSONArray(items)
-        val media = (0 until list.length()).map { i ->
+    /** `[{id, path, title, artist, album, art}]`, art being a cover file path or "". */
+    private fun mediaItems(json: String): List<MediaItem> {
+        val list = JSONArray(json)
+        return (0 until list.length()).map { i ->
             val o = list.getJSONObject(i)
             val meta = MediaMetadata.Builder()
                 .setTitle(o.getString("title"))
@@ -105,10 +110,37 @@ object YtmdlPlayer {
                 .setMediaMetadata(meta)
                 .build()
         }
+    }
+
+    /** Replaces the queue (loops go with the old entries). */
+    @JvmStatic
+    fun setQueue(items: String, index: Int, positionMs: Long, play: Boolean) = command { c ->
         error = null
-        c.setMediaItems(media, index, positionMs)
+        c.setMediaItems(mediaItems(items), index, positionMs)
         c.prepare()
         c.playWhenReady = play
+    }
+
+    /** Adds songs after the current one ([next]) or at the end; starts a queue if there is none. */
+    @JvmStatic
+    fun insert(items: String, next: Boolean) = command { c ->
+        val media = mediaItems(items)
+        if (c.mediaItemCount == 0) {
+            c.setMediaItems(media)
+            c.prepare()
+            c.play()
+        } else {
+            c.addMediaItems(if (next) c.currentMediaItemIndex + 1 else c.mediaItemCount, media)
+        }
+    }
+
+    /** Removes the entry with media id [key], or every entry of track [key]. */
+    @JvmStatic
+    fun remove(key: String) = command { c ->
+        for (i in c.mediaItemCount - 1 downTo 0) {
+            val id = c.getMediaItemAt(i).mediaId
+            if (id == key || id.startsWith("$key.")) c.removeMediaItem(i)
+        }
     }
 
     @JvmStatic
@@ -143,6 +175,29 @@ object YtmdlPlayer {
     @JvmStatic
     fun setRepeat(mode: Int) = command { it.repeatMode = mode }
 
+    /** Loops entry [id] between [a] and [b] ms; an empty [id] clears the loop. */
+    @JvmStatic
+    fun setSongLoop(id: String, a: Long, b: Long) = command { c ->
+        val args = Bundle()
+        if (id.isNotEmpty()) {
+            args.putString("id", id)
+            args.putLong("a", a)
+            args.putLong("b", b)
+        }
+        c.sendCustomCommand(SessionCommand(PlaybackService.SONG_LOOP, Bundle.EMPTY), args)
+    }
+
+    /** Goes back to entry [first] whenever entry [last] ends; empty ids clear the loop. */
+    @JvmStatic
+    fun setQueueLoop(first: String, last: String) = command { c ->
+        val args = Bundle()
+        if (first.isNotEmpty() && last.isNotEmpty()) {
+            args.putString("first", first)
+            args.putString("last", last)
+        }
+        c.sendCustomCommand(SessionCommand(PlaybackService.QUEUE_LOOP, Bundle.EMPTY), args)
+    }
+
     private fun publish() {
         val c = controller ?: return
         val ids = JSONArray()
@@ -158,6 +213,16 @@ object YtmdlPlayer {
             .put("repeat", c.repeatMode)
             .put("ids", ids)
             .put("error", error ?: JSONObject.NULL)
+        val extras = c.sessionExtras
+        extras.getString("songLoopId")?.let { id ->
+            state.put(
+                "songLoop",
+                JSONObject().put("id", id).put("a", extras.getLong("songLoopA")).put("b", extras.getLong("songLoopB")),
+            )
+        }
+        extras.getString("queueLoopFirst")?.let { first ->
+            state.put("queueLoop", JSONObject().put("first", first).put("last", extras.getString("queueLoopLast")))
+        }
         try {
             nativeChanged(state.toString())
         } catch (e: UnsatisfiedLinkError) {

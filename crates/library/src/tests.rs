@@ -122,13 +122,56 @@ fn looks_up_tracks_in_order_and_keeps_settings() {
 }
 
 #[test]
-fn deletes_track_and_file() {
+fn deletes_track_file_and_empty_folders() {
     let tmp = TempDir::new("delete");
     let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
-    let track = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Gone", None, &["A"], None));
-    lib.delete_track(track.id).unwrap();
+    let album = tmp.0.join("Music/Artist/Album");
+    fs::create_dir_all(&album).unwrap();
+    let track = add(&lib, &album, meta("aaaaaaaaaaa", "Gone", None, &["A"], None));
+    let kept = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Kept", None, &["A"], None));
+    assert_eq!(lib.delete_track(track.id).unwrap().map(|t| t.id), Some(track.id));
     assert!(!track.path.exists());
-    assert!(lib.tracks().unwrap().is_empty());
+    assert!(!tmp.0.join("Music/Artist").exists());
+    assert!(tmp.0.join("Music").exists());
+    let left: Vec<i64> = lib.tracks().unwrap().iter().map(|t| t.id).collect();
+    assert_eq!(left, [kept.id]);
+    assert_eq!(lib.delete_track(track.id).unwrap(), None);
+}
+
+#[test]
+fn playlists_keep_order_skip_duplicates_and_follow_deletes() {
+    let tmp = TempDir::new("playlists");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    let c = add(&lib, &tmp.0, meta("ccccccccccc", "C", None, &["X"], None));
+
+    let mix = lib.create_playlist("  Mix ").unwrap();
+    let other = lib.create_playlist("Other").unwrap();
+    assert_eq!(lib.add_to_playlist(mix, &[c.id, a.id]).unwrap(), 2);
+    assert_eq!(lib.add_to_playlist(mix, &[a.id, b.id]).unwrap(), 1);
+    lib.add_to_playlist(other, &[a.id]).unwrap();
+
+    let titles = |id| lib.playlist_tracks(id).unwrap().into_iter().map(|e| e.track.title).collect::<Vec<_>>();
+    assert_eq!(titles(mix), ["C", "A", "B"]);
+    let names: Vec<String> = lib.playlists().unwrap().into_iter().map(|p| p.name).collect();
+    assert_eq!(names, ["Other", "Mix"]);
+    let p = lib.playlist(mix).unwrap().unwrap();
+    assert_eq!((p.tracks, p.duration_secs), (3, 540.0));
+
+    let entry = lib.playlist_tracks(mix).unwrap()[0].entry_id;
+    lib.remove_from_playlist(entry).unwrap();
+    assert_eq!(titles(mix), ["A", "B"]);
+
+    lib.delete_track(a.id).unwrap();
+    assert_eq!(titles(mix), ["B"]);
+    assert!(titles(other).is_empty());
+
+    lib.rename_playlist(mix, "Best").unwrap();
+    assert_eq!(lib.playlist(mix).unwrap().unwrap().name, "Best");
+    lib.delete_playlist(mix).unwrap();
+    assert!(lib.playlist(mix).unwrap().is_none());
+    assert_eq!(lib.tracks().unwrap().len(), 2);
 }
 
 #[test]

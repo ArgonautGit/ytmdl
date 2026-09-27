@@ -2,16 +2,18 @@
 //!
 //! The APK carries the CPython stdlib and the seed yt-dlp as one archive,
 //! `assets/ytmdl/runtime.zip` (a single file because AGP skips asset directories
-//! starting with `_`, like the stdlib's `compression/_common`), and `libpython3.14.so`, its `lib*_python.so` deps and `libqjs.so` (the QuickJS-NG
+//! starting with `_`, like the stdlib's `compression/_common`), and
+//! `libpython3.14.so`, its `lib*_python.so` deps and `libqjs.so` (the QuickJS-NG
 //! executable) in `lib/arm64-v8a/`. Only `nativeLibraryDir` may be executed from
 //! (W^X), so yt-dlp gets `files/bin/qjs`, a symlink to `libqjs.so` there.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, anyhow};
-use jni::objects::{JObject, JString, JValue};
+use jni::objects::{GlobalRef, JClass, JObject, JString, JValue, JValueOwned};
 use jni::{JNIEnv, JavaVM};
 use ytmdl_core::RuntimeConfig;
 
@@ -189,7 +191,8 @@ pub fn request_storage_access() {
     }
 }
 
-/// Asks MediaStore to index a finished download so music apps see it.
+/// Asks MediaStore to index a finished download so music apps see it, or to
+/// forget a deleted one.
 pub fn media_scan(path: &Path) {
     let result = with_env(|env, activity| {
         let paths = env.new_object_array(1, "java/lang/String", JObject::null())?;
@@ -215,11 +218,11 @@ pub mod player {
     use std::ffi::c_void;
     use std::sync::OnceLock;
 
-    use jni::objects::{GlobalRef, JClass, JObject, JString, JValue, JValueOwned};
+    use jni::objects::{GlobalRef, JClass, JString, JValue, JValueOwned};
     use jni::{JNIEnv, NativeMethod};
     use tokio::sync::mpsc::UnboundedSender;
 
-    use super::with_env;
+    use super::{app_class, call_static, with_env};
 
     const CLASS: &str = "dev.nick.ytmdl.YtmdlPlayer";
     static PLAYER: OnceLock<GlobalRef> = OnceLock::new();
@@ -228,7 +231,7 @@ pub mod player {
     pub fn connect(states: UnboundedSender<String>) {
         let _ = STATES.set(states);
         let result = with_env(|env, activity| {
-            let class = player_class(env, activity)?;
+            let class = app_class(env, activity, CLASS, &PLAYER)?;
             let changed = NativeMethod {
                 name: "nativeChanged".into(),
                 sig: "(Ljava/lang/String;)V".into(),
@@ -250,43 +253,50 @@ pub mod player {
         }
     }
 
-    /// App classes need the activity's class loader; JNI's FindClass on a native
-    /// thread only sees the system classes.
-    fn player_class<'local>(env: &mut JNIEnv<'local>, activity: &JObject) -> jni::errors::Result<JClass<'local>> {
-        if let Some(class) = PLAYER.get() {
-            return Ok(JClass::from(env.new_local_ref(class)?));
-        }
-        let loader = env.call_method(activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
-        let name = env.new_string(CLASS)?;
-        let class = env
-            .call_method(&loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&name)])?
-            .l()?;
-        let _ = PLAYER.set(env.new_global_ref(&class)?);
-        Ok(JClass::from(class))
-    }
-
     fn call(method: &str, sig: &str, args: impl for<'a> FnOnce(&mut JNIEnv<'a>) -> jni::errors::Result<Vec<JValueOwned<'a>>>) {
-        let result = with_env(|env, activity| {
-            let class = player_class(env, activity)?;
-            let args = args(env)?;
-            let args: Vec<JValue> = args.iter().map(|a| a.borrow()).collect();
-            env.call_static_method(&class, method, sig, &args)?;
-            Ok(())
-        });
-        if let Err(e) = result {
-            tracing::warn!(target: "ytmdl", "player {method}: {e:#}");
-        }
+        call_static(CLASS, &PLAYER, method, sig, |env, _| args(env));
     }
 
-    /// `items`: JSON array of `{id, path, title, artist, album, art}`.
+    fn string<'a>(env: &mut JNIEnv<'a>, s: &str) -> jni::errors::Result<JValueOwned<'a>> {
+        Ok(JValueOwned::Object(env.new_string(s)?.into()))
+    }
+
+    /// `items`: JSON array of `{id, path, title, artist, album, art}`, ids
+    /// unique in the queue.
     pub fn set_queue(items: &str, index: usize, position_ms: i64, play: bool) {
         call("setQueue", "(Ljava/lang/String;IJZ)V", |env| {
             Ok(vec![
-                JValueOwned::Object(env.new_string(items)?.into()),
+                string(env, items)?,
                 JValueOwned::Int(index as i32),
                 JValueOwned::Long(position_ms),
                 JValueOwned::Bool(play.into()),
             ])
+        });
+    }
+
+    /// Adds `items` after the current song (`next`) or at the end.
+    pub fn insert(items: &str, next: bool) {
+        call("insert", "(Ljava/lang/String;Z)V", |env| Ok(vec![string(env, items)?, JValueOwned::Bool(next.into())]));
+    }
+
+    /// Removes the queue entry with id `key`, or all entries of track `key`.
+    pub fn remove(key: &str) {
+        call("remove", "(Ljava/lang/String;)V", |env| Ok(vec![string(env, key)?]));
+    }
+
+    /// Loops entry `id` from `a_ms` to `b_ms`; `None` clears the loop.
+    pub fn set_song_loop(song: Option<(&str, i64, i64)>) {
+        let (id, a, b) = song.unwrap_or(("", 0, 0));
+        call("setSongLoop", "(Ljava/lang/String;JJ)V", |env| {
+            Ok(vec![string(env, id)?, JValueOwned::Long(a), JValueOwned::Long(b)])
+        });
+    }
+
+    /// Goes back to entry `first` when entry `last` ends; `None` clears.
+    pub fn set_queue_loop(range: Option<(&str, &str)>) {
+        let (first, last) = range.unwrap_or(("", ""));
+        call("setQueueLoop", "(Ljava/lang/String;Ljava/lang/String;)V", |env| {
+            Ok(vec![string(env, first)?, string(env, last)?])
         });
     }
 
@@ -316,6 +326,84 @@ pub mod player {
 
     pub fn set_repeat(mode: i32) {
         call("setRepeat", "(I)V", |_| Ok(vec![JValueOwned::Int(mode)]));
+    }
+}
+
+/// The downloads foreground service (`YtmdlDownloads` in app/android/Downloads.kt),
+/// which keeps the process alive while downloads run in the background.
+pub mod downloads {
+    use std::sync::OnceLock;
+
+    use jni::objects::{GlobalRef, JValueOwned};
+
+    use super::call_static;
+
+    const CLASS: &str = "dev.nick.ytmdl.YtmdlDownloads";
+    static DOWNLOADS: OnceLock<GlobalRef> = OnceLock::new();
+
+    /// Starts the service, or updates its notification.
+    pub fn update(title: &str, text: &str) {
+        call_static(CLASS, &DOWNLOADS, "update", "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)V", |env, activity| {
+            Ok(vec![
+                JValueOwned::Object(env.new_local_ref(activity)?),
+                JValueOwned::Object(env.new_string(title)?.into()),
+                JValueOwned::Object(env.new_string(text)?.into()),
+            ])
+        });
+    }
+
+    pub fn stop() {
+        call_static(CLASS, &DOWNLOADS, "stop", "(Landroid/content/Context;)V", |env, activity| {
+            Ok(vec![JValueOwned::Object(env.new_local_ref(activity)?)])
+        });
+    }
+
+    /// Asks for the notification permission (Android 13+) if it isn't granted.
+    pub fn ask_notifications() {
+        call_static(CLASS, &DOWNLOADS, "askNotifications", "(Landroid/app/Activity;)V", |env, activity| {
+            Ok(vec![JValueOwned::Object(env.new_local_ref(activity)?)])
+        });
+    }
+}
+
+/// Loads one of the app's classes, cached in `cache`. App classes need the
+/// activity's class loader; JNI's FindClass on a native thread only sees the
+/// system classes.
+fn app_class<'local>(
+    env: &mut JNIEnv<'local>,
+    activity: &JObject,
+    name: &str,
+    cache: &OnceLock<GlobalRef>,
+) -> jni::errors::Result<JClass<'local>> {
+    if let Some(class) = cache.get() {
+        return Ok(JClass::from(env.new_local_ref(class)?));
+    }
+    let loader = env.call_method(activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
+    let name = env.new_string(name)?;
+    let class = env
+        .call_method(&loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&name)])?
+        .l()?;
+    let _ = cache.set(env.new_global_ref(&class)?);
+    Ok(JClass::from(class))
+}
+
+/// Calls a static method of an app class, logging failures.
+fn call_static(
+    class: &str,
+    cache: &OnceLock<GlobalRef>,
+    method: &str,
+    sig: &str,
+    args: impl for<'a> FnOnce(&mut JNIEnv<'a>, &JObject) -> jni::errors::Result<Vec<JValueOwned<'a>>>,
+) {
+    let result = with_env(|env, activity| {
+        let class = app_class(env, activity, class, cache)?;
+        let args = args(env, activity)?;
+        let args: Vec<JValue> = args.iter().map(|a| a.borrow()).collect();
+        env.call_static_method(&class, method, sig, &args)?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        tracing::warn!(target: "ytmdl", "{class}.{method}: {e:#}");
     }
 }
 

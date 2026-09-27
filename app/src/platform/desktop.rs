@@ -80,4 +80,15 @@ pub mod player {
     pub fn seek_to(_position_ms: i64) {}
     pub fn skip_to(_index: usize) {}
     pub fn set_repeat(_mode: i32) {}
+    pub fn insert(_items: &str, _next: bool) {}
+    pub fn remove(_key: &str) {}
+    pub fn set_song_loop(_song: Option<(&str, i64, i64)>) {}
+    pub fn set_queue_loop(_range: Option<(&str, &str)>) {}
+}
+
+/// Desktop processes aren't frozen in the background.
+pub mod downloads {
+    pub fn update(_title: &str, _text: &str) {}
+    pub fn stop() {}
+    pub fn ask_notifications() {}
 }

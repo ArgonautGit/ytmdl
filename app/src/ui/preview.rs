@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 use dioxus::prelude::*;
 use ytmdl_core::{CancelToken, Entry, Progress, SearchSource};
 
+use super::icons::Icon;
 use super::views::*;
 use crate::jobs::{Job, JobState};
 
@@ -56,6 +57,14 @@ const SCREENS: &[Screen] = &[
     ("library-songs", "Library, songs", library_songs),
     ("library-playing", "Library with the mini player", library_playing),
     ("now-playing", "Now playing", now_playing),
+    ("now-playing-loops", "Now playing, A-B loops on the song and the queue", now_playing_loops),
+    ("now-playing-pick", "Now playing, picking the queue loop's B", now_playing_pick),
+    ("song-menu", "Song menu", song_menu),
+    ("add-to-playlist", "Add to playlist", add_to_playlist),
+    ("new-playlist", "New playlist", new_playlist),
+    ("delete-song", "Delete a song", delete_song),
+    ("library-playlists", "Library, playlists", library_playlists),
+    ("playlist", "Playlist", playlist),
     ("library-albums", "Library, albums", library_albums),
     ("library-artists", "Library, artists", library_artists),
     ("library-empty", "Library, empty", library_empty),
@@ -161,13 +170,28 @@ fn song_items() -> Vec<SongItem> {
         .chain(&s.album_tracks)
         .enumerate()
         .map(|(i, e)| SongItem {
-            id: i as i64,
+            key: i.to_string(),
             title: e.title.clone(),
             artists: e.artists.join(", "),
             album: e.album.clone(),
             duration_secs: e.duration_secs,
             art: e.thumbnail.clone(),
             playing: i == 1,
+            mark: None,
+        })
+        .collect()
+}
+
+fn playlist_items() -> Vec<PlaylistItem> {
+    let songs = &sample().songs;
+    [("Morning run", 18, 3900.0), ("Focus", 42, 9800.0), ("Comedy gold", 7, 1100.0)]
+        .iter()
+        .enumerate()
+        .map(|(i, (name, tracks, secs))| PlaylistItem {
+            name: name.to_string(),
+            tracks: *tracks,
+            duration_secs: *secs,
+            art: songs[(i + 2) % songs.len()].thumbnail.clone(),
         })
         .collect()
 }
@@ -205,11 +229,16 @@ fn library_page_body(view: LibraryView, songs: Vec<SongItem>) -> Element {
             songs,
             albums: album_items(),
             artists: artist_items(),
+            playlists: playlist_items(),
             onview: |_| {},
             onplay: |_| {},
+            onmore: |_| {},
             onshuffle: |_| {},
             onalbum: |_| {},
             onartist: |_| {},
+            onplaylist: |_| {},
+            onplaylistmore: |_| {},
+            onnewplaylist: |_| {},
             onsearch: |_| {},
         }
     }
@@ -241,8 +270,13 @@ fn library_playing() -> Element {
     }
 }
 
-fn now_playing() -> Element {
-    let queue = song_items().into_iter().take(8).collect();
+fn now_playing_page(song_loop: Option<(f64, Option<f64>)>, marks: &[(usize, LoopMark)], queue_loop: QueueLoopView) -> Element {
+    let queue = song_items()
+        .into_iter()
+        .take(8)
+        .enumerate()
+        .map(|(i, s)| SongItem { mark: marks.iter().find(|(m, _)| *m == i).map(|(_, mark)| *mark), ..s })
+        .collect();
     rsx! {
         div { class: "app has-mini",
             div { class: "overlay sheet",
@@ -253,7 +287,9 @@ fn now_playing() -> Element {
                     playing: true,
                     buffering: false,
                     repeat: RepeatMode::All,
+                    song_loop,
                     queue,
+                    queue_loop,
                     onclose: |_| {},
                     ontoggle: |_| {},
                     onnext: |_| {},
@@ -261,11 +297,135 @@ fn now_playing() -> Element {
                     onseeking: |_| {},
                     onseek: |_| {},
                     onrepeat: |_| {},
+                    onab: |_| {},
                     onskip: |_| {},
+                    onmore: |_| {},
+                    onqueueloop: |_| {},
                 }
             }
         }
     }
+}
+
+fn now_playing() -> Element {
+    now_playing_page(None, &[], QueueLoopView::Off)
+}
+
+fn now_playing_loops() -> Element {
+    let marks = [(1, LoopMark::A), (2, LoopMark::Inside), (3, LoopMark::Inside), (4, LoopMark::B)];
+    now_playing_page(Some((32.0, Some(78.5))), &marks, QueueLoopView::Looping { first: 2, last: 5 })
+}
+
+fn now_playing_pick() -> Element {
+    now_playing_page(Some((32.0, None)), &[(1, LoopMark::A)], QueueLoopView::PickB)
+}
+
+/// `page` with `modal` over it.
+fn with_modal(page: Element, modal: Element) -> Element {
+    rsx! {
+        div { class: "app has-mini",
+            Page { visible: true, {page} }
+            MiniPlayer { now: now_item(), progress: 0.37, playing: true, ontoggle: |_| {}, onnext: |_| {}, onopen: |_| {} }
+            BottomNav { tab: Tab::Library, active: 0, onselect: |_| {} }
+            {modal}
+        }
+    }
+}
+
+fn song_menu() -> Element {
+    let song = &song_items()[2];
+    let head = MenuHead {
+        title: song.title.clone(),
+        sub: format!("{} • {}", song.artists, song.album.clone().unwrap_or_default()),
+        art: song.art.clone(),
+        icon: Icon::Music,
+    };
+    let items = vec![
+        MenuItem::new(Icon::ListStart, "Play next"),
+        MenuItem::new(Icon::ListEnd, "Add to queue"),
+        MenuItem::new(Icon::ListPlus, "Add to playlist"),
+        MenuItem::new(Icon::Disc, "Go to album"),
+        MenuItem::new(Icon::Person, "Go to artist"),
+        MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete from device") },
+    ];
+    with_modal(
+        library_page_body(LibraryView::Songs, song_items()),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+fn add_to_playlist() -> Element {
+    let items = std::iter::once(MenuItem::new(Icon::Plus, "New playlist"))
+        .chain(playlist_items().into_iter().map(|p| MenuItem {
+            sub: Some(format!("{} songs", p.tracks)),
+            ..MenuItem::new(Icon::Playlist, p.name)
+        }))
+        .collect();
+    let head = MenuHead { title: "Add to playlist".into(), sub: "1 song".into(), art: None, icon: Icon::ListPlus };
+    with_modal(
+        library_page_body(LibraryView::Songs, song_items()),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+fn new_playlist() -> Element {
+    with_modal(
+        library_page_body(LibraryView::Playlists, song_items()),
+        rsx! {
+            Dialog {
+                title: "New playlist",
+                value: "Road trip".to_string(),
+                placeholder: "Name",
+                confirm: "Create",
+                onconfirm: |_| {},
+                oncancel: |_| {},
+            }
+        },
+    )
+}
+
+fn delete_song() -> Element {
+    let title = &song_items()[2].title;
+    with_modal(
+        library_page_body(LibraryView::Songs, song_items()),
+        rsx! {
+            Dialog {
+                title: "Delete this song?",
+                text: format!("“{title}” will be removed from this device and from your playlists."),
+                confirm: "Delete",
+                danger: true,
+                onconfirm: |_| {},
+                oncancel: |_| {},
+            }
+        },
+    )
+}
+
+fn library_playlists() -> Element {
+    library_page(LibraryView::Playlists, song_items())
+}
+
+fn playlist() -> Element {
+    let songs = song_items().into_iter().skip(2).take(7).collect();
+    let cover = sample().songs[3].thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544));
+    shell(
+        Tab::Library,
+        0,
+        rsx! {
+            div { class: "overlay",
+                PlaylistPage {
+                    name: "Morning run".to_string(),
+                    cover,
+                    songs,
+                    onback: |_| {},
+                    onplay: |_| {},
+                    onshuffle: |_| {},
+                    onmore: |_| {},
+                    onplaylistmore: |_| {},
+                }
+            }
+        },
+    )
 }
 
 fn library_albums() -> Element {
@@ -291,7 +451,15 @@ fn library_album() -> Element {
         0,
         rsx! {
             div { class: "overlay",
-                LocalAlbumPage { header, songs, onback: |_| {}, onplay: |_| {}, onshuffle: |_| {} }
+                LocalAlbumPage {
+                    header,
+                    songs,
+                    onback: |_| {},
+                    onplay: |_| {},
+                    onshuffle: |_| {},
+                    onmore: |_| {},
+                    onalbummore: |_| {},
+                }
             }
         },
     )
@@ -314,6 +482,7 @@ fn artist() -> Element {
                     onplay: |_| {},
                     onshuffle: |_| {},
                     onalbum: |_| {},
+                    onmore: |_| {},
                 }
             }
         },

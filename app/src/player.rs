@@ -2,6 +2,10 @@
 //! queue and keeps playing with the app closed; this mirrors its state for the
 //! UI and sends it commands. The queue is saved in the library so it comes back
 //! after a restart.
+//!
+//! Queue entries have keys "<track id>.<n>", unique in the queue, so a song can
+//! be queued twice and the A-B loops can name entries. The loops themselves run
+//! in the service.
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -29,9 +33,40 @@ pub struct Snapshot {
     pub duration_ms: i64,
     /// Media3's repeat mode: 0 off, 1 one, 2 all.
     pub repeat: i32,
-    /// Track ids of the queue.
+    /// Entry keys of the queue.
     pub ids: Vec<String>,
     pub error: Option<String>,
+    pub song_loop: Option<SongLoop>,
+    pub queue_loop: Option<QueueLoop>,
+}
+
+/// Seeks back to `a` on reaching `b` (ms) while entry `id` plays.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SongLoop {
+    pub id: String,
+    pub a: i64,
+    pub b: i64,
+}
+
+/// Goes back to entry `first` when entry `last` ends.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct QueueLoop {
+    pub first: String,
+    pub last: String,
+}
+
+/// A song in the queue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    /// Position in the service's queue.
+    pub index: usize,
+    pub key: String,
+    pub track: Track,
+}
+
+/// The track an entry key ("<track id>.<n>") stands for.
+fn track_id(key: &str) -> Option<i64> {
+    key.split('.').next()?.parse().ok()
 }
 
 impl Snapshot {
@@ -64,10 +99,15 @@ pub struct Player {
     snapshot: Signal<Snapshot>,
     /// When `snapshot` arrived, to advance its position while playing.
     received: Signal<Instant>,
-    /// (index in the service's queue, track); tracks deleted meanwhile are left out.
-    queue: Signal<Vec<(usize, Track)>>,
+    /// Tracks deleted meanwhile are left out.
+    queue: Signal<Vec<Entry>>,
     /// Bumped twice a second while playing and the app is visible.
     tick: Signal<u64>,
+    /// Point A of a song loop being set: (entry key, ms).
+    loop_start: Signal<Option<(String, i64)>>,
+    /// Next `n` for entry keys; kept past the keys the service reports, which
+    /// can come from an earlier run of the app.
+    serial: CopyValue<u64>,
     library: LibraryHandle,
 }
 
@@ -79,6 +119,8 @@ impl Player {
             received: Signal::new(Instant::now()),
             queue: Signal::new(Vec::new()),
             tick: Signal::new(0),
+            loop_start: Signal::new(None),
+            serial: CopyValue::new(0),
             library,
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -105,6 +147,11 @@ impl Player {
         let old = snapshot.peek().clone();
         if s.ids != old.ids {
             queue.set(self.lookup(&s.ids));
+            let mut serial = self.serial;
+            let used = s.ids.iter().filter_map(|k| k.split_once('.')?.1.parse::<u64>().ok()).max();
+            if let Some(used) = used.filter(|&n| n >= *serial.peek()) {
+                serial.set(used + 1);
+            }
         }
         if !s.ids.is_empty() && (s.ids != old.ids || s.index != old.index || s.play_when_ready != old.play_when_ready) {
             self.save(&s);
@@ -129,20 +176,29 @@ impl Player {
         }
     }
 
-    fn lookup(&self, ids: &[String]) -> Vec<(usize, Track)> {
-        let numeric: Vec<(usize, i64)> = ids.iter().enumerate().filter_map(|(i, id)| Some((i, id.parse().ok()?))).collect();
-        let tracks = self.library.get().tracks_by_id(&numeric.iter().map(|(_, id)| *id).collect::<Vec<_>>());
-        let tracks = tracks.unwrap_or_else(|e| {
+    fn lookup(&self, keys: &[String]) -> Vec<Entry> {
+        let ids: Vec<i64> = keys.iter().filter_map(|k| track_id(k)).collect();
+        let tracks = self.library.get().tracks_by_id(&ids).unwrap_or_else(|e| {
             tracing::warn!(target: "ytmdl", "player queue: {e}");
             Vec::new()
         });
         let by_id: std::collections::HashMap<i64, Track> = tracks.into_iter().map(|t| (t.id, t)).collect();
-        numeric.into_iter().filter_map(|(i, id)| Some((i, by_id.get(&id)?.clone()))).collect()
+        keys.iter()
+            .enumerate()
+            .filter_map(|(index, key)| Some(Entry { index, key: key.clone(), track: by_id.get(&track_id(key)?)?.clone() }))
+            .collect()
+    }
+
+    /// Looks the queue up again after the library changed (a song deleted, say).
+    pub fn refresh(&self) {
+        let mut queue = self.queue;
+        let keys = self.snapshot.peek().ids.clone();
+        queue.set(self.lookup(&keys));
     }
 
     fn save(&self, s: &Snapshot) {
         let saved = Saved {
-            ids: s.ids.iter().filter_map(|id| id.parse().ok()).collect(),
+            ids: s.ids.iter().filter_map(|k| track_id(k)).collect(),
             index: s.index,
             position_ms: s.position_ms.max(0),
         };
@@ -166,15 +222,18 @@ impl Player {
         backend::set_queue(&self.items(&tracks), index, position, false);
     }
 
-    /// The queue as YtmdlPlayer.setQueue takes it.
+    /// Queue entries as YtmdlPlayer takes them, with new keys.
     fn items(&self, tracks: &[Track]) -> String {
         let library = self.library.get();
+        let mut serial = self.serial;
         let items: Vec<_> = tracks
             .iter()
             .map(|t| {
                 let art = t.art.as_deref().and_then(|k| library.art_file(&Library::art_name(k, ART_LARGE)));
+                let n = *serial.peek();
+                serial.set(n + 1);
                 serde_json::json!({
-                    "id": t.id.to_string(),
+                    "id": format!("{}.{n}", t.id),
                     "path": t.path,
                     "title": t.title,
                     "artist": t.artists.join(", "),
@@ -201,6 +260,30 @@ impl Player {
     pub fn shuffle(&self, mut tracks: Vec<Track>) {
         shuffle(&mut tracks);
         self.play(tracks, 0);
+    }
+
+    /// Queues `tracks` right after the current song.
+    pub fn play_next(&self, tracks: &[Track]) {
+        if !tracks.is_empty() {
+            backend::insert(&self.items(tracks), true);
+        }
+    }
+
+    /// Queues `tracks` at the end.
+    pub fn add_to_queue(&self, tracks: &[Track]) {
+        if !tracks.is_empty() {
+            backend::insert(&self.items(tracks), false);
+        }
+    }
+
+    /// Takes one entry out of the queue.
+    pub fn remove_entry(&self, key: &str) {
+        backend::remove(key);
+    }
+
+    /// Takes every entry of a (deleted) track out of the queue.
+    pub fn remove_track(&self, id: i64) {
+        backend::remove(&id.to_string());
     }
 
     pub fn toggle(&self) {
@@ -233,6 +316,43 @@ impl Player {
         backend::skip_to(index);
     }
 
+    /// The song A-B button: sets A at the current position, then B, then clears
+    /// the loop. B before A swaps them.
+    pub fn song_loop_step(&self) {
+        let Some(key) = self.current_key_peek() else { return };
+        let ms = (self.position_secs_peek() * 1000.0) as i64;
+        let mut start = self.loop_start;
+        if self.snapshot.peek().song_loop.is_some() {
+            start.set(None);
+            backend::set_song_loop(None);
+            return;
+        }
+        let pending = start.peek().clone().filter(|(k, _)| *k == key);
+        match pending {
+            None => start.set(Some((key, ms))),
+            // Too short to loop; keep waiting for B.
+            Some((_, a)) if (ms - a).abs() < 500 => {}
+            Some((key, a)) => {
+                start.set(None);
+                backend::set_song_loop(Some((&key, a.min(ms), a.max(ms))));
+            }
+        }
+    }
+
+    /// Loops the queue from entry `first` to entry `last`, in queue order.
+    pub fn set_queue_loop(&self, first: &str, last: &str) {
+        let ids = &self.snapshot.peek().ids;
+        let (Some(a), Some(b)) = (ids.iter().position(|k| k == first), ids.iter().position(|k| k == last)) else {
+            return;
+        };
+        let (first, last) = if a <= b { (first, last) } else { (last, first) };
+        backend::set_queue_loop(Some((first, last)));
+    }
+
+    pub fn clear_queue_loop(&self) {
+        backend::set_queue_loop(None);
+    }
+
     /// Off, then all, then one.
     pub fn cycle_repeat(&self) {
         let mode = match self.repeat() {
@@ -249,18 +369,42 @@ impl Player {
         self.snapshot.read().clone()
     }
 
-    pub fn queue(&self) -> Vec<(usize, Track)> {
+    pub fn queue(&self) -> Vec<Entry> {
         self.queue.read().clone()
     }
 
     pub fn current(&self) -> Option<Track> {
         let index = self.snapshot.read().index;
-        self.queue.read().iter().find(|(i, _)| *i == index).map(|(_, t)| t.clone())
+        self.queue.read().iter().find(|e| e.index == index).map(|e| e.track.clone())
     }
 
+    /// Track id of the current song.
     pub fn current_id(&self) -> Option<i64> {
+        self.current_key().as_deref().and_then(track_id)
+    }
+
+    /// Entry key of the current song.
+    pub fn current_key(&self) -> Option<String> {
         let s = self.snapshot.read();
-        s.ids.get(s.index).and_then(|id| id.parse().ok())
+        s.ids.get(s.index).cloned()
+    }
+
+    fn current_key_peek(&self) -> Option<String> {
+        let s = self.snapshot.peek();
+        s.ids.get(s.index).cloned()
+    }
+
+    /// The current song's loop: A (ms), and B once set.
+    pub fn song_loop(&self) -> Option<(i64, Option<i64>)> {
+        let key = self.current_key()?;
+        if let Some(l) = self.snapshot.read().song_loop.as_ref().filter(|l| l.id == key) {
+            return Some((l.a, Some(l.b)));
+        }
+        self.loop_start.read().as_ref().filter(|(k, _)| *k == key).map(|(_, a)| (*a, None))
+    }
+
+    pub fn queue_loop(&self) -> Option<QueueLoop> {
+        self.snapshot.read().queue_loop.clone()
     }
 
     pub fn repeat(&self) -> Repeat {
@@ -281,15 +425,22 @@ impl Player {
     /// rerenders twice a second while playing.
     pub fn position_secs(&self) -> f64 {
         let _ = (self.tick)();
-        let s = self.snapshot.read();
-        let mut ms = s.position_ms as f64;
-        if s.playing {
-            ms += self.received.read().elapsed().as_millis() as f64;
-        }
-        let secs = ms.max(0.0) / 1000.0;
-        let duration = if s.duration_ms > 0 { s.duration_ms as f64 / 1000.0 } else { f64::INFINITY };
-        secs.min(duration)
+        position(&self.snapshot.read(), *self.received.read())
     }
+
+    fn position_secs_peek(&self) -> f64 {
+        position(&self.snapshot.peek(), *self.received.peek())
+    }
+}
+
+fn position(s: &Snapshot, received: Instant) -> f64 {
+    let mut ms = s.position_ms as f64;
+    if s.playing {
+        ms += received.elapsed().as_millis() as f64;
+    }
+    let secs = ms.max(0.0) / 1000.0;
+    let duration = if s.duration_ms > 0 { s.duration_ms as f64 / 1000.0 } else { f64::INFINITY };
+    secs.min(duration)
 }
 
 /// Fisher-Yates with xorshift; good enough for a play order.

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The accent colour in app/assets/style.css. -->
+    <color name="ytmdl_icon_background">#FF0033</color>
+</resources>

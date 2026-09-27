@@ -20,12 +20,14 @@ pub enum LibraryView {
     Songs,
     Albums,
     Artists,
+    Playlists,
 }
 
 /// A downloaded track as a list row.
 #[derive(Clone, PartialEq, Debug)]
 pub struct SongItem {
-    pub id: i64,
+    /// Unique in its list (the same song can be in a queue twice).
+    pub key: String,
     pub title: String,
     pub artists: String,
     pub album: Option<String>,
@@ -33,6 +35,64 @@ pub struct SongItem {
     /// Small cover URL.
     pub art: Option<String>,
     pub playing: bool,
+    /// Where the song is in the queue's A-B loop, if it is.
+    pub mark: Option<LoopMark>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LoopMark {
+    /// Where the loop starts again.
+    A,
+    Inside,
+    /// Where the loop ends.
+    B,
+    /// A one-song loop.
+    AB,
+}
+
+/// The queue's A-B loop, as the queue header shows it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum QueueLoopView {
+    Off,
+    /// Waiting for the first song to be tapped.
+    PickA,
+    /// Waiting for the last song.
+    PickB,
+    /// Songs `first..=last` (1-based queue positions) repeat.
+    Looping { first: usize, last: usize },
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct PlaylistItem {
+    pub name: String,
+    pub tracks: u32,
+    pub duration_secs: f64,
+    pub art: Option<String>,
+}
+
+/// A row in a menu sheet.
+#[derive(Clone, PartialEq, Debug)]
+pub struct MenuItem {
+    pub icon: Icon,
+    pub label: String,
+    pub sub: Option<String>,
+    /// Destructive (shown in red).
+    pub danger: bool,
+}
+
+impl MenuItem {
+    pub fn new(icon: Icon, label: impl Into<String>) -> Self {
+        MenuItem { icon, label: label.into(), sub: None, danger: false }
+    }
+}
+
+/// What a menu sheet is about, shown above its items.
+#[derive(Clone, PartialEq, Debug)]
+pub struct MenuHead {
+    pub title: String,
+    pub sub: String,
+    pub art: Option<String>,
+    pub icon: Icon,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -584,7 +644,7 @@ pub fn AlbumPage(
 }
 
 #[component]
-fn BackButton(onback: EventHandler<()>) -> Element {
+pub fn BackButton(onback: EventHandler<()>) -> Element {
     rsx! {
         button { class: "icon-btn back", "aria-label": "Back", onclick: move |_| onback.call(()),
             Svg { icon: Icon::Back }
@@ -650,14 +710,25 @@ pub fn LibraryPage(
     songs: Vec<SongItem>,
     albums: Vec<AlbumItem>,
     artists: Vec<ArtistItem>,
+    playlists: Vec<PlaylistItem>,
     onview: EventHandler<LibraryView>,
     onplay: EventHandler<usize>,
+    /// A song's menu.
+    onmore: EventHandler<usize>,
     onshuffle: EventHandler<()>,
     onalbum: EventHandler<usize>,
     onartist: EventHandler<usize>,
+    onplaylist: EventHandler<usize>,
+    onplaylistmore: EventHandler<usize>,
+    onnewplaylist: EventHandler<()>,
     onsearch: EventHandler<()>,
 ) -> Element {
-    let views = [("Songs", LibraryView::Songs), ("Albums", LibraryView::Albums), ("Artists", LibraryView::Artists)];
+    let views = [
+        ("Songs", LibraryView::Songs),
+        ("Albums", LibraryView::Albums),
+        ("Artists", LibraryView::Artists),
+        ("Playlists", LibraryView::Playlists),
+    ];
     rsx! {
         header { class: "topbar",
             h1 { "Library" }
@@ -691,7 +762,7 @@ pub fn LibraryPage(
                             "Shuffle"
                         }
                     }
-                    SongList { songs, onplay }
+                    SongList { songs, onplay, onmore }
                 },
                 LibraryView::Albums if albums.is_empty() => rsx! {
                     EmptyState { icon: Icon::Disc, title: "No albums yet", text: "Download a whole album, or songs that belong to one." }
@@ -704,32 +775,107 @@ pub fn LibraryPage(
                         }
                     }
                 },
+                LibraryView::Playlists => rsx! {
+                    ul { class: "list",
+                        li { class: "row tappable", onclick: move |_| onnewplaylist.call(()),
+                            div { class: "cover new", Svg { icon: Icon::Plus } }
+                            div { class: "meta", div { class: "title", "New playlist" } }
+                        }
+                        for (i , playlist) in playlists.into_iter().enumerate() {
+                            PlaylistRow {
+                                key: "{i}/{playlist.name}",
+                                playlist,
+                                onopen: move |_| onplaylist.call(i),
+                                onmore: move |_| onplaylistmore.call(i),
+                            }
+                        }
+                    }
+                },
             }
         }
     }
 }
 
-/// Downloaded songs; `numbered` shows album positions instead of covers.
 #[component]
-pub fn SongList(songs: Vec<SongItem>, onplay: EventHandler<usize>, #[props(default)] numbered: bool) -> Element {
+fn PlaylistRow(playlist: PlaylistItem, onopen: EventHandler<()>, onmore: EventHandler<()>) -> Element {
+    rsx! {
+        li { class: "row tappable song", onclick: move |_| onopen.call(()),
+            Cover { url: playlist.art.clone(), icon: Icon::Playlist }
+            div { class: "meta",
+                div { class: "title", "{playlist.name}" }
+                div { class: "sub", {dotted([Some("Playlist".into()), Some(plural(playlist.tracks as usize, "song", "songs"))])} }
+            }
+            MoreButton { onmore }
+        }
+    }
+}
+
+/// ⋮, opening a row's menu without triggering the row.
+#[component]
+fn MoreButton(onmore: EventHandler<()>) -> Element {
+    rsx! {
+        button {
+            class: "icon-btn more",
+            "aria-label": "More",
+            onclick: move |e| {
+                e.stop_propagation();
+                onmore.call(());
+            },
+            Svg { icon: Icon::More, size: 20 }
+        }
+    }
+}
+
+/// Downloaded songs; `numbered` shows album positions instead of covers, and
+/// `onmore` adds each song's menu button.
+#[component]
+pub fn SongList(
+    songs: Vec<SongItem>,
+    onplay: EventHandler<usize>,
+    #[props(default)] onmore: Option<EventHandler<usize>>,
+    #[props(default)] numbered: bool,
+) -> Element {
     rsx! {
         ul { class: if numbered { "list tracks" } else { "list" },
             for (i , song) in songs.into_iter().enumerate() {
-                SongItemRow { key: "{song.id}", song, index: numbered.then_some(i + 1), onplay: move |_| onplay.call(i) }
+                SongItemRow {
+                    key: "{song.key}",
+                    song,
+                    index: numbered.then_some(i + 1),
+                    onplay: move |_| onplay.call(i),
+                    onmore: onmore.map(|m| EventHandler::new(move |_| m.call(i))),
+                }
             }
         }
     }
 }
 
 #[component]
-fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>) -> Element {
+fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>, onmore: Option<EventHandler<()>>) -> Element {
     let duration = song.duration_secs.map(duration_text);
     let sub = match index {
         Some(_) => dotted([Some(song.artists.clone()), duration]),
         None => dotted([Some(song.artists.clone()), song.album.clone().filter(|a| *a != song.title), duration]),
     };
+    let mut class = String::from("row tappable song");
+    if song.playing {
+        class += " playing";
+    }
+    match song.mark {
+        Some(LoopMark::A) => class += " loop loop-a",
+        Some(LoopMark::Inside) => class += " loop",
+        Some(LoopMark::B) => class += " loop loop-b",
+        Some(LoopMark::AB) => class += " loop loop-a loop-b",
+        None => {}
+    }
+    let badge = match song.mark {
+        Some(LoopMark::A) => Some("A"),
+        Some(LoopMark::B) => Some("B"),
+        Some(LoopMark::AB) => Some("A B"),
+        _ => None,
+    };
     rsx! {
-        li { class: if song.playing { "row tappable song playing" } else { "row tappable song" }, onclick: move |_| onplay.call(()),
+        li { class, onclick: move |_| onplay.call(()),
             match index {
                 Some(n) => rsx! {
                     span { class: "index",
@@ -746,6 +892,12 @@ fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>) -
             div { class: "meta",
                 div { class: "title", "{song.title}" }
                 div { class: "sub", "{sub}" }
+            }
+            if let Some(badge) = badge {
+                span { class: "loop-badge", "{badge}" }
+            }
+            if let Some(onmore) = onmore {
+                MoreButton { onmore }
             }
         }
     }
@@ -792,12 +944,22 @@ fn ArtistRow(artist: ArtistItem, onopen: EventHandler<()>) -> Element {
     }
 }
 
+/// Play and shuffle, plus a menu button when `onmore` is set; disabled when
+/// there is nothing to play.
 #[component]
-fn PlayButtons(onplay: EventHandler<()>, onshuffle: EventHandler<()>) -> Element {
+fn PlayButtons(
+    onplay: EventHandler<()>,
+    onshuffle: EventHandler<()>,
+    #[props(default)] onmore: Option<EventHandler<()>>,
+    #[props(default)] empty: bool,
+) -> Element {
     rsx! {
         div { class: "hero-actions",
-            button { class: "primary", onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
-            button { class: "secondary", onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle" }
+            button { class: "primary", disabled: empty, onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
+            button { class: "secondary", disabled: empty, onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle" }
+            if let Some(onmore) = onmore {
+                button { class: "secondary round", "aria-label": "More", onclick: move |_| onmore.call(()), Svg { icon: Icon::More, size: 20 } }
+            }
         }
     }
 }
@@ -810,6 +972,10 @@ pub fn LocalAlbumPage(
     onback: EventHandler<()>,
     onplay: EventHandler<usize>,
     onshuffle: EventHandler<()>,
+    /// A song's menu.
+    onmore: EventHandler<usize>,
+    /// The album's menu.
+    onalbummore: EventHandler<()>,
 ) -> Element {
     let total: f64 = songs.iter().filter_map(|s| s.duration_secs).sum();
     let line = dotted([Some(plural(songs.len(), "song", "songs")), (total > 0.0).then(|| total_text(total))]);
@@ -818,9 +984,47 @@ pub fn LocalAlbumPage(
             BackButton { onback }
             Hero { cover: header.cover.clone(), title: header.title.clone(), meta: header.meta(), icon: Icon::Disc,
                 div { class: "sub", "{line}" }
-                PlayButtons { onplay: move |_| onplay.call(0), onshuffle }
+                PlayButtons { onplay: move |_| onplay.call(0), onshuffle, onmore: onalbummore, empty: songs.is_empty() }
             }
-            SongList { songs, onplay, numbered: true }
+            SongList { songs, onplay, onmore, numbered: true }
+        }
+    }
+}
+
+#[component]
+pub fn PlaylistPage(
+    name: String,
+    cover: Option<String>,
+    songs: Vec<SongItem>,
+    onback: EventHandler<()>,
+    onplay: EventHandler<usize>,
+    onshuffle: EventHandler<()>,
+    /// A song's menu.
+    onmore: EventHandler<usize>,
+    /// The playlist's menu.
+    onplaylistmore: EventHandler<()>,
+) -> Element {
+    let total: f64 = songs.iter().filter_map(|s| s.duration_secs).sum();
+    let meta = dotted([
+        Some("Playlist".into()),
+        Some(plural(songs.len(), "song", "songs")),
+        (total > 0.0).then(|| total_text(total)),
+    ]);
+    rsx! {
+        div { class: "album",
+            BackButton { onback }
+            Hero { cover, title: name, meta, icon: Icon::Playlist,
+                PlayButtons { onplay: move |_| onplay.call(0), onshuffle, onmore: onplaylistmore, empty: songs.is_empty() }
+            }
+            if songs.is_empty() {
+                EmptyState {
+                    icon: Icon::Playlist,
+                    title: "No songs yet",
+                    text: "Add songs from your library with their ⋮ menu.",
+                }
+            } else {
+                SongList { songs, onplay, onmore }
+            }
         }
     }
 }
@@ -835,6 +1039,8 @@ pub fn ArtistPage(
     onplay: EventHandler<usize>,
     onshuffle: EventHandler<()>,
     onalbum: EventHandler<usize>,
+    /// A song's menu.
+    onmore: EventHandler<usize>,
 ) -> Element {
     let meta = dotted([
         Some(plural(songs.len(), "song", "songs")),
@@ -851,7 +1057,7 @@ pub fn ArtistPage(
                 AlbumGrid { albums, onopen: onalbum, shelf: true }
             }
             h2 { class: "section", "Songs" }
-            SongList { songs, onplay }
+            SongList { songs, onplay, onmore }
         }
     }
 }
@@ -908,8 +1114,11 @@ pub fn NowPlayingPage(
     playing: bool,
     buffering: bool,
     repeat: RepeatMode,
+    /// The song's A-B loop in seconds: A, and B once it is set.
+    song_loop: Option<(f64, Option<f64>)>,
     /// The whole queue; the current song is marked playing.
     queue: Vec<SongItem>,
+    queue_loop: QueueLoopView,
     onclose: EventHandler<()>,
     ontoggle: EventHandler<()>,
     onnext: EventHandler<()>,
@@ -919,10 +1128,28 @@ pub fn NowPlayingPage(
     /// When it is let go.
     onseek: EventHandler<f64>,
     onrepeat: EventHandler<()>,
+    /// The A-B button: sets A, then B, then clears.
+    onab: EventHandler<()>,
+    /// A queue row tapped (to play it, or to pick it for the loop).
     onskip: EventHandler<usize>,
+    /// A queue row's menu.
+    onmore: EventHandler<usize>,
+    /// The queue loop button: starts picking, or cancels or stops the loop.
+    onqueueloop: EventHandler<()>,
 ) -> Element {
     let max = duration.max(1.0);
     let pct = (position / max * 100.0).clamp(0.0, 100.0);
+    let at = |secs: f64| (secs / max * 100.0).clamp(0.0, 100.0);
+    let (ab_class, ab_label) = match song_loop {
+        None => ("ab-btn", "A-B loop off"),
+        Some((_, None)) => ("ab-btn pending", "Set B"),
+        Some((_, Some(_))) => ("ab-btn on", "Stop A-B loop"),
+    };
+    let ab_note = match song_loop {
+        None => None,
+        Some((a, None)) => Some(format!("A {} · tap A-B again for B", duration_text(a))),
+        Some((a, Some(b))) => Some(format!("Looping {} – {}", duration_text(a), duration_text(b))),
+    };
     let sub = dotted([Some(now.artists.clone()), now.album.clone().filter(|a| *a != now.title)]);
     let parse = |v: String| v.parse::<f64>().ok();
     rsx! {
@@ -945,6 +1172,17 @@ pub fn NowPlayingPage(
                 div { class: "sub", "{sub}" }
             }
             div { class: "seek",
+                if let Some((a, b)) = song_loop {
+                    div { class: "ab-track",
+                        if let Some(b) = b {
+                            div { class: "ab-range", style: "left: {at(a):.2}%; width: {at(b) - at(a):.2}%" }
+                        }
+                        div { class: "ab-mark", style: "left: {at(a):.2}%" }
+                        if let Some(b) = b {
+                            div { class: "ab-mark", style: "left: {at(b):.2}%" }
+                        }
+                    }
+                }
                 input {
                     r#type: "range",
                     "aria-label": "Position",
@@ -966,6 +1204,9 @@ pub fn NowPlayingPage(
                 }
                 div { class: "times",
                     span { {duration_text(position)} }
+                    if let Some(note) = ab_note {
+                        span { class: "ab-note", "{note}" }
+                    }
                     span { {duration_text(duration)} }
                 }
             }
@@ -993,10 +1234,132 @@ pub fn NowPlayingPage(
                 button { class: "icon-btn big", "aria-label": "Next", onclick: move |_| onnext.call(()),
                     Svg { icon: Icon::Next, size: 32 }
                 }
-                div { class: "icon-btn" }
+                button { class: ab_class, "aria-label": ab_label, onclick: move |_| onab.call(()),
+                    span { class: "a", "A" }
+                    "-"
+                    span { class: "b", "B" }
+                }
             }
-            h2 { class: "section", "Queue" span { class: "section-note", {plural(queue.len(), "song", "songs")} } }
-            SongList { songs: queue, onplay: onskip }
+            h2 { class: "section",
+                "Queue"
+                span { class: "section-note",
+                    match queue_loop {
+                        QueueLoopView::Off => plural(queue.len(), "song", "songs"),
+                        QueueLoopView::PickA => "Tap the song to loop back to (A)".into(),
+                        QueueLoopView::PickB => "Tap the last song of the loop (B)".into(),
+                        QueueLoopView::Looping { first, last } if first == last => format!("Looping song {first}"),
+                        QueueLoopView::Looping { first, last } => format!("Looping songs {first}–{last}"),
+                    }
+                }
+                button { class: "text-btn section-action", onclick: move |_| onqueueloop.call(()),
+                    match queue_loop {
+                        QueueLoopView::Off => "A-B loop",
+                        QueueLoopView::PickA | QueueLoopView::PickB => "Cancel",
+                        QueueLoopView::Looping { .. } => "Stop loop",
+                    }
+                }
+            }
+            div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
+                SongList { songs: queue, onplay: onskip, onmore }
+            }
+        }
+    }
+}
+
+// ---- menus and dialogs ----
+
+/// A bottom sheet of actions; tapping outside closes it.
+#[component]
+pub fn MenuSheet(head: Option<MenuHead>, items: Vec<MenuItem>, onpick: EventHandler<usize>, onclose: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "modal",
+            div { class: "scrim", onclick: move |_| onclose.call(()) }
+            div { class: "menu", role: "menu",
+                div { class: "grip" }
+                if let Some(head) = head {
+                    div { class: "menu-head",
+                        Cover { url: head.art.clone(), icon: head.icon }
+                        div { class: "meta",
+                            div { class: "title", "{head.title}" }
+                            div { class: "sub", "{head.sub}" }
+                        }
+                    }
+                }
+                for (i , item) in items.into_iter().enumerate() {
+                    button {
+                        key: "{i}",
+                        class: if item.danger { "menu-item danger" } else { "menu-item" },
+                        role: "menuitem",
+                        onclick: move |_| onpick.call(i),
+                        Svg { icon: item.icon }
+                        div { class: "meta",
+                            div { class: "title", "{item.label}" }
+                            if let Some(sub) = item.sub {
+                                div { class: "sub", "{sub}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A question with a confirm button, and a text field when `value` is set.
+#[component]
+pub fn Dialog(
+    title: String,
+    #[props(default)] text: Option<String>,
+    /// The text field's contents; no field when `None`.
+    #[props(default)] value: Option<String>,
+    #[props(default)] placeholder: String,
+    confirm: String,
+    #[props(default)] danger: bool,
+    #[props(default)] oninput: Option<EventHandler<String>>,
+    onconfirm: EventHandler<()>,
+    oncancel: EventHandler<()>,
+) -> Element {
+    let blank = value.as_deref().is_some_and(|v| v.trim().is_empty());
+    rsx! {
+        div { class: "modal",
+            div { class: "scrim", onclick: move |_| oncancel.call(()) }
+            form {
+                class: "dialog",
+                role: "dialog",
+                onsubmit: move |e| {
+                    e.prevent_default();
+                    if !blank {
+                        onconfirm.call(());
+                    }
+                },
+                h2 { "{title}" }
+                if let Some(text) = text {
+                    p { "{text}" }
+                }
+                if let Some(value) = value {
+                    input {
+                        r#type: "text",
+                        "enterkeyhint": "done",
+                        placeholder: "{placeholder}",
+                        value: "{value}",
+                        maxlength: "100",
+                        oninput: move |e| {
+                            if let Some(h) = oninput {
+                                h.call(e.value());
+                            }
+                        },
+                        onmounted: move |e| async move {
+                            let _ = e.set_focus(true).await;
+                        },
+                    }
+                }
+                div { class: "dialog-actions",
+                    button { r#type: "button", class: "text-btn", onclick: move |_| oncancel.call(()), "Cancel" }
+                    button { r#type: "submit", class: if danger { "text-btn strong danger" } else { "text-btn strong" }, disabled: blank,
+                        "{confirm}"
+                    }
+                }
+            }
         }
     }
 }
