@@ -279,6 +279,17 @@ pub mod player {
         call("insert", "(Ljava/lang/String;Z)V", |env| Ok(vec![string(env, items)?, JValueOwned::Bool(next.into())]));
     }
 
+    /// Moves the entry at queue position `from` to `to`.
+    pub fn move_entry(from: usize, to: usize) {
+        call("move", "(II)V", |_| Ok(vec![JValueOwned::Int(from as i32), JValueOwned::Int(to as i32)]));
+    }
+
+    /// Pauses at wall-clock `at_ms` (Unix ms), or at the end of the song;
+    /// neither clears the timer.
+    pub fn set_sleep(at_ms: i64, end_of_song: bool) {
+        call("setSleep", "(JZ)V", |_| Ok(vec![JValueOwned::Long(at_ms), JValueOwned::Bool(end_of_song.into())]));
+    }
+
     /// Removes the queue entry with id `key`, or all entries of track `key`.
     pub fn remove(key: &str) {
         call("remove", "(Ljava/lang/String;)V", |env| Ok(vec![string(env, key)?]));
@@ -326,6 +337,48 @@ pub mod player {
 
     pub fn set_repeat(mode: i32) {
         call("setRepeat", "(I)V", |_| Ok(vec![JValueOwned::Int(mode)]));
+    }
+}
+
+/// Text shared to the app from others (`YtmdlShare` in app/android/Share.kt).
+pub mod share {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    use jni::objects::{GlobalRef, JClass, JString};
+    use jni::{JNIEnv, NativeMethod};
+    use tokio::sync::mpsc::UnboundedSender;
+
+    use super::{app_class, with_env};
+
+    const CLASS: &str = "dev.nick.ytmdl.YtmdlShare";
+    static SHARE: OnceLock<GlobalRef> = OnceLock::new();
+    static TEXTS: OnceLock<UnboundedSender<String>> = OnceLock::new();
+
+    /// Sends each shared text to `texts`, starting with one that started the app.
+    pub fn listen(texts: UnboundedSender<String>) {
+        let _ = TEXTS.set(texts);
+        let result = with_env(|env, activity| {
+            let class = app_class(env, activity, CLASS, &SHARE)?;
+            let shared = NativeMethod {
+                name: "nativeShared".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: native_shared as *mut c_void,
+            };
+            env.register_native_methods(&class, &[shared])?;
+            env.call_static_method(&class, "listen", "()V", &[])?;
+            Ok(())
+        });
+        if let Err(e) = result {
+            tracing::error!(target: "ytmdl", "listening for shared links: {e:#}");
+        }
+    }
+
+    /// Called on the Android main thread.
+    extern "system" fn native_shared<'local>(mut env: JNIEnv<'local>, _: JClass<'local>, text: JString<'local>) {
+        if let (Ok(text), Some(tx)) = (env.get_string(&text), TEXTS.get()) {
+            let _ = tx.send(text.into());
+        }
     }
 }
 

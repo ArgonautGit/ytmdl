@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 use ytmdl_core::{CancelToken, Entry, Progress, SearchSource};
 
 use super::icons::Icon;
+use super::sort::SortKey;
 use super::views::*;
 use crate::jobs::{Job, JobState};
 
@@ -59,6 +60,14 @@ const SCREENS: &[Screen] = &[
     ("now-playing", "Now playing", now_playing),
     ("now-playing-loops", "Now playing, A-B loops on the song and the queue", now_playing_loops),
     ("now-playing-pick", "Now playing, picking the queue loop's B", now_playing_pick),
+    ("now-playing-sections", "Now playing, a saved section looping and the sleep timer on", now_playing_sections),
+    ("sleep-menu", "Sleep timer", sleep_menu),
+    ("section-name", "Saving a loop as a section", section_name),
+    ("library-search", "Library, searching", library_search),
+    ("sort-menu", "Sorting the library", sort_menu),
+    ("stats", "Listening stats, 30 days", stats),
+    ("stats-week", "Listening stats, 7 days", stats_week),
+    ("stats-empty", "Listening stats, nothing played", stats_empty),
     ("song-menu", "Song menu", song_menu),
     ("add-to-playlist", "Add to playlist", add_to_playlist),
     ("new-playlist", "New playlist", new_playlist),
@@ -226,13 +235,21 @@ fn library_page(view: LibraryView, songs: Vec<SongItem>) -> Element {
 }
 
 fn library_page_body(view: LibraryView, songs: Vec<SongItem>) -> Element {
+    library_page_with(view, songs, None, SortKey::Added)
+}
+
+fn library_page_with(view: LibraryView, songs: Vec<SongItem>, query: Option<&str>, sort: SortKey) -> Element {
+    let searching = query.is_some();
     rsx! {
         LibraryPage {
             view,
+            empty: songs.is_empty() && !searching,
             songs,
             albums: album_items(),
             artists: artist_items(),
             playlists: playlist_items(),
+            query: query.map(Into::into),
+            sort,
             onview: |_| {},
             onplay: |_| {},
             onmore: |_| {},
@@ -243,8 +260,30 @@ fn library_page_body(view: LibraryView, songs: Vec<SongItem>) -> Element {
             onplaylistmore: |_| {},
             onnewplaylist: |_| {},
             onsearch: |_| {},
+            onfind: |_| {},
+            onfindclose: |_| {},
+            onquery: |_| {},
+            onsort: |_| {},
+            onstats: |_| {},
         }
     }
+}
+
+fn library_search() -> Element {
+    let songs = song_items().into_iter().filter(|s| s.title.to_lowercase().contains("polka")).collect();
+    shell(Tab::Library, 0, library_page_with(LibraryView::Songs, songs, Some("polka"), SortKey::Title))
+}
+
+fn sort_menu() -> Element {
+    let items = [SortKey::Added, SortKey::Title, SortKey::Artist, SortKey::Album, SortKey::Plays]
+        .iter()
+        .map(|k| MenuItem::choice(k.label(), *k == SortKey::Plays))
+        .collect();
+    let head = MenuHead { title: "Sort by".into(), sub: "Your songs".into(), art: None, icon: Icon::Sort };
+    with_modal(
+        library_page_with(LibraryView::Songs, song_items(), None, SortKey::Plays),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
 }
 
 fn library_songs() -> Element {
@@ -274,6 +313,17 @@ fn library_playing() -> Element {
 }
 
 fn now_playing_page(song_loop: Option<(f64, Option<f64>)>, marks: &[(usize, LoopMark)], queue_loop: QueueLoopView) -> Element {
+    now_playing_with(song_loop, marks, queue_loop, None, Vec::new(), false)
+}
+
+fn now_playing_with(
+    song_loop: Option<(f64, Option<f64>)>,
+    marks: &[(usize, LoopMark)],
+    queue_loop: QueueLoopView,
+    sleep: Option<&str>,
+    sections: Vec<SectionChip>,
+    can_save: bool,
+) -> Element {
     let queue = song_items()
         .into_iter()
         .take(8)
@@ -304,6 +354,13 @@ fn now_playing_page(song_loop: Option<(f64, Option<f64>)>, marks: &[(usize, Loop
                     onskip: |_| {},
                     onmore: |_| {},
                     onqueueloop: |_| {},
+                    sleep: sleep.map(Into::into),
+                    onsleep: |_| {},
+                    sections,
+                    can_save,
+                    onsection: |_| {},
+                    onsavesection: |_| {},
+                    oneditsections: |_| {},
                 }
             }
         }
@@ -320,7 +377,44 @@ fn now_playing_loops() -> Element {
 }
 
 fn now_playing_pick() -> Element {
-    now_playing_page(Some((32.0, None)), &[(1, LoopMark::A)], QueueLoopView::PickB)
+    now_playing_with(Some((32.0, None)), &[(1, LoopMark::A)], QueueLoopView::PickB, None, Vec::new(), false)
+}
+
+fn section_chips() -> Vec<SectionChip> {
+    [("Intro", "0:00–0:18", false), ("Chorus", "0:32–1:18", true), ("Bridge", "1:40–1:58", false)]
+        .iter()
+        .map(|(name, times, active)| SectionChip { name: name.to_string(), times: times.to_string(), active: *active })
+        .collect()
+}
+
+fn now_playing_sections() -> Element {
+    now_playing_with(Some((32.0, Some(78.5))), &[], QueueLoopView::Off, Some("23 min"), section_chips(), false)
+}
+
+fn sleep_menu() -> Element {
+    let mut items = vec![MenuItem::new(Icon::Close, "Turn off")];
+    items.extend(["5 minutes", "15 minutes", "30 minutes", "45 minutes", "1 hour"].map(|l| MenuItem::new(Icon::Moon, l)));
+    items.push(MenuItem::new(Icon::Music, "End of song"));
+    let head = MenuHead { title: "Sleep timer".into(), sub: "Pausing in 23 min".into(), art: None, icon: Icon::Moon };
+    rsx! {
+        {now_playing_with(Some((32.0, Some(78.5))), &[], QueueLoopView::Off, Some("23 min"), section_chips(), false)}
+        MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} }
+    }
+}
+
+fn section_name() -> Element {
+    rsx! {
+        {now_playing_with(Some((32.0, Some(78.5))), &[], QueueLoopView::Off, None, Vec::new(), true)}
+        Dialog {
+            title: "Save section",
+            text: "0:32–1:18".to_string(),
+            value: "Section 1".to_string(),
+            placeholder: "Name",
+            confirm: "Save",
+            onconfirm: |_| {},
+            oncancel: |_| {},
+        }
+    }
 }
 
 /// `page` with `modal` over it.
@@ -686,13 +780,96 @@ fn settings() -> Element {
                 about,
                 output: "/storage/emulated/0/Android/data/dev.nick.ytmdl/files/Music".to_string(),
                 storage: false,
-                update: Some("yt-dlp 2026.08.19 is the latest.".to_string()),
+                update: Some("Downloaded yt-dlp 2026.09.20. Restart the app to use it.".to_string()),
                 checking: false,
+                next_version: Some("2026.09.20".to_string()),
+                auto_update: true,
+                auto_note: "Checks daily for stable builds · last checked just now".to_string(),
                 onupdate: |_| {},
+                ontoggleauto: |_| {},
                 onallow: |_| {},
             }
         },
     )
+}
+
+fn stats_page(period: Period, stats: Option<StatsView>) -> Element {
+    shell(
+        Tab::Library,
+        0,
+        rsx! {
+            div { class: "overlay",
+                StatsPage {
+                    period,
+                    stats,
+                    onback: |_| {},
+                    onperiod: |_| {},
+                    onsong: |_| {},
+                    onartist: |_| {},
+                    onalbum: |_| {},
+                }
+            }
+        },
+    )
+}
+
+fn sample_stats(bars: Vec<Bar>) -> StatsView {
+    let songs = &sample().songs;
+    let rank = |i: usize, sub: String| RankItem {
+        title: songs[i % songs.len()].title.clone(),
+        sub,
+        art: songs[i % songs.len()].thumbnail.clone(),
+    };
+    StatsView {
+        time: "14 hr 32 min".into(),
+        plays: 312,
+        songs: 87,
+        artists: 23,
+        chart_title: "Per day".into(),
+        chart_note: Some("Most: 2 hr 5 min".into()),
+        bars,
+        top_songs: (0..6).map(|i| rank(i, format!("Kevin MacLeod • {} plays", 31usize.saturating_sub(i * 4)))).collect(),
+        top_artists: artist_items()
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| RankItem { title: a.name, sub: format!("{} plays • {} hr", 120usize.saturating_sub(i * 25).max(4), 6usize.saturating_sub(i).max(1)), art: a.art })
+            .collect(),
+        top_albums: album_items()
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| RankItem { title: a.title, sub: format!("{} plays", 48usize.saturating_sub(i * 5).max(3)), art: a.art })
+            .collect(),
+    }
+}
+
+fn stats() -> Element {
+    let heights = [0.2, 0.0, 0.45, 0.3, 0.9, 0.1, 0.0, 0.6, 0.75, 0.35, 0.15, 0.0, 0.5, 1.0, 0.4];
+    let bars = (0..30)
+        .map(|i| Bar {
+            height: heights[i % heights.len()],
+            label: if (29 - i) % 7 == 0 { (i as u32 + 1).to_string() } else { String::new() },
+            now: i == 29,
+        })
+        .collect();
+    stats_page(Period::Month, Some(sample_stats(bars)))
+}
+
+fn stats_week() -> Element {
+    let bars = ["M", "T", "W", "T", "F", "S", "S"]
+        .iter()
+        .zip([0.3, 0.8, 0.0, 0.55, 1.0, 0.4, 0.2])
+        .enumerate()
+        .map(|(i, (label, height))| Bar { height, label: label.to_string(), now: i == 6 })
+        .collect();
+    let mut view = sample_stats(bars);
+    view.time = "3 hr 5 min".into();
+    stats_page(Period::Week, Some(view))
+}
+
+fn stats_empty() -> Element {
+    let mut view = sample_stats(Vec::new());
+    view.plays = 0;
+    stats_page(Period::Week, Some(view))
 }
 
 // ---- placeholder data (no .deps/ui-sample.json) ----

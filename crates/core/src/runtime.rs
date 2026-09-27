@@ -282,10 +282,19 @@ impl Runtime {
         .await
     }
 
-    /// Downloads the newest yt-dlp for `channel` if it differs from the loaded one.
-    /// It becomes active on the next start.
+    /// The yt-dlp version the next start loads, when an update is waiting for it.
+    pub fn next_version(&self) -> Option<String> {
+        let name = std::fs::read_to_string(self.0.config.ytdlp_dir.join(ACTIVE_FILE)).ok()?;
+        let name = name.trim();
+        let version = name.strip_prefix("yt-dlp-")?.strip_suffix(".zip")?;
+        let waiting = self.0.config.ytdlp_dir.join(name).is_file() && self.0.ytdlp_zip.file_name() != Some(name.as_ref());
+        waiting.then(|| version.to_owned())
+    }
+
+    /// Downloads the newest yt-dlp for `channel` unless it is the loaded one or
+    /// already waiting for the next start, where it becomes active.
     pub async fn check_update(&self, channel: Channel) -> Result<UpdateOutcome> {
-        let current = self.0.version.yt_dlp.clone().unwrap_or_default();
+        let current = self.next_version().or_else(|| self.0.version.yt_dlp.clone()).unwrap_or_default();
         let dir = self.0.config.ytdlp_dir.clone();
         let json: String = self
             .run(&self.0.meta, move |py, bridge| {

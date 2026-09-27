@@ -5,7 +5,7 @@
 //!
 //! Queue entries have keys "<track id>.<n>", unique in the queue, so a song can
 //! be queued twice and the A-B loops can name entries. The loops themselves run
-//! in the service.
+//! in the service, and so does the sleep timer.
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -38,6 +38,10 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub song_loop: Option<SongLoop>,
     pub queue_loop: Option<QueueLoop>,
+    /// The sleep timer: Unix ms to pause at.
+    pub sleep_at: Option<i64>,
+    /// The sleep timer pauses at the end of the song.
+    pub sleep_at_end: bool,
 }
 
 /// Seeks back to `a` on reaching `b` (ms) while entry `id` plays.
@@ -77,6 +81,14 @@ impl Snapshot {
     }
 }
 
+/// When the sleep timer pauses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Sleep {
+    /// At this Unix time (ms).
+    At(i64),
+    EndOfSong,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Repeat {
     Off,
@@ -101,7 +113,8 @@ pub struct Player {
     received: Signal<Instant>,
     /// Tracks deleted meanwhile are left out.
     queue: Signal<Vec<Entry>>,
-    /// Bumped twice a second while playing and the app is visible.
+    /// Bumped twice a second while playing (or a sleep timer runs) and the
+    /// app is visible.
     tick: Signal<u64>,
     /// Point A of a song loop being set: (entry key, ms).
     loop_start: Signal<Option<(String, i64)>>,
@@ -170,7 +183,11 @@ impl Player {
         );
         let mut tick = self.tick;
         while ticks.recv::<bool>().await.is_ok() {
-            if self.snapshot.peek().playing {
+            let busy = {
+                let s = self.snapshot.peek();
+                s.playing || s.sleep_at.is_some()
+            };
+            if busy {
                 *tick.write() += 1;
             }
         }
@@ -276,6 +293,36 @@ impl Player {
         }
     }
 
+    /// Moves the queue entry at `from` to where the one at `to` is (positions
+    /// in [`Player::queue`]).
+    pub fn move_entry(&self, from: usize, to: usize) {
+        let queue = self.queue.peek();
+        let (Some(a), Some(b)) = (queue.get(from), queue.get(to)) else { return };
+        let (from, to) = (a.index, b.index);
+        drop(queue);
+        if from == to {
+            return;
+        }
+        backend::move_entry(from, to);
+        // Show the new order now rather than when the service reports it.
+        let mut s = self.snapshot.peek().clone();
+        if from >= s.ids.len() || to >= s.ids.len() {
+            return;
+        }
+        let key = s.ids.remove(from);
+        s.ids.insert(to, key);
+        s.index = match s.index {
+            i if i == from => to,
+            i if from < i && i <= to => i - 1,
+            i if to <= i && i < from => i + 1,
+            i => i,
+        };
+        let (mut snapshot, mut queue) = (self.snapshot, self.queue);
+        queue.set(self.lookup(&s.ids));
+        self.save(&s);
+        snapshot.set(s);
+    }
+
     /// Takes one entry out of the queue.
     pub fn remove_entry(&self, key: &str) {
         backend::remove(key);
@@ -337,6 +384,39 @@ impl Player {
                 backend::set_song_loop(Some((&key, a.min(ms), a.max(ms))));
             }
         }
+    }
+
+    /// Loops the current song from `a_ms` to `b_ms` (a saved section), from A.
+    pub fn loop_section(&self, a_ms: i64, b_ms: i64) {
+        let Some(key) = self.current_key_peek() else { return };
+        let mut start = self.loop_start;
+        start.set(None);
+        backend::set_song_loop(Some((&key, a_ms, b_ms)));
+        self.seek(a_ms as f64 / 1000.0);
+        let mut snapshot = self.snapshot;
+        snapshot.write().song_loop = Some(SongLoop { id: key, a: a_ms, b: b_ms });
+    }
+
+    /// Ends the current song's A-B loop (or forgets its A).
+    pub fn stop_song_loop(&self) {
+        let (mut start, mut snapshot) = (self.loop_start, self.snapshot);
+        start.set(None);
+        backend::set_song_loop(None);
+        snapshot.write().song_loop = None;
+    }
+
+    /// Sets the sleep timer, or turns it off.
+    pub fn set_sleep(&self, sleep: Option<Sleep>) {
+        let (at, end) = match sleep {
+            None => (0, false),
+            Some(Sleep::At(ms)) => (ms, false),
+            Some(Sleep::EndOfSong) => (0, true),
+        };
+        backend::set_sleep(at, end);
+        let mut snapshot = self.snapshot;
+        let mut s = snapshot.write();
+        s.sleep_at = (at > 0).then_some(at);
+        s.sleep_at_end = end;
     }
 
     /// Loops the queue from entry `first` to entry `last`, in queue order.
@@ -405,6 +485,11 @@ impl Player {
 
     pub fn queue_loop(&self) -> Option<QueueLoop> {
         self.snapshot.read().queue_loop.clone()
+    }
+
+    pub fn sleep(&self) -> Option<Sleep> {
+        let s = self.snapshot.read();
+        if s.sleep_at_end { Some(Sleep::EndOfSong) } else { s.sleep_at.map(Sleep::At) }
     }
 
     pub fn repeat(&self) -> Repeat {

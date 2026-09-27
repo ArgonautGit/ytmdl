@@ -1,8 +1,8 @@
 //! Playlists downloaded from links follow their YouTube playlist: they sync
-//! when the app starts or comes back to the screen (if the last sync is old)
-//! and from the playlist's menu. Songs added on YouTube are downloaded, songs
-//! removed there leave the playlist (their files stay), and the order follows
-//! YouTube's.
+//! when the app starts or comes back to the screen (if the last sync is old;
+//! see `use_background_work`) and from the playlist's menu. Songs added on
+//! YouTube are downloaded, songs removed there leave the playlist (their files
+//! stay), and the order follows YouTube's.
 
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use ytmdl_core::{Entry, Resolved};
 
 use super::views::plural;
-use super::{Boot, Ctx};
+use super::Ctx;
 
 /// How old a sync can get before the app syncs again on its own.
 const STALE_SECS: i64 = 30 * 60;
@@ -123,32 +123,6 @@ impl Ctx {
             }
         }
     }
-}
-
-/// Syncs old playlists once the downloader is up, whenever the app comes back
-/// to the screen, and every ten minutes while it is on screen.
-pub(super) fn use_auto_sync(ctx: Ctx) {
-    use_effect(move || {
-        if matches!(*ctx.boot.read(), Boot::Ready(_)) {
-            ctx.sync_stale();
-        }
-    });
-    use_hook(move || {
-        spawn(async move {
-            let mut wake = document::eval(
-                "document.addEventListener('visibilitychange', () => { \
-                     if (document.visibilityState === 'visible') dioxus.send(true); \
-                 }); \
-                 while (true) { \
-                     await new Promise(r => setTimeout(r, 600000)); \
-                     if (document.visibilityState === 'visible') dioxus.send(true); \
-                 }",
-            );
-            while wake.recv::<bool>().await.is_ok() {
-                ctx.sync_stale();
-            }
-        })
-    });
 }
 
 /// "just now", "5 min ago", "3 hr ago", "2 days ago".

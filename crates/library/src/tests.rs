@@ -319,3 +319,79 @@ fn scan_indexes_tagged_files_and_forgets_deleted_ones() {
     assert_eq!(lib.scan(&[music]).unwrap().removed, 1);
     assert!(lib.tracks().unwrap().is_empty());
 }
+
+#[test]
+fn imports_listens_and_counts_plays() {
+    let tmp = TempDir::new("listens");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Tune", Some("Record"), &["Band", "Guest"], Some(1)));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Other", Some("Record"), &["Band"], Some(2)));
+    let gone = add(&lib, &tmp.0, meta("ccccccccccc", "Gone", None, &["Solo"], None));
+    let now = now();
+
+    // Three plays of a, one of b, a skip of b (under 30 s), a bad line, and a
+    // listen of a song deleted before the import.
+    let log = tmp.0.join("listens.log");
+    let line = |t: &Track, ms: i64| format!("{now}\t{}\t{ms}\n", t.id);
+    let text = [line(&a, 180_000), line(&a, 45_000), line(&a, 30_000), line(&b, 90_000), line(&b, 5_000)].concat()
+        + "garbage\n"
+        + &line(&gone, 60_000);
+    fs::write(&log, text).unwrap();
+    lib.delete_track(gone.id).unwrap();
+    assert_eq!(lib.import_listens(&log).unwrap(), 6);
+    assert!(!log.exists());
+    assert_eq!(lib.import_listens(&log).unwrap(), 0);
+
+    // A log left halfway by an earlier import goes in before the new one.
+    fs::write(tmp.0.join("listens.importing"), line(&b, 40_000)).unwrap();
+    fs::write(&log, line(&b, 1_000)).unwrap();
+    assert_eq!(lib.import_listens(&log).unwrap(), 2);
+
+    let stats = lib.stats(Period::Week).unwrap();
+    assert_eq!(stats.listened_ms, 180_000 + 45_000 + 30_000 + 90_000 + 5_000 + 60_000 + 40_000 + 1_000);
+    assert_eq!(stats.plays, 3 + 2 + 1);
+    assert_eq!((stats.songs, stats.artists), (2, 2));
+    let top: Vec<_> = stats.top_tracks.iter().map(|t| (t.track.title.as_str(), t.plays)).collect();
+    assert_eq!(top, [("Tune", 3), ("Other", 2)]);
+    let artists: Vec<_> = stats.top_artists.iter().map(|a| (a.name.as_str(), a.plays)).collect();
+    assert_eq!(artists, [("Band", 5), ("Guest", 3)]);
+    assert_eq!(stats.top_albums.len(), 1);
+    assert_eq!((stats.top_albums[0].title.as_str(), stats.top_albums[0].plays), ("Record", 5));
+
+    // Today is the last of seven day buckets and holds everything.
+    assert_eq!(stats.buckets.len(), 7);
+    assert!(stats.buckets.iter().all(|b| b.day.is_some() && b.weekday.is_some()));
+    assert_eq!(stats.buckets.last().unwrap().ms, stats.listened_ms);
+    assert_eq!(lib.stats(Period::Month).unwrap().buckets.len(), 30);
+    assert_eq!(lib.stats(Period::Year).unwrap().buckets.len(), 12);
+    let all = lib.stats(Period::All).unwrap();
+    assert_eq!((all.plays, all.buckets.len()), (6, 1));
+
+    let counts = lib.play_counts().unwrap();
+    assert_eq!(counts.tracks.get("aaaaaaaaaaa"), Some(&3));
+    assert_eq!(counts.albums.get(&("Band".to_string(), "Record".to_string())), Some(&5));
+    assert_eq!(counts.artists.get("Guest"), Some(&3));
+
+    // Older listens fall out of the week but stay in all time.
+    lib.db().execute("UPDATE listens SET started_at = started_at - 40 * 86400 WHERE ms = 180000", []).unwrap();
+    assert_eq!(lib.stats(Period::Week).unwrap().plays, 5);
+    assert_eq!(lib.stats(Period::All).unwrap().plays, 6);
+}
+
+#[test]
+fn saves_sections() {
+    let tmp = TempDir::new("sections");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let solo = lib.add_section("aaaaaaaaaaa", " Solo ", 90_000, 120_000).unwrap();
+    let chorus = lib.add_section("aaaaaaaaaaa", "Chorus", 30_000, 45_000).unwrap();
+    lib.add_section("bbbbbbbbbbb", "Intro", 0, 10_000).unwrap();
+    assert!(lib.add_section("aaaaaaaaaaa", "Backwards", 50_000, 40_000).is_err());
+    assert!(lib.add_section("aaaaaaaaaaa", "  ", 0, 1_000).is_err());
+
+    let names = |lib: &Library| lib.sections("aaaaaaaaaaa").unwrap().into_iter().map(|s| s.name).collect::<Vec<_>>();
+    assert_eq!(names(&lib), ["Chorus", "Solo"]);
+    lib.rename_section(solo.id, "Guitar solo").unwrap();
+    lib.delete_section(chorus.id).unwrap();
+    assert_eq!(names(&lib), ["Guitar solo"]);
+    assert_eq!(lib.sections("bbbbbbbbbbb").unwrap().len(), 1);
+}

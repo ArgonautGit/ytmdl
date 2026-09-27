@@ -5,7 +5,9 @@ use dioxus::prelude::*;
 use ytmdl_core::{Channel, Entry, SearchSource, art_url};
 
 use super::icons::{Icon, Svg};
+use super::sort::SortKey;
 use crate::jobs::{Job, JobState};
+pub use ytmdl_library::Period;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tab {
@@ -84,17 +86,35 @@ pub enum SyncView {
 /// A row in a menu sheet.
 #[derive(Clone, PartialEq, Debug)]
 pub struct MenuItem {
-    pub icon: Icon,
+    /// None in a list of choices, which marks the chosen one instead.
+    pub icon: Option<Icon>,
     pub label: String,
     pub sub: Option<String>,
     /// Destructive (shown in red).
     pub danger: bool,
+    /// The current choice (a check mark).
+    pub checked: bool,
 }
 
 impl MenuItem {
     pub fn new(icon: Icon, label: impl Into<String>) -> Self {
-        MenuItem { icon, label: label.into(), sub: None, danger: false }
+        MenuItem { icon: Some(icon), label: label.into(), sub: None, danger: false, checked: false }
     }
+
+    /// A choice in a list, checked when it is the current one.
+    pub fn choice(label: impl Into<String>, checked: bool) -> Self {
+        MenuItem { icon: None, checked, ..MenuItem::new(Icon::Check, label) }
+    }
+}
+
+/// A saved A-B section under the now-playing seek bar.
+#[derive(Clone, PartialEq, Debug)]
+pub struct SectionChip {
+    pub name: String,
+    /// "0:32–1:05"
+    pub times: String,
+    /// Looping now.
+    pub active: bool,
 }
 
 /// What a menu sheet is about, shown above its items.
@@ -748,6 +768,8 @@ fn AlbumSummary(
 
 // ---- library ----
 
+/// The library tabs. The lists come searched and sorted; `empty` is whether
+/// the library has no songs at all.
 #[component]
 pub fn LibraryPage(
     view: LibraryView,
@@ -755,6 +777,12 @@ pub fn LibraryPage(
     albums: Vec<AlbumItem>,
     artists: Vec<ArtistItem>,
     playlists: Vec<PlaylistItem>,
+    empty: bool,
+    /// What the search field holds while it is open.
+    #[props(default)]
+    query: Option<String>,
+    /// The tab's sort.
+    sort: SortKey,
     onview: EventHandler<LibraryView>,
     onplay: EventHandler<usize>,
     /// A song's menu.
@@ -765,7 +793,15 @@ pub fn LibraryPage(
     onplaylist: EventHandler<usize>,
     onplaylistmore: EventHandler<usize>,
     onnewplaylist: EventHandler<()>,
+    /// Goes to the Search tab (from the empty library).
     onsearch: EventHandler<()>,
+    /// Opens the search field, and closes it.
+    onfind: EventHandler<()>,
+    onfindclose: EventHandler<()>,
+    onquery: EventHandler<String>,
+    /// The sort menu.
+    onsort: EventHandler<()>,
+    onstats: EventHandler<()>,
 ) -> Element {
     let views = [
         ("Songs", LibraryView::Songs),
@@ -773,9 +809,51 @@ pub fn LibraryPage(
         ("Artists", LibraryView::Artists),
         ("Playlists", LibraryView::Playlists),
     ];
+    let searching = query.as_deref().is_some_and(|q| !q.trim().is_empty());
+    let no_matches = rsx! {
+        EmptyState {
+            icon: Icon::Search,
+            title: "No matches",
+            text: format!("Nothing here matches “{}”.", query.as_deref().unwrap_or_default().trim()),
+        }
+    };
     rsx! {
         header { class: "topbar",
-            h1 { "Library" }
+            if let Some(q) = query.clone() {
+                form {
+                    class: "searchbar",
+                    onsubmit: move |e| {
+                        e.prevent_default();
+                        document::eval("document.activeElement && document.activeElement.blur()");
+                    },
+                    Svg { icon: Icon::Search, size: 20 }
+                    input {
+                        r#type: "search",
+                        "enterkeyhint": "search",
+                        placeholder: "Search your library",
+                        value: "{q}",
+                        oninput: move |e| onquery.call(e.value()),
+                        onmounted: move |e| async move {
+                            let _ = e.set_focus(true).await;
+                        },
+                    }
+                    button { r#type: "button", class: "icon-btn small", "aria-label": "Close search", onclick: move |_| onfindclose.call(()),
+                        Svg { icon: Icon::Close, size: 20 }
+                    }
+                }
+            } else {
+                div { class: "title-row",
+                    h1 { "Library" }
+                    if !empty {
+                        button { class: "icon-btn", "aria-label": "Search your library", onclick: move |_| onfind.call(()),
+                            Svg { icon: Icon::Search }
+                        }
+                    }
+                    button { class: "icon-btn", "aria-label": "Listening stats", onclick: move |_| onstats.call(()),
+                        Svg { icon: Icon::Chart }
+                    }
+                }
+            }
             div { class: "chips",
                 for (label , value) in views {
                     button {
@@ -787,7 +865,7 @@ pub fn LibraryPage(
                 }
             }
         }
-        if songs.is_empty() {
+        if empty {
             EmptyState {
                 icon: Icon::Library,
                 title: "Your library is empty",
@@ -799,42 +877,86 @@ pub fn LibraryPage(
         } else {
             match view {
                 LibraryView::Songs => rsx! {
-                    div { class: "list-head",
-                        span { class: "section-note", {plural(songs.len(), "song", "songs")} }
-                        button { class: "secondary small", onclick: move |_| onshuffle.call(()),
-                            Svg { icon: Icon::Shuffle, size: 18 }
-                            "Shuffle"
-                        }
+                    ListHead {
+                        count: plural(songs.len(), "song", "songs"),
+                        sort,
+                        onsort,
+                        onshuffle: (!songs.is_empty()).then_some(onshuffle),
                     }
-                    SongList { songs, onplay, onmore }
+                    if songs.is_empty() {
+                        {no_matches}
+                    } else {
+                        SongList { songs, onplay, onmore }
+                    }
                 },
-                LibraryView::Albums if albums.is_empty() => rsx! {
+                LibraryView::Albums if albums.is_empty() && !searching => rsx! {
                     EmptyState { icon: Icon::Disc, title: "No albums yet", text: "Download a whole album, or songs that belong to one." }
                 },
-                LibraryView::Albums => rsx! { AlbumGrid { albums, onopen: onalbum } },
-                LibraryView::Artists => rsx! {
-                    ul { class: "list",
-                        for (i , artist) in artists.into_iter().enumerate() {
-                            ArtistRow { key: "{artist.name}", artist, onopen: move |_| onartist.call(i) }
-                        }
+                LibraryView::Albums => rsx! {
+                    ListHead { count: plural(albums.len(), "album", "albums"), sort, onsort }
+                    if albums.is_empty() {
+                        {no_matches}
+                    } else {
+                        AlbumGrid { albums, onopen: onalbum }
                     }
                 },
-                LibraryView::Playlists => rsx! {
-                    ul { class: "list",
-                        li { class: "row tappable", onclick: move |_| onnewplaylist.call(()),
-                            div { class: "cover new", Svg { icon: Icon::Plus } }
-                            div { class: "meta", div { class: "title", "New playlist" } }
-                        }
-                        for (i , playlist) in playlists.into_iter().enumerate() {
-                            PlaylistRow {
-                                key: "{i}/{playlist.name}",
-                                playlist,
-                                onopen: move |_| onplaylist.call(i),
-                                onmore: move |_| onplaylistmore.call(i),
+                LibraryView::Artists => rsx! {
+                    ListHead { count: plural(artists.len(), "artist", "artists"), sort, onsort }
+                    if artists.is_empty() {
+                        {no_matches}
+                    } else {
+                        ul { class: "list",
+                            for (i , artist) in artists.into_iter().enumerate() {
+                                ArtistRow { key: "{artist.name}", artist, onopen: move |_| onartist.call(i) }
                             }
                         }
                     }
                 },
+                LibraryView::Playlists => rsx! {
+                    ListHead { count: plural(playlists.len(), "playlist", "playlists"), sort, onsort }
+                    if playlists.is_empty() && searching {
+                        {no_matches}
+                    } else {
+                        ul { class: "list",
+                            if !searching {
+                                li { class: "row tappable", onclick: move |_| onnewplaylist.call(()),
+                                    div { class: "cover new", Svg { icon: Icon::Plus } }
+                                    div { class: "meta", div { class: "title", "New playlist" } }
+                                }
+                            }
+                            for (i , playlist) in playlists.into_iter().enumerate() {
+                                PlaylistRow {
+                                    key: "{i}/{playlist.name}",
+                                    playlist,
+                                    onopen: move |_| onplaylist.call(i),
+                                    onmore: move |_| onplaylistmore.call(i),
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// A tab's count, its sort button, and shuffle when set.
+#[component]
+fn ListHead(count: String, sort: SortKey, onsort: EventHandler<()>, #[props(default)] onshuffle: Option<EventHandler<()>>) -> Element {
+    rsx! {
+        div { class: "list-head",
+            span { class: "section-note", "{count}" }
+            div { class: "list-tools",
+                button { class: "sort-btn", "aria-label": "Sort: {sort.label()}", onclick: move |_| onsort.call(()),
+                    Svg { icon: Icon::Sort, size: 16 }
+                    "{sort.label()}"
+                }
+                if let Some(onshuffle) = onshuffle {
+                    button { class: "secondary small", onclick: move |_| onshuffle.call(()),
+                        Svg { icon: Icon::Shuffle, size: 18 }
+                        "Shuffle"
+                    }
+                }
             }
         }
     }
@@ -876,14 +998,16 @@ fn MoreButton(onmore: EventHandler<()>) -> Element {
     }
 }
 
-/// Downloaded songs; `numbered` shows album positions instead of covers, and
-/// `onmore` adds each song's menu button.
+/// Downloaded songs; `numbered` shows album positions instead of covers,
+/// `onmore` adds each song's menu button, and `handles` drag handles for
+/// reordering (the queue; see assets/queue-drag.js).
 #[component]
 pub fn SongList(
     songs: Vec<SongItem>,
     onplay: EventHandler<usize>,
     #[props(default)] onmore: Option<EventHandler<usize>>,
     #[props(default)] numbered: bool,
+    #[props(default)] handles: bool,
 ) -> Element {
     rsx! {
         ul { class: if numbered { "list tracks" } else { "list" },
@@ -892,6 +1016,7 @@ pub fn SongList(
                     key: "{song.key}",
                     song,
                     index: numbered.then_some(i + 1),
+                    handle: handles,
                     onplay: move |_| onplay.call(i),
                     onmore: onmore.map(|m| EventHandler::new(move |_| m.call(i))),
                 }
@@ -901,7 +1026,13 @@ pub fn SongList(
 }
 
 #[component]
-fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>, onmore: Option<EventHandler<()>>) -> Element {
+fn SongItemRow(
+    song: SongItem,
+    index: Option<usize>,
+    handle: bool,
+    onplay: EventHandler<()>,
+    onmore: Option<EventHandler<()>>,
+) -> Element {
     let duration = song.duration_secs.map(duration_text);
     let sub = match index {
         Some(_) => dotted([Some(song.artists.clone()), duration]),
@@ -948,6 +1079,15 @@ fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>, o
             }
             if let Some(onmore) = onmore {
                 MoreButton { onmore }
+            }
+            if handle {
+                // Dragging is JS (pointer events); a tap does nothing.
+                button {
+                    class: "icon-btn drag-handle",
+                    "aria-label": "Drag to reorder",
+                    onclick: move |e| e.stop_propagation(),
+                    Svg { icon: Icon::Grip, size: 20 }
+                }
             }
         }
     }
@@ -1211,6 +1351,21 @@ pub fn NowPlayingPage(
     onmore: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
+    /// The sleep timer's time left ("23 min", "End of song") while it is set.
+    #[props(default)]
+    sleep: Option<String>,
+    /// The sleep timer button.
+    onsleep: EventHandler<()>,
+    /// The song's saved A-B sections.
+    #[props(default)]
+    sections: Vec<SectionChip>,
+    /// A loop is set that isn't saved yet.
+    #[props(default)]
+    can_save: bool,
+    /// A section tapped: loops it, or stops it looping.
+    onsection: EventHandler<usize>,
+    onsavesection: EventHandler<()>,
+    oneditsections: EventHandler<()>,
 ) -> Element {
     let max = duration.max(1.0);
     let pct = (position / max * 100.0).clamp(0.0, 100.0);
@@ -1238,8 +1393,16 @@ pub fn NowPlayingPage(
                 button { class: "icon-btn", "aria-label": "Close", onclick: move |_| onclose.call(()),
                     Svg { icon: Icon::ChevronDown, size: 28 }
                 }
-                span { "Now playing" }
-                div { class: "icon-btn" }
+                span { class: "now-title", "Now playing" }
+                button {
+                    class: if sleep.is_some() { "sleep-btn on" } else { "sleep-btn" },
+                    "aria-label": "Sleep timer",
+                    onclick: move |_| onsleep.call(()),
+                    Svg { icon: Icon::Moon, size: 22 }
+                    if let Some(left) = sleep.clone() {
+                        span { "{left}" }
+                    }
+                }
             }
             Cover { url: now.art_large.clone(), class: "cover now-cover" }
             div { class: "now-meta",
@@ -1283,6 +1446,30 @@ pub fn NowPlayingPage(
                         span { class: "ab-note", "{note}" }
                     }
                     span { {duration_text(duration)} }
+                }
+            }
+            if !sections.is_empty() || can_save {
+                div { class: "chips sections",
+                    for (i , section) in sections.iter().cloned().enumerate() {
+                        button {
+                            key: "{i}",
+                            class: if section.active { "chip section selected" } else { "chip section" },
+                            onclick: move |_| onsection.call(i),
+                            "{section.name}"
+                            span { class: "times", "{section.times}" }
+                        }
+                    }
+                    if can_save {
+                        button { class: "chip section save", onclick: move |_| onsavesection.call(()),
+                            Svg { icon: Icon::Plus, size: 16 }
+                            "Save loop"
+                        }
+                    }
+                    if !sections.is_empty() {
+                        button { class: "chip section edit", "aria-label": "Edit sections", onclick: move |_| oneditsections.call(()),
+                            Svg { icon: Icon::Pencil, size: 16 }
+                        }
+                    }
                 }
             }
             div { class: "controls",
@@ -1335,7 +1522,7 @@ pub fn NowPlayingPage(
                 }
             }
             div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
-                SongList { songs: queue, onplay: onskip, onmore }
+                SongList { songs: queue, onplay: onskip, onmore, handles: true }
             }
         }
     }
@@ -1364,14 +1551,20 @@ pub fn MenuSheet(head: Option<MenuHead>, items: Vec<MenuItem>, onpick: EventHand
                     button {
                         key: "{i}",
                         class: if item.danger { "menu-item danger" } else { "menu-item" },
-                        role: "menuitem",
+                        role: if item.icon.is_some() { "menuitem" } else { "menuitemradio" },
+                        "aria-checked": if item.icon.is_none() { Some(item.checked.to_string()) } else { None },
                         onclick: move |_| onpick.call(i),
-                        Svg { icon: item.icon }
+                        if let Some(icon) = item.icon {
+                            Svg { icon }
+                        }
                         div { class: "meta",
                             div { class: "title", "{item.label}" }
                             if let Some(sub) = item.sub {
                                 div { class: "sub", "{sub}" }
                             }
+                        }
+                        if item.checked {
+                            span { class: "menu-check", Svg { icon: Icon::Check, size: 20 } }
                         }
                     }
                 }
@@ -1568,7 +1761,15 @@ pub fn SettingsPage(
     storage: bool,
     update: Option<String>,
     checking: bool,
+    /// The update downloaded for the next start.
+    #[props(default)]
+    next_version: Option<String>,
+    /// Daily update checks.
+    auto_update: bool,
+    /// Under the automatic updates switch.
+    auto_note: String,
     onupdate: EventHandler<Channel>,
+    ontoggleauto: EventHandler<()>,
     onallow: EventHandler<()>,
 ) -> Element {
     rsx! {
@@ -1602,7 +1803,9 @@ pub fn SettingsPage(
                     Svg { icon: Icon::Download }
                     div { class: "meta",
                         div { class: "title", "Version" }
-                        div { class: "sub", "{about.yt_dlp}" }
+                        div { class: "sub",
+                            {dotted([Some(about.yt_dlp.clone()), next_version.map(|v| format!("{v} on next start"))])}
+                        }
                     }
                 }
                 div { class: "actions",
@@ -1612,8 +1815,23 @@ pub fn SettingsPage(
                 if let Some(msg) = update {
                     div { class: "note", "{msg}" }
                 }
+                div { class: "item divided",
+                    Svg { icon: Icon::Sync }
+                    div { class: "meta",
+                        div { class: "title", "Update automatically" }
+                        div { class: "sub", "{auto_note}" }
+                    }
+                    button {
+                        class: if auto_update { "switch on" } else { "switch" },
+                        role: "switch",
+                        "aria-checked": "{auto_update}",
+                        "aria-label": "Update automatically",
+                        onclick: move |_| ontoggleauto.call(()),
+                        span { class: "knob" }
+                    }
+                }
             }
-            p { class: "hint", "YouTube changes often. If downloads start failing, update yt-dlp, then restart the app." }
+            p { class: "hint", "YouTube changes often. If downloads start failing, update yt-dlp, then restart the app (swipe it away in recent apps)." }
         }
         section { class: "group",
             h2 { "About" }
@@ -1633,6 +1851,176 @@ fn AboutItem(label: String, value: String) -> Element {
             div { class: "meta",
                 div { class: "title", "{label}" }
                 div { class: "sub", "{value}" }
+            }
+        }
+    }
+}
+
+// ---- stats ----
+
+/// A bar of the listening chart.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Bar {
+    /// 0..=1 of the tallest bar.
+    pub height: f64,
+    /// Under the bar; empty for most bars of a long chart.
+    pub label: String,
+    /// Today, this month or this year.
+    pub now: bool,
+}
+
+/// A ranked song, artist or album.
+#[derive(Clone, PartialEq, Debug)]
+pub struct RankItem {
+    pub title: String,
+    pub sub: String,
+    pub art: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct StatsView {
+    /// "12 hr 5 min"
+    pub time: String,
+    pub plays: u32,
+    pub songs: u32,
+    pub artists: u32,
+    /// "Per day"
+    pub chart_title: String,
+    /// "Up to 2 hr 5 min"
+    pub chart_note: Option<String>,
+    pub bars: Vec<Bar>,
+    pub top_songs: Vec<RankItem>,
+    pub top_artists: Vec<RankItem>,
+    /// Large art.
+    pub top_albums: Vec<RankItem>,
+}
+
+/// Listening stats over a period; `stats` is `None` while they load.
+#[component]
+pub fn StatsPage(
+    period: Period,
+    stats: Option<StatsView>,
+    onback: EventHandler<()>,
+    onperiod: EventHandler<Period>,
+    /// Plays the top songs from this one.
+    onsong: EventHandler<usize>,
+    onartist: EventHandler<usize>,
+    onalbum: EventHandler<usize>,
+) -> Element {
+    let periods = [("7 days", Period::Week), ("30 days", Period::Month), ("12 months", Period::Year), ("All time", Period::All)];
+    rsx! {
+        div { class: "stats",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Your listening" }
+                }
+                div { class: "chips",
+                    for (label , value) in periods {
+                        button {
+                            key: "{label}",
+                            class: if period == value { "chip selected" } else { "chip" },
+                            onclick: move |_| onperiod.call(value),
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            match stats {
+                None => rsx! {
+                    div { class: "empty", div { class: "spinner" } }
+                },
+                Some(stats) if stats.plays == 0 => rsx! {
+                    EmptyState {
+                        icon: Icon::Chart,
+                        title: "Nothing played yet",
+                        text: if period == Period::All { "Play some music and your listening shows up here." } else { "Nothing was played in this time. Try a longer one above." },
+                    }
+                },
+                Some(stats) => rsx! {
+                    div { class: "tiles",
+                        Tile { value: stats.time.clone(), label: "Listening time", wide: true }
+                        Tile { value: stats.plays.to_string(), label: "Plays" }
+                        Tile { value: stats.songs.to_string(), label: "Songs" }
+                        Tile { value: stats.artists.to_string(), label: "Artists" }
+                    }
+                    div { class: "chart-card",
+                        div { class: "chart-head",
+                            span { "{stats.chart_title}" }
+                            if let Some(note) = stats.chart_note.clone() {
+                                span { class: "section-note", "{note}" }
+                            }
+                        }
+                        div { class: "chart",
+                            for (i , bar) in stats.bars.iter().cloned().enumerate() {
+                                div { key: "{i}", class: if bar.now { "bar-col now" } else { "bar-col" },
+                                    div { class: "bar-slot",
+                                        div { class: "bar", style: "height: {bar.height * 100.0:.1}%" }
+                                    }
+                                    span { class: "bar-label", "{bar.label}" }
+                                }
+                            }
+                        }
+                    }
+                    if !stats.top_songs.is_empty() {
+                        h2 { class: "section", "Top songs" }
+                        ol { class: "list",
+                            for (i , item) in stats.top_songs.iter().cloned().enumerate() {
+                                RankRow { key: "{i}", rank: i + 1, item, onopen: move |_| onsong.call(i) }
+                            }
+                        }
+                    }
+                    if !stats.top_artists.is_empty() {
+                        h2 { class: "section", "Top artists" }
+                        ol { class: "list",
+                            for (i , item) in stats.top_artists.iter().cloned().enumerate() {
+                                RankRow { key: "{i}", rank: i + 1, item, round: true, onopen: move |_| onartist.call(i) }
+                            }
+                        }
+                    }
+                    if !stats.top_albums.is_empty() {
+                        h2 { class: "section", "Top albums" }
+                        ul { class: "grid shelf",
+                            for (i , album) in stats.top_albums.iter().cloned().enumerate() {
+                                li { key: "{i}", class: "tile", onclick: move |_| onalbum.call(i),
+                                    Cover { url: album.art.clone(), class: "cover square", icon: Icon::Disc }
+                                    div { class: "title", "{album.title}" }
+                                    div { class: "sub", "{album.sub}" }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn Tile(value: String, label: String, #[props(default)] wide: bool) -> Element {
+    rsx! {
+        div { class: if wide { "stat wide" } else { "stat" },
+            div { class: "stat-value", "{value}" }
+            div { class: "stat-label", "{label}" }
+        }
+    }
+}
+
+#[component]
+fn RankRow(rank: usize, item: RankItem, #[props(default)] round: bool, onopen: EventHandler<()>) -> Element {
+    rsx! {
+        li { class: "row tappable song", onclick: move |_| onopen.call(()),
+            span { class: "rank", "{rank}" }
+            Cover {
+                url: item.art.clone(),
+                class: if round { "cover round" } else { "cover" },
+                icon: if round { Icon::Person } else { Icon::Music },
+            }
+            div { class: "meta",
+                div { class: "title", "{item.title}" }
+                div { class: "sub", "{item.sub}" }
             }
         }
     }

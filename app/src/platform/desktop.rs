@@ -82,8 +82,17 @@ pub mod player {
     pub fn set_repeat(_mode: i32) {}
     pub fn insert(_items: &str, _next: bool) {}
     pub fn remove(_key: &str) {}
+    pub fn move_entry(_from: usize, _to: usize) {}
+    pub fn set_sleep(_at_ms: i64, _end_of_song: bool) {}
     pub fn set_song_loop(_song: Option<(&str, i64, i64)>) {}
     pub fn set_queue_loop(_range: Option<(&str, &str)>) {}
+}
+
+/// Nothing shares to a desktop build.
+pub mod share {
+    use tokio::sync::mpsc::UnboundedSender;
+
+    pub fn listen(_texts: UnboundedSender<String>) {}
 }
 
 /// Desktop processes aren't frozen in the background.

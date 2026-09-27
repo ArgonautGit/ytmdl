@@ -4,21 +4,27 @@
 mod icons;
 #[cfg(test)]
 mod preview;
+mod sort;
+mod stats;
 mod sync;
+mod update;
 mod views;
 
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use ytmdl_core::{Channel, CollectionKind, Entry, Resolved, SearchSource};
-use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, Playlist, PlaylistEntry, Track};
+use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, PlayCounts, Playlist, PlaylistEntry, Section, Track};
 
 use crate::jobs::{Job, JobState, Queue, Services, entry_from_track};
 use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
-use crate::player::{Player, Repeat};
+use crate::player::{Player, Repeat, Sleep};
 use icons::Icon;
+use sort::Sorts;
+use stats::StatsScreen;
 use sync::SyncState;
+use update::Updates;
 use views::*;
 
 const CSS: &str = include_str!("../../assets/style.css");
@@ -45,6 +51,12 @@ struct Ctx {
     toast: Signal<Option<(u64, String)>>,
     /// Synced playlists syncing now, or whose last sync failed.
     syncs: Signal<HashMap<i64, SyncState>>,
+    tab: Signal<Tab>,
+    /// A link shared to the app, for the Search tab to open.
+    shared: Signal<Option<String>>,
+    /// The sort of each library tab.
+    sorts: Signal<Sorts>,
+    updates: Signal<Updates>,
 }
 
 impl Ctx {
@@ -80,6 +92,18 @@ impl Ctx {
             Some(_) => return false,
         }
         true
+    }
+
+    /// A song shared to the app downloads straight away.
+    fn download_shared(&self, entry: Entry) {
+        let title = entry.title.clone();
+        if self.owned.peek().contains(&entry.id) {
+            self.notify(format!("“{title}” is already in your library"));
+        } else if self.download_entry(entry, true) {
+            self.notify(format!("Downloading “{title}”"));
+        } else {
+            self.notify(format!("“{title}” is already downloading"));
+        }
     }
 
     /// Deletes songs from the device, the library and the queue.
@@ -149,6 +173,7 @@ enum Overlay {
     Playlist(i64),
     /// The full-screen player, over the tabs.
     NowPlaying,
+    Stats,
     /// A menu or dialog over the page below.
     Sheet(Sheet),
 }
@@ -166,6 +191,14 @@ enum Sheet {
     /// `leave`: the page the songs were on goes too (a whole album).
     DeleteSongs { ids: Vec<i64>, what: String, leave: bool },
     DeletePlaylist { id: i64, name: String, open: bool },
+    /// How a library tab is sorted.
+    Sort(LibraryView),
+    Sleep,
+    /// A song's saved A-B sections.
+    Sections { video_id: String, title: String },
+    Section(Section),
+    /// Names a new section (`id` None) of the song, or renames one.
+    SectionName { id: Option<i64>, name: String, video_id: String, a: i64, b: i64 },
 }
 
 /// Where a song's menu was opened, which decides its items.
@@ -340,7 +373,7 @@ pub fn App() -> Element {
 
 #[component]
 fn Shell(setup: Setup) -> Element {
-    let library = use_hook(|| LibraryHandle::new(setup.library.clone()));
+    let library = use_hook(|| LibraryHandle::new(setup.library.clone(), setup.dirs.data.join("listens.log")));
     let boot = use_signal(|| Boot::Starting);
     let queue = use_hook(|| Queue::new(library));
     let owned = use_memo(move || {
@@ -352,8 +385,25 @@ fn Shell(setup: Setup) -> Element {
     let storage = use_signal(platform::has_storage_access);
     let toast = use_signal(|| None);
     let syncs = use_signal(HashMap::new);
-    let ctx = use_context_provider(|| Ctx { boot, queue, library, owned, player, nav, storage, toast, syncs });
     let mut tab = use_signal(|| Tab::Library);
+    let shared = use_signal(|| None);
+    let sorts = use_signal(|| Sorts::load(&setup.library));
+    let updates = use_signal(|| Updates::load(&setup.library));
+    let ctx = use_context_provider(|| Ctx {
+        boot,
+        queue,
+        library,
+        owned,
+        player,
+        nav,
+        storage,
+        toast,
+        syncs,
+        tab,
+        shared,
+        sorts,
+        updates,
+    });
 
     let dirs = setup.dirs.clone();
     use_hook(move || spawn(crate::start(boot, dirs, queue)));
@@ -372,7 +422,8 @@ fn Shell(setup: Setup) -> Element {
         player.refresh();
     });
     downloads_notification(queue);
-    sync::use_auto_sync(ctx);
+    use_background_work(ctx);
+    use_shared_links(ctx);
 
     // Playback errors (a file deleted elsewhere, say) show once each.
     let mut shown_error = use_signal(|| None::<String>);
@@ -412,6 +463,65 @@ fn Shell(setup: Setup) -> Element {
             }
         }
     }
+}
+
+/// What runs once the downloader is up, whenever the app comes back to the
+/// screen, and every ten minutes while it is on screen: syncing playlists
+/// whose last sync is old, the daily yt-dlp update check, and reading the
+/// player's listening log (also whenever the song changes).
+fn use_background_work(ctx: Ctx) {
+    use_effect(move || {
+        if matches!(*ctx.boot.read(), Boot::Ready(_)) {
+            ctx.sync_stale();
+            ctx.auto_update_ytdlp();
+        }
+    });
+    use_hook(move || {
+        spawn(async move {
+            let mut wake = document::eval(
+                "document.addEventListener('visibilitychange', () => { \
+                     if (document.visibilityState === 'visible') dioxus.send(true); \
+                 }); \
+                 while (true) { \
+                     await new Promise(r => setTimeout(r, 600000)); \
+                     if (document.visibilityState === 'visible') dioxus.send(true); \
+                 }",
+            );
+            while wake.recv::<bool>().await.is_ok() {
+                spawn(ctx.library.import_listens());
+                if ctx.services().is_some() {
+                    ctx.sync_stale();
+                    ctx.auto_update_ytdlp();
+                }
+            }
+        })
+    });
+    let song = use_memo(move || ctx.player.current_key());
+    use_effect(move || {
+        let _ = song();
+        spawn(ctx.library.import_listens());
+    });
+}
+
+/// Links shared to the app open in the Search tab.
+fn use_shared_links(ctx: Ctx) {
+    use_hook(move || {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        platform::share::listen(tx);
+        spawn(async move {
+            while let Some(text) = rx.recv().await {
+                match ytmdl_core::shared_link(&text) {
+                    Some(url) => {
+                        let (mut tab, mut shared) = (ctx.tab, ctx.shared);
+                        ctx.nav.clear();
+                        tab.set(Tab::Search);
+                        shared.set(Some(url));
+                    }
+                    None => ctx.notify("What was shared has no link to open".into()),
+                }
+            }
+        })
+    });
 }
 
 /// Keeps the downloads foreground service (and its notification) up while
@@ -497,6 +607,7 @@ fn Overlays() -> Element {
                             Overlay::Artist(name) => rsx! { ArtistScreen { name } },
                             Overlay::Playlist(id) => rsx! { PlaylistScreen { id } },
                             Overlay::NowPlaying => rsx! { NowPlayingScreen {} },
+                            Overlay::Stats => rsx! { StatsScreen {} },
                             Overlay::Sheet(_) => rsx! {},
                         }
                     }
@@ -539,13 +650,31 @@ fn MiniPlayerBar() -> Element {
 /// has A and waits for B.
 type Picking = Option<Option<String>>;
 
+/// Drag to reorder the queue; reports moves through `window.ytmdlQueueMoved`.
+const QUEUE_DRAG_JS: &str = include_str!("../../assets/queue-drag.js");
+
 #[component]
 fn NowPlayingScreen() -> Element {
     let ctx = use_context::<Ctx>();
     let player = ctx.player;
+    let lib = ctx.library;
     // The slider's value while dragged, so ticks don't pull it back.
     let mut dragging = use_signal(|| None::<f64>);
     let mut picking = use_signal(|| None as Picking);
+    let video = use_memo(move || player.current().map(|t| t.video_id));
+    let sections: Memo<Vec<Section>> = use_memo(move || {
+        lib.subscribe();
+        video().map(|v| lib.get().sections(&v).unwrap_or_default()).unwrap_or_default()
+    });
+    use_hook(move || {
+        spawn(async move {
+            let script = [QUEUE_DRAG_JS, "window.ytmdlQueueMoved = (from, to) => dioxus.send([from, to]); await new Promise(() => {});"];
+            let mut moves = document::eval(&script.join("\n"));
+            while let Ok((from, to)) = moves.recv::<(usize, usize)>().await {
+                player.move_entry(from, to);
+            }
+        })
+    });
     let Some(track) = player.current() else {
         return rsx! {
             EmptyState { icon: Icon::Music, title: "Nothing is playing", text: "Pick a song in your library." }
@@ -587,6 +716,24 @@ fn NowPlayingScreen() -> Element {
     let secs = |ms: i64| ms as f64 / 1000.0;
     let entries = queue.clone();
     let menu_entries = queue.clone();
+
+    // The loop, if it is one of the song's saved sections.
+    let song_loop = player.song_loop();
+    let looping = song_loop.and_then(|(a, b)| Some((a, b?)));
+    let near = |x: i64, y: i64| (x - y).abs() < 50;
+    let active = looping.and_then(|(a, b)| sections.read().iter().position(|s| near(s.a_ms, a) && near(s.b_ms, b)));
+    let chips = sections
+        .read()
+        .iter()
+        .enumerate()
+        .map(|(i, s)| SectionChip { name: s.name.clone(), times: section_times(s.a_ms, s.b_ms), active: active == Some(i) })
+        .collect();
+    let sleep = player.sleep().map(|s| match s {
+        Sleep::EndOfSong => "End of song".to_string(),
+        Sleep::At(at) => time_left(at - unix_ms()),
+    });
+    let (video_id, title) = (track.video_id.clone(), track.title.clone());
+    let section_count = sections.read().len();
     rsx! {
         NowPlayingPage {
             now: now_item(&track),
@@ -599,7 +746,7 @@ fn NowPlayingScreen() -> Element {
                 Repeat::All => RepeatMode::All,
                 Repeat::One => RepeatMode::One,
             },
-            song_loop: player.song_loop().map(|(a, b)| (secs(a), b.map(secs))),
+            song_loop: song_loop.map(|(a, b)| (secs(a), b.map(secs))),
             queue: songs,
             queue_loop: queue_view,
             onclose: move |_| ctx.nav.back(),
@@ -639,8 +786,52 @@ fn NowPlayingScreen() -> Element {
                     picking.set(Some(None));
                 }
             },
+            sleep,
+            onsleep: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Sleep)),
+            sections: chips,
+            can_save: looping.is_some() && active.is_none(),
+            onsection: move |i: usize| {
+                let Some(s) = sections.peek().get(i).cloned() else { return };
+                if active == Some(i) {
+                    player.stop_song_loop();
+                } else {
+                    player.loop_section(s.a_ms, s.b_ms);
+                }
+            },
+            onsavesection: {
+                let video_id = video_id.clone();
+                move |_| {
+                    let Some((a, b)) = looping else { return };
+                    let name = format!("Section {}", section_count + 1);
+                    let sheet = Sheet::SectionName { id: None, name, video_id: video_id.clone(), a, b };
+                    ctx.nav.push(Overlay::Sheet(sheet));
+                }
+            },
+            oneditsections: move |_| {
+                ctx.nav.push(Overlay::Sheet(Sheet::Sections { video_id: video_id.clone(), title: title.clone() }))
+            },
         }
     }
+}
+
+/// "0:32–1:05"
+fn section_times(a_ms: i64, b_ms: i64) -> String {
+    format!("{}–{}", duration_text(a_ms as f64 / 1000.0), duration_text(b_ms as f64 / 1000.0))
+}
+
+/// The sleep timer's time left: "1 hr 5 min", "23 min", "1 min".
+fn time_left(ms: i64) -> String {
+    let minutes = (ms.max(0) + 59_999) / 60_000;
+    match minutes {
+        0..60 => format!("{} min", minutes.max(1)),
+        _ if minutes % 60 == 0 => format!("{} hr", minutes / 60),
+        _ => format!("{} hr {} min", minutes / 60, minutes % 60),
+    }
+}
+
+/// Now, in Unix ms (the sleep timer's clock).
+fn unix_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 // ---- library ----
@@ -649,25 +840,46 @@ fn NowPlayingScreen() -> Element {
 fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
     let ctx = use_context::<Ctx>();
     let lib = ctx.library;
+    let sorts = ctx.sorts;
     let mut view = use_signal(|| LibraryView::Songs);
+    // The search field's text while it is open.
+    let mut query = use_signal(|| None::<String>);
     let tracks = use_memo(move || {
         lib.subscribe();
         lib.get().tracks().unwrap_or_default()
     });
-    let albums: Memo<Vec<Album>> = use_memo(move || {
+    let all_albums: Memo<Vec<Album>> = use_memo(move || {
         lib.subscribe();
         lib.get().albums().unwrap_or_default()
     });
-    let artists: Memo<Vec<Artist>> = use_memo(move || {
+    let all_artists: Memo<Vec<Artist>> = use_memo(move || {
         lib.subscribe();
         lib.get().artists().unwrap_or_default()
     });
-    let playlists: Memo<Vec<Playlist>> = use_memo(move || {
+    let all_playlists: Memo<Vec<Playlist>> = use_memo(move || {
         lib.subscribe();
         lib.get().playlists().unwrap_or_default()
     });
+    // Only needed (and only read) while a tab sorts by plays.
+    let plays: Memo<PlayCounts> = use_memo(move || {
+        if !sorts.read().by_plays() {
+            return PlayCounts::default();
+        }
+        lib.subscribe();
+        lib.subscribe_listens();
+        lib.get().play_counts().unwrap_or_default()
+    });
+    let q = move || query.read().clone().unwrap_or_default();
+    let songs_shown =
+        use_memo(move || sort::songs(&tracks.read(), sorts.read().get(LibraryView::Songs), &plays.read(), &q()));
+    let albums =
+        use_memo(move || sort::albums(&all_albums.read(), sorts.read().get(LibraryView::Albums), &plays.read(), &q()));
+    let artists =
+        use_memo(move || sort::artists(&all_artists.read(), sorts.read().get(LibraryView::Artists), &plays.read(), &q()));
+    let playlists =
+        use_memo(move || sort::playlists(&all_playlists.read(), sorts.read().get(LibraryView::Playlists), &q()));
     let current = ctx.player.current_id();
-    let songs = tracks.read().iter().map(|t| song_item(t, current == Some(t.id))).collect();
+    let songs = songs_shown.read().iter().map(|t| song_item(t, current == Some(t.id))).collect();
     rsx! {
         LibraryPage {
             view: view(),
@@ -675,15 +887,18 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
             albums: albums.read().iter().map(album_item).collect(),
             artists: artists.read().iter().map(artist_item).collect(),
             playlists: playlists.read().iter().map(playlist_item).collect(),
+            empty: tracks.read().is_empty(),
+            query: query(),
+            sort: sorts.read().get(view()),
             onview: move |v| view.set(v),
-            onplay: move |i| ctx.player.play(tracks(), i),
+            onplay: move |i| ctx.player.play(songs_shown(), i),
             onmore: move |i| {
-                let track: Option<Track> = tracks.peek().get(i).cloned();
+                let track: Option<Track> = songs_shown.peek().get(i).cloned();
                 if let Some(track) = track {
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(track), from: From::Library }));
                 }
             },
-            onshuffle: move |_| ctx.player.shuffle(tracks()),
+            onshuffle: move |_| ctx.player.shuffle(songs_shown()),
             onalbum: move |i| {
                 let album: Option<Album> = albums.peek().get(i).cloned();
                 if let Some(a) = album {
@@ -712,6 +927,11 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
                 ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), tracks: Vec::new() }))
             },
             onsearch,
+            onfind: move |_| query.set(Some(String::new())),
+            onfindclose: move |_| query.set(None),
+            onquery: move |q| query.set(Some(q)),
+            onsort: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Sort(view()))),
+            onstats: move |_| ctx.nav.push(Overlay::Stats),
         }
     }
 }
@@ -877,6 +1097,198 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::Name { id, name, tracks } => rsx! { NameDialog { id, name, tracks } },
         Sheet::DeleteSongs { ids, what, leave } => rsx! { DeleteSongsDialog { ids, what, leave } },
         Sheet::DeletePlaylist { id, name, open } => rsx! { DeletePlaylistDialog { id, name, open } },
+        Sheet::Sort(view) => rsx! { SortMenu { view } },
+        Sheet::Sleep => rsx! { SleepMenu {} },
+        Sheet::Sections { video_id, title } => rsx! { SectionsMenu { video_id, title } },
+        Sheet::Section(section) => rsx! { SectionMenu { section } },
+        Sheet::SectionName { id, name, video_id, a, b } => rsx! { SectionNameDialog { id, name, video_id, a, b } },
+    }
+}
+
+#[component]
+fn SortMenu(view: LibraryView) -> Element {
+    let ctx = use_context::<Ctx>();
+    let current = ctx.sorts.read().get(view);
+    let keys = view.sorts();
+    let tab = match view {
+        LibraryView::Songs => "songs",
+        LibraryView::Albums => "albums",
+        LibraryView::Artists => "artists",
+        LibraryView::Playlists => "playlists",
+    };
+    rsx! {
+        MenuSheet {
+            head: MenuHead { title: "Sort by".into(), sub: format!("Your {tab}"), art: None, icon: Icon::Sort },
+            items: keys.iter().map(|k| MenuItem::choice(k.label(), *k == current)).collect(),
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| {
+                ctx.nav.back();
+                let Some(&key) = keys.get(i) else { return };
+                let mut sorts = ctx.sorts;
+                sorts.write().set(view, key);
+                sorts.peek().save(&ctx.library.get());
+            },
+        }
+    }
+}
+
+/// Sleep timer lengths, in minutes.
+const SLEEP_MINUTES: [i64; 5] = [5, 15, 30, 45, 60];
+
+#[derive(Clone, Copy)]
+enum SleepChoice {
+    Off,
+    Minutes(i64),
+    EndOfSong,
+}
+
+#[component]
+fn SleepMenu() -> Element {
+    let ctx = use_context::<Ctx>();
+    let current = ctx.player.sleep();
+    let sub = match current {
+        None => "Pause the music later".to_string(),
+        Some(Sleep::EndOfSong) => "Pausing at the end of this song".to_string(),
+        Some(Sleep::At(at)) => format!("Pausing in {}", time_left(at - unix_ms())),
+    };
+    let mut choices: Vec<(MenuItem, SleepChoice)> = Vec::new();
+    if current.is_some() {
+        choices.push((MenuItem::new(Icon::Close, "Turn off"), SleepChoice::Off));
+    }
+    for m in SLEEP_MINUTES {
+        let label = if m == 60 { "1 hour".to_string() } else { format!("{m} minutes") };
+        choices.push((MenuItem::new(Icon::Moon, label), SleepChoice::Minutes(m)));
+    }
+    let end = MenuItem { checked: current == Some(Sleep::EndOfSong), ..MenuItem::new(Icon::Music, "End of song") };
+    choices.push((end, SleepChoice::EndOfSong));
+    let (items, picks): (Vec<MenuItem>, Vec<SleepChoice>) = choices.into_iter().unzip();
+    rsx! {
+        MenuSheet {
+            head: MenuHead { title: "Sleep timer".into(), sub, art: None, icon: Icon::Moon },
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| {
+                ctx.nav.back();
+                let (sleep, message) = match picks.get(i) {
+                    Some(SleepChoice::Off) => (None, "Sleep timer off".to_string()),
+                    Some(&SleepChoice::Minutes(m)) => {
+                        (Some(Sleep::At(unix_ms() + m * 60_000)), format!("Music pauses in {}", time_left(m * 60_000)))
+                    }
+                    Some(SleepChoice::EndOfSong) => (Some(Sleep::EndOfSong), "Music pauses at the end of this song".into()),
+                    None => return,
+                };
+                ctx.player.set_sleep(sleep);
+                ctx.notify(message);
+            },
+        }
+    }
+}
+
+/// A song's saved sections; picking one offers to rename or delete it.
+#[component]
+fn SectionsMenu(video_id: String, title: String) -> Element {
+    let ctx = use_context::<Ctx>();
+    let lib = ctx.library;
+    let v = video_id.clone();
+    let sections = use_memo(move || {
+        lib.subscribe();
+        lib.get().sections(&v).unwrap_or_default()
+    });
+    let items = sections
+        .read()
+        .iter()
+        .map(|s| MenuItem { sub: Some(section_times(s.a_ms, s.b_ms)), ..MenuItem::new(Icon::Bookmark, s.name.clone()) })
+        .collect();
+    rsx! {
+        MenuSheet {
+            head: MenuHead { title: "Saved sections".into(), sub: title, art: None, icon: Icon::Bookmark },
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| {
+                if let Some(s) = sections.peek().get(i).cloned() {
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Section(s)));
+                }
+            },
+        }
+    }
+}
+
+#[component]
+fn SectionMenu(section: Section) -> Element {
+    let ctx = use_context::<Ctx>();
+    let items = vec![
+        MenuItem::new(Icon::Repeat, "Loop it"),
+        MenuItem::new(Icon::Pencil, "Rename"),
+        MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete") },
+    ];
+    let head = MenuHead {
+        title: section.name.clone(),
+        sub: section_times(section.a_ms, section.b_ms),
+        art: None,
+        icon: Icon::Bookmark,
+    };
+    rsx! {
+        MenuSheet {
+            head,
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| {
+                let s = section.clone();
+                match i {
+                    0 => {
+                        ctx.nav.back();
+                        if ctx.player.current().is_some_and(|t| t.video_id == s.video_id) {
+                            ctx.player.loop_section(s.a_ms, s.b_ms);
+                        }
+                    }
+                    1 => {
+                        let sheet = Sheet::SectionName { id: Some(s.id), name: s.name, video_id: s.video_id, a: s.a_ms, b: s.b_ms };
+                        ctx.nav.replace(Overlay::Sheet(sheet));
+                    }
+                    _ => {
+                        ctx.nav.back();
+                        match ctx.library.get().delete_section(s.id) {
+                            Ok(()) => {
+                                ctx.library.changed();
+                                ctx.notify(format!("Deleted “{}”", s.name));
+                            }
+                            Err(e) => ctx.notify(format!("Couldn't delete it: {e}")),
+                        }
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// Names a new section of a song (the loop from `a` to `b` ms), or renames one.
+#[component]
+fn SectionNameDialog(id: Option<i64>, name: String, video_id: String, a: i64, b: i64) -> Element {
+    let ctx = use_context::<Ctx>();
+    let mut value = use_signal(|| name.clone());
+    rsx! {
+        Dialog {
+            title: if id.is_some() { "Rename section" } else { "Save section" },
+            text: section_times(a, b),
+            value: value(),
+            placeholder: "Name",
+            confirm: if id.is_some() { "Rename" } else { "Save" },
+            oninput: move |v| value.set(v),
+            oncancel: move |_| ctx.nav.back(),
+            onconfirm: move |_| {
+                let name = value.peek().trim().to_string();
+                let library = ctx.library.get();
+                ctx.nav.back();
+                let result = match id {
+                    Some(id) => library.rename_section(id, &name),
+                    None => library.add_section(&video_id, &name, a, b).map(|_| ()),
+                };
+                match result {
+                    Ok(()) => ctx.library.changed(),
+                    Err(e) => ctx.notify(format!("Couldn't save the section: {e}")),
+                }
+            },
+        }
     }
 }
 
@@ -1245,7 +1657,8 @@ fn SearchScreen() -> Element {
     // Bumped per search so a slow earlier search can't overwrite a newer one.
     let mut generation = use_signal(|| 0u64);
 
-    let search = use_callback(move |()| {
+    // `shared`: a link shared to the app, whose song (if it is one) downloads.
+    let search = use_callback(move |shared: bool| {
         let q = query.peek().trim().to_string();
         let Some(svc) = ctx.services() else { return };
         if q.is_empty() {
@@ -1266,7 +1679,13 @@ fn SearchScreen() -> Element {
                     return;
                 }
                 match result {
-                    Ok(Resolved::Track(t)) => found.set(Found::Entries(SearchSource::MusicSongs, vec![entry_from_track(t)])),
+                    Ok(Resolved::Track(t)) => {
+                        let entry = entry_from_track(t);
+                        if shared {
+                            ctx.download_shared(entry.clone());
+                        }
+                        found.set(Found::Entries(SearchSource::MusicSongs, vec![entry]));
+                    }
                     Ok(Resolved::Collection { title, kind, entries }) => {
                         found.set(Found::Idle);
                         let first = entries.first();
@@ -1296,6 +1715,18 @@ fn SearchScreen() -> Element {
         });
     });
 
+    // A link shared to the app is looked up once the downloader is up.
+    use_effect(move || {
+        let ready = matches!(*ctx.boot.read(), Boot::Ready(_));
+        if !ready || ctx.shared.read().is_none() {
+            return;
+        }
+        let mut shared = ctx.shared;
+        let Some(url) = shared.write().take() else { return };
+        query.set(url);
+        search.call(true);
+    });
+
     let states = track_states(&ctx.queue.jobs().read(), &ctx.owned.read());
     let results = match (&*ctx.boot.read(), found()) {
         (Boot::Starting, _) => ResultsView::Starting,
@@ -1317,7 +1748,7 @@ fn SearchScreen() -> Element {
             onsubmit: move |_| {
                 // Close the keyboard so the results are visible.
                 document::eval("document.activeElement && document.activeElement.blur()");
-                search.call(());
+                search.call(false);
             },
             onclear: move |_| {
                 query.set(String::new());
@@ -1326,7 +1757,7 @@ fn SearchScreen() -> Element {
             },
             onsource: move |s| {
                 source.set(s);
-                search.call(());
+                search.call(false);
             },
             ondownload: move |e| ctx.download(e),
             onopen: move |e: Entry| {
@@ -1457,8 +1888,7 @@ fn DownloadsScreen() -> Element {
 #[component]
 fn SettingsScreen() -> Element {
     let ctx = use_context::<Ctx>();
-    let mut update = use_signal(|| None::<String>);
-    let mut checking = use_signal(|| false);
+    let updates = ctx.updates.read().clone();
     let Some(svc) = ctx.services() else { return rsx! {} };
     let rt = svc.dl.runtime().clone();
     let v = rt.version().clone();
@@ -1470,26 +1900,20 @@ fn SettingsScreen() -> Element {
     };
     let storage = (ctx.storage)();
     let output = if storage { &svc.output_dir } else { &svc.fallback_output_dir };
+    // Rechecked whenever a check finishes.
+    let next_version = if updates.checking { None } else { rt.next_version() };
     rsx! {
         SettingsPage {
             about,
             output: output.display().to_string().replacen("/storage/emulated/0/", "Internal storage/", 1),
             storage,
-            update: update(),
-            checking: checking(),
-            onupdate: move |channel: Channel| {
-                let rt = rt.clone();
-                checking.set(true);
-                update.set(Some("Checking…".into()));
-                spawn(async move {
-                    update.set(Some(match rt.check_update(channel).await {
-                        Ok(o) if o.updated => format!("Downloaded yt-dlp {}. Restart the app to use it.", o.version),
-                        Ok(o) => format!("yt-dlp {} is the latest.", o.version),
-                        Err(e) => format!("Update failed: {e}"),
-                    }));
-                    checking.set(false);
-                });
-            },
+            update: updates.message.clone(),
+            checking: updates.checking,
+            next_version,
+            auto_update: updates.auto,
+            auto_note: updates.note(),
+            onupdate: move |channel: Channel| ctx.check_ytdlp(channel, true),
+            ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
             onallow: move |_| platform::request_storage_access(),
         }
     }

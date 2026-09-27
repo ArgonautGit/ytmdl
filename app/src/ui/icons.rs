@@ -42,6 +42,15 @@ pub enum Icon {
     CircleMinus,
     Sync,
     Unlink,
+    /// Sleep timer.
+    Moon,
+    /// Listening stats.
+    Chart,
+    /// Drag to reorder.
+    Grip,
+    Sort,
+    /// A saved A-B section.
+    Bookmark,
 }
 
 #[component]
@@ -166,6 +175,21 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         },
         Icon::Unlink => rsx! {
             path { d: "m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71M5.17 11.75l-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71M8 2v3M2 8h3M16 19v3M19 16h3" }
+        },
+        Icon::Moon => rsx! {
+            path { d: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" }
+        },
+        Icon::Chart => rsx! {
+            path { d: "M18 20V10M12 20V4M6 20v-6" }
+        },
+        Icon::Grip => rsx! {
+            path { d: "M5 8h14M5 12h14M5 16h14" }
+        },
+        Icon::Sort => rsx! {
+            path { d: "m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16" }
+        },
+        Icon::Bookmark => rsx! {
+            path { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }
         },
     };
     rsx! {

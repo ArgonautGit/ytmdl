@@ -16,30 +16,37 @@ new APK.
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
-  tracks, playlists, the download queue (so it survives restarts) and the
-  saved play queue, plus cover art resized for the UI. The files stay the
-  record: a scan of the music folders re-indexes them from their tags and
-  forgets deleted ones.
-- `app`: the Dioxus app (library, playlists, search, downloads, settings,
-  player with A-B loops over part of a song or a run of the queue).
-  Playlists downloaded from a link stay synced with YouTube: new songs there
-  are downloaded, removed ones leave the playlist (the files stay), and the
-  order follows. They sync when the app starts or returns to the screen
-  (at most every 30 minutes) and from the playlist's menu.
+  tracks, playlists, the download queue (so it survives restarts), the saved
+  play queue, listening history and saved A-B sections, plus cover art
+  resized for the UI. The files stay the record: a scan of the music folders
+  re-indexes them from their tags and forgets deleted ones.
+- `app`: the Dioxus app (library with search and sorting, playlists, search,
+  downloads, settings, listening stats, player with A-B loops over part of a
+  song or a run of the queue, saved sections, a sleep timer and a reorderable
+  queue). Playlists downloaded from a link stay synced with YouTube: new songs
+  there are downloaded, removed ones leave the playlist (the files stay), and
+  the order follows. They sync when the app starts or returns to the screen
+  (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
+  for updates once a day (a switch in Settings turns that off); a new build
+  loads on the next start.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
-  headset controls), which also runs the A-B loops so they hold with the screen
-  off. Downloads get a data-sync foreground service so Android doesn't freeze
-  them in the background. `res/` has the launcher and notification icons.
-  `tools/patch-gradle-project` adds all of it to the Gradle project dx
-  generates.
+  headset controls), which also runs the A-B loops and the sleep timer so they
+  hold with the screen off, and logs what it plays to `files/listens.log` for
+  the stats, since the app may not be running. Downloads get a data-sync
+  foreground service so Android doesn't freeze them in the background. The
+  activity takes links shared from other apps ("Share", then ytmdl): a song
+  downloads, an album or playlist opens. `res/` has the launcher and
+  notification icons. `tools/patch-gradle-project` adds all of it to the
+  Gradle project dx generates.
 
 Files land in `Music/<Artist>/<Album>/<Title> [<id>].m4a` on shared storage
 (after the all-files access prompt) and are added to MediaStore.
 
 The Rust side can't start twice in one process, and tao starts it again for a
 second activity, so the app's process ends with its activity (music plays on
-in the `:player` process) and back on the root page only hides the app.
+in the `:player` process), back on the root page only hides the app, and the
+activity is single-task so a shared link reaches the running one.
 Downloads live in the app's process, so swiping the app away stops them; they
 pick up again on the next start.
 

@@ -134,6 +134,12 @@ object YtmdlPlayer {
         }
     }
 
+    /** Moves the entry at [from] to [to] (queue positions). */
+    @JvmStatic
+    fun move(from: Int, to: Int) = command { c ->
+        if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount) c.moveMediaItem(from, to)
+    }
+
     /** Removes the entry with media id [key], or every entry of track [key]. */
     @JvmStatic
     fun remove(key: String) = command { c ->
@@ -198,6 +204,14 @@ object YtmdlPlayer {
         c.sendCustomCommand(SessionCommand(PlaybackService.QUEUE_LOOP, Bundle.EMPTY), args)
     }
 
+    /** Pauses at wall-clock ms [at], or at the end of the song; neither clears. */
+    @JvmStatic
+    fun setSleep(at: Long, endOfSong: Boolean) = command { c ->
+        val args = Bundle()
+        if (endOfSong) args.putBoolean("endOfSong", true) else if (at > 0) args.putLong("at", at)
+        c.sendCustomCommand(SessionCommand(PlaybackService.SLEEP, Bundle.EMPTY), args)
+    }
+
     private fun publish() {
         val c = controller ?: return
         val ids = JSONArray()
@@ -220,6 +234,8 @@ object YtmdlPlayer {
                 JSONObject().put("id", id).put("a", extras.getLong("songLoopA")).put("b", extras.getLong("songLoopB")),
             )
         }
+        if (extras.containsKey("sleepAt")) state.put("sleepAt", extras.getLong("sleepAt"))
+        if (extras.getBoolean("sleepAtEnd")) state.put("sleepAtEnd", true)
         extras.getString("queueLoopFirst")?.let { first ->
             state.put("queueLoop", JSONObject().put("first", first).put("last", extras.getString("queueLoopLast")))
         }

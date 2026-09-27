@@ -5,15 +5,16 @@ tools/build-apk).
   tools/patch-gradle-project <gradle project dir> <repo root>
 
 - app/android/*.kt: the Media3 playback service and its JNI bridge
-  (YtmdlPlayer), the downloads foreground service, and a MainActivity replacing
-  the generated one.
+  (YtmdlPlayer), the downloads foreground service, the receiver of shared
+  links, and a MainActivity replacing the generated one.
 - app/android/res: the launcher and notification icons (overriding dx's).
 - Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
   generated project compiles with (1.10+ pulls in kotlin-stdlib 2.2).
 - The manifest: the playback service, in its own ":player" process, the
-  downloads service, and every configuration change handled by the activity.
-  The Rust side can't survive the activity being re-created in one process
-  (see MainActivity.kt).
+  downloads service, and the activity handling every configuration change,
+  single-task and taking shared text. The Rust side can't survive the
+  activity being re-created, or a second one, in one process (see
+  MainActivity.kt).
 
 Safe to run again on an already patched project.
 """
@@ -29,6 +30,15 @@ CONFIG_CHANGES = (
     "orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
     "|uiMode|density|fontScale|locale|layoutDirection|colorMode|touchscreen|mcc|mnc"
 )
+
+# "Share" in YouTube Music (or anything sharing a link) lists the app.
+SHARE_FILTER = """\
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+"""
 
 SERVICES = """\
         <service android:name="dev.nick.ytmdl.PlaybackService" android:process=":player"
@@ -51,7 +61,7 @@ def main() -> None:
     shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
     ours = kotlin / "dev/nick/ytmdl"
     ours.mkdir(parents=True, exist_ok=True)
-    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt"):
+    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt"):
         shutil.copy(sources / name, ours / name)
     shutil.copytree(sources / "res", main_dir / "res", dirs_exist_ok=True)
 
@@ -69,6 +79,13 @@ def main() -> None:
     text = manifest.read_text()
     text, n = re.subn(r'android:configChanges="[^"]*"', f'android:configChanges="{CONFIG_CHANGES}"', text)
     assert n == 1, "the activity's configChanges not found"
+    if "android:launchMode" not in text:
+        text, n = re.subn(r'(android:configChanges="[^"]*")', r'\1 android:launchMode="singleTask"', text)
+        assert n == 1
+    if "android.intent.action.SEND" not in text:
+        launcher = re.search(r"\n *<intent-filter>\s*<action android:name=\"android.intent.action.MAIN\" />.*?</intent-filter>\n", text, re.S)
+        assert launcher, "the launcher intent filter not found"
+        text = text[: launcher.end()] + SHARE_FILTER + text[launcher.end() :]
     if "PlaybackService" not in text:
         assert text.count("</application>") == 1
         text = text.replace("    </application>", SERVICES + "    </application>")

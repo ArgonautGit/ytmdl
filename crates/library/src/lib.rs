@@ -1,13 +1,16 @@
 //! The music library: an SQLite index of downloaded tracks and of the download
-//! queue, plus a cache of resized cover art.
+//! queue, plus playlists, listening history, saved A-B sections and a cache of
+//! resized cover art.
 //!
 //! The audio files stay the record. Each carries its source URL in the comment
 //! tag, so [`Library::scan`] can rebuild the index from the music folders, and it
 //! drops tracks whose files were deleted elsewhere.
 
 mod art;
+mod listens;
 mod playlists;
 mod scan;
+mod sections;
 
 use std::collections::HashSet;
 use std::fs;
@@ -21,8 +24,10 @@ use ytmdl_core::{Downloaded, Entry};
 
 pub use art::{ART_LARGE, ART_SMALL};
 use art::ArtCache;
+pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
 pub use playlists::{Playlist, PlaylistEntry};
 pub use scan::ScanReport;
+pub use sections::Section;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -102,6 +107,27 @@ CREATE TABLE playlist_remote (
     PRIMARY KEY (playlist_id, position)
 );
 CREATE INDEX playlist_remote_video ON playlist_remote (video_id);
+"#, r#"
+-- What was played, from the player's log (see listens.rs). By video id, so
+-- a song downloaded again keeps its history.
+CREATE TABLE listens (
+    id         INTEGER PRIMARY KEY,
+    video_id   TEXT,                        -- NULL: deleted before the log was read
+    started_at INTEGER NOT NULL,            -- unix seconds
+    ms         INTEGER NOT NULL             -- time actually played
+);
+CREATE INDEX listens_started ON listens (started_at);
+CREATE INDEX listens_video ON listens (video_id);
+-- Named A-B loops over part of a song.
+CREATE TABLE sections (
+    id         INTEGER PRIMARY KEY,
+    video_id   TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    a_ms       INTEGER NOT NULL,
+    b_ms       INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX sections_video ON sections (video_id, a_ms);
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =

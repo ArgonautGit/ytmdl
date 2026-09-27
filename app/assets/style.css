@@ -92,6 +92,10 @@ h1, h2, h3 { margin: 0; }
     min-height: 64px;
 }
 .topbar h1 { font-size: 24px; font-weight: 700; }
+/* A title with buttons beside it (library, stats). */
+.title-row { display: flex; align-items: center; gap: 2px; min-height: 48px; margin: -4px -8px -4px 0; }
+.title-row h1 { flex: 1; min-width: 0; padding: 0; }
+.title-row .icon-btn:first-child { margin-left: -12px; }
 
 .bottomnav {
     position: absolute;
@@ -430,6 +434,31 @@ button.icon-btn:active { background: var(--press); }
 .secondary.small { height: 32px; padding: 0 14px; gap: 6px; font-size: 14px; }
 
 .row.song { padding-right: 16px; }
+.list-tools { display: flex; align-items: center; gap: 8px; }
+.sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 6px;
+    border-radius: 16px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.sort-btn:active { background: var(--press); }
+
+/* Queue rows move while one is dragged by its handle (assets/queue-drag.js). */
+.row .drag-handle { margin: -8px -12px -8px -4px; color: var(--muted); touch-action: none; cursor: grab; }
+.list.sorting .row { transition: transform 0.18s ease; }
+.list.sorting .row.dragging {
+    position: relative;
+    z-index: 2;
+    transition: none;
+    background: #262626;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
 .row .more { margin: -8px -12px -8px -8px; color: var(--muted); }
 .cover.new { color: var(--fg); }
 .secondary.round { width: 40px; padding: 0; }
@@ -548,6 +577,23 @@ button.icon-btn:active { background: var(--press); }
     font-size: 15px;
     font-weight: 500;
 }
+.now-title { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: none; }
+.sleep-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 48px;
+    height: 40px;
+    margin: 4px 0;
+    padding: 0 12px;
+    border-radius: 20px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+.sleep-btn:active { background: var(--press); }
+.sleep-btn.on { background: rgba(255, 255, 255, 0.12); color: var(--fg); }
 .cover.now-cover {
     width: min(calc(100vw - 56px), 44vh);
     height: auto;
@@ -604,6 +650,15 @@ button.icon-btn:active { background: var(--press); }
 .ab-range { position: absolute; top: 19px; height: 3px; border-radius: 2px; background: var(--accent); }
 .ab-mark { position: absolute; top: 4px; width: 2px; height: 18px; margin-left: -1px; border-radius: 1px; background: var(--accent); }
 .ab-note { overflow: hidden; color: var(--accent); white-space: nowrap; text-overflow: ellipsis; }
+
+/* Saved A-B sections, under the seek bar. */
+.chips.sections { position: relative; margin: 10px 0 0; padding: 0 28px; }
+.chip.section { display: inline-flex; align-items: center; gap: 6px; }
+.chip.section .times { color: var(--muted); font-size: 12px; font-weight: 400; }
+.chip.section.selected { background: var(--accent); color: #fff; }
+.chip.section.selected .times { color: rgba(255, 255, 255, 0.8); }
+.chip.section.save { background: transparent; box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+.chip.section.edit { padding: 0 10px; background: transparent; color: var(--muted); }
 
 .ab-btn {
     flex: none;
@@ -685,6 +740,7 @@ button.icon-btn:active { background: var(--press); }
 .menu-item .title { font-size: 15px; font-weight: 400; }
 .menu-item .sub { margin-top: 1px; font-size: 13px; }
 .menu-item.danger { color: #ff6b81; }
+.menu-check { display: grid; margin-left: auto; color: var(--accent); }
 
 .dialog {
     position: absolute;
@@ -772,6 +828,50 @@ button.icon-btn:active { background: var(--press); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 14px 54px; }
 .note { padding: 0 16px 14px 54px; color: var(--muted); font-size: 13px; }
 .hint { margin: 10px 4px 0; color: var(--dim); font-size: 13px; }
+.item.divided { border-top: 1px solid var(--line); }
+.switch {
+    position: relative;
+    flex: none;
+    width: 48px;
+    height: 28px;
+    border-radius: 14px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 2px #5a5a5a;
+    transition: background 0.15s;
+}
+.switch .knob {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #8a8a8a;
+    transition: transform 0.15s, width 0.15s, height 0.15s, top 0.15s, background 0.15s;
+}
+.switch.on { background: var(--accent); box-shadow: none; }
+.switch.on .knob { top: 4px; width: 20px; height: 20px; background: #fff; transform: translateX(20px); }
+
+/* ---- stats ---- */
+
+.stats { min-height: 100%; padding-bottom: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 4px 16px 0; }
+.stat { padding: 12px 14px; border-radius: 12px; background: var(--surface); }
+.stat.wide { grid-column: 1 / -1; }
+.stat-value { font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat.wide .stat-value { font-size: 28px; }
+.stat-label { margin-top: 2px; color: var(--muted); font-size: 13px; }
+
+.chart-card { margin: 10px 16px 6px; padding: 14px 14px 10px; border-radius: 12px; background: var(--surface); }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 500; }
+.chart { display: flex; align-items: stretch; gap: 3px; height: 140px; margin-top: 12px; }
+.bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.bar-slot { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.bar { width: 100%; min-height: 2px; border-radius: 3px 3px 1px 1px; background: #5c5c5c; }
+.bar-col.now .bar { background: var(--accent); }
+.bar-label { height: 14px; color: var(--muted); font-size: 11px; line-height: 14px; white-space: nowrap; }
+.bar-col.now .bar-label { color: var(--fg); font-weight: 700; }
+.rank { flex: none; width: 18px; color: var(--muted); font-size: 15px; font-weight: 500; text-align: center; }
 
 /* ---- startup ---- */
 

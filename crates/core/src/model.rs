@@ -249,6 +249,29 @@ pub fn playlist_url(url: &str) -> Option<String> {
     valid.then(|| format!("https://music.youtube.com/playlist?list={id}"))
 }
 
+/// The link in text shared from another app ("Check this out https://…").
+/// A song link keeps only its video: YouTube Music adds the list it was
+/// playing from (`list=RD…`), which would open that mix instead of the song.
+pub fn shared_link(text: &str) -> Option<String> {
+    let url = text
+        .split_whitespace()
+        .find(|w| w.starts_with("https://") || w.starts_with("http://"))?
+        .trim_end_matches(['.', ',', ')', '"', '\'']);
+    let rest = url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?;
+    let valid = |id: &str| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if host == "youtu.be" {
+        let id = rest[host.len()..].trim_start_matches('/').split(['?', '#', '/']).next()?;
+        return valid(id).then(|| format!("https://www.youtube.com/watch?v={id}"));
+    }
+    let query = url.split_once('?').map_or("", |(_, q)| q.split('#').next().unwrap_or(""));
+    match query.split('&').find_map(|p| p.strip_prefix("v=")) {
+        Some(id) if valid(id) => Some(format!("https://{host}/watch?v={id}")),
+        Some(_) => None,
+        None => Some(url.to_owned()),
+    }
+}
+
 /// YouTube names album playlists "Album - <title>" (also "EP - ", "Single - ").
 pub(crate) fn album_title(title: &str) -> String {
     ["Album - ", "EP - ", "Single - "]
@@ -300,6 +323,24 @@ mod tests {
         assert_eq!(playlist_url("https://music.youtube.com/watch?v=abc"), None);
         assert_eq!(playlist_url("https://music.youtube.com/playlist?list="), None);
         assert_eq!(playlist_url("https://www.youtube.com/playlist?list=PL<script>"), None);
+    }
+
+    #[test]
+    fn finds_shared_links() {
+        let song = Some("https://music.youtube.com/watch?v=abc-_12");
+        assert_eq!(shared_link("https://music.youtube.com/watch?v=abc-_12&si=xyz").as_deref(), song);
+        assert_eq!(shared_link("https://music.youtube.com/watch?v=abc-_12&list=RDAMVMabc").as_deref(), song);
+        assert_eq!(shared_link("Listen to this: https://music.youtube.com/watch?v=abc-_12.").as_deref(), song);
+        assert_eq!(
+            shared_link("https://youtu.be/abc-_12?si=xyz").as_deref(),
+            Some("https://www.youtube.com/watch?v=abc-_12")
+        );
+        let playlist = "https://music.youtube.com/playlist?list=PLx-y_1&si=abc";
+        assert_eq!(shared_link(playlist).as_deref(), Some(playlist));
+        let album = "https://music.youtube.com/browse/MPREb_abc";
+        assert_eq!(shared_link(&format!("Album {album}")).as_deref(), Some(album));
+        assert_eq!(shared_link("no link here"), None);
+        assert_eq!(shared_link("https://music.youtube.com/watch?v=<x>"), None);
     }
 
     #[test]
