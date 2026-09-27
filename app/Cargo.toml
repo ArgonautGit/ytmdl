@@ -7,7 +7,9 @@ publish = false
 [dependencies]
 dioxus = { version = "=0.7.9" }
 ytmdl-core.workspace = true
+ytmdl-library.workspace = true
 anyhow.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true

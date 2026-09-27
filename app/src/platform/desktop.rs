@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use ytmdl_core::RuntimeConfig;
 
-use super::{DOWNLOAD_WORKERS, Prepared};
+use super::{DOWNLOAD_WORKERS, Dirs};
 
 pub fn init_logging() {
     tracing_subscriber::fmt()
@@ -16,9 +16,24 @@ pub fn init_logging() {
         .init();
 }
 
+/// XDG data and cache folders; downloads go to `$YTMDL_OUTPUT` or ~/Music.
+pub fn dirs() -> Result<Dirs> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
+    let xdg = |name: &str, fallback: &str| {
+        std::env::var_os(name).map(PathBuf::from).unwrap_or_else(|| home.join(fallback)).join("ytmdl")
+    };
+    let music = std::env::var_os("YTMDL_OUTPUT").map(PathBuf::from).unwrap_or_else(|| home.join("Music"));
+    Ok(Dirs {
+        data: xdg("XDG_DATA_HOME", ".local/share"),
+        cache: xdg("XDG_CACHE_HOME", ".cache"),
+        fallback_music: music.clone(),
+        music,
+    })
+}
+
 /// Runtime paths from the environment, falling back to the values the devshell had
 /// when this binary was built.
-pub fn prepare() -> Result<Prepared> {
+pub fn prepare(dirs: &Dirs) -> Result<RuntimeConfig> {
     let var = |name: &str, built: Option<&str>| {
         std::env::var_os(name).map(PathBuf::from).or_else(|| built.map(PathBuf::from))
     };
@@ -27,26 +42,14 @@ pub fn prepare() -> Result<Prepared> {
     let ytdlp_seed =
         var("YTMDL_YTDLP", option_env!("YTMDL_YTDLP")).context("set YTMDL_YTDLP (run tools/fetch-deps)")?;
     let qjs = var("YTMDL_QJS", option_env!("YTMDL_QJS")).context("set YTMDL_QJS")?;
-
-    let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
-    let xdg = |name: &str, fallback: &str| {
-        std::env::var_os(name).map(PathBuf::from).unwrap_or_else(|| home.join(fallback)).join("ytmdl")
-    };
-    let data = xdg("XDG_DATA_HOME", ".local/share");
-    let cache = xdg("XDG_CACHE_HOME", ".cache");
-    let output_dir = std::env::var_os("YTMDL_OUTPUT").map(PathBuf::from).unwrap_or_else(|| home.join("Music"));
-    Ok(Prepared {
-        config: RuntimeConfig {
-            python_home,
-            ytdlp_seed,
-            ytdlp_dir: data.join("yt-dlp"),
-            qjs,
-            tmp_dir: cache.join("tmp"),
-            cache_dir: cache,
-            download_workers: DOWNLOAD_WORKERS,
-        },
-        fallback_output_dir: output_dir.clone(),
-        output_dir,
+    Ok(RuntimeConfig {
+        python_home,
+        ytdlp_seed,
+        ytdlp_dir: dirs.data.join("yt-dlp"),
+        qjs,
+        tmp_dir: dirs.cache.join("tmp"),
+        cache_dir: dirs.cache.clone(),
+        download_workers: DOWNLOAD_WORKERS,
     })
 }
 
@@ -62,3 +65,19 @@ pub fn has_storage_access() -> bool {
 pub fn request_storage_access() {}
 
 pub fn media_scan(_path: &Path) {}
+
+/// No playback on desktop (the app is only built there for checks); the player
+/// never reports a state, so the UI shows no player.
+pub mod player {
+    use tokio::sync::mpsc::UnboundedSender;
+
+    pub fn connect(_states: UnboundedSender<String>) {}
+    pub fn set_queue(_items: &str, _index: usize, _position_ms: i64, _play: bool) {}
+    pub fn play() {}
+    pub fn pause() {}
+    pub fn next() {}
+    pub fn previous() {}
+    pub fn seek_to(_position_ms: i64) {}
+    pub fn skip_to(_index: usize) {}
+    pub fn set_repeat(_mode: i32) {}
+}

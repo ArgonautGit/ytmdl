@@ -1,7 +1,9 @@
 //! ytmdl: search YouTube Music and download tagged tracks (Dioxus; desktop and Android).
 
 mod jobs;
+mod library;
 mod platform;
+mod player;
 mod ui;
 
 use std::time::Instant;
@@ -10,6 +12,7 @@ use dioxus::prelude::*;
 use ytmdl_core::{Downloader, Runtime};
 
 use jobs::{Queue, Services};
+use platform::Dirs;
 use ui::Boot;
 
 fn main() {
@@ -17,31 +20,38 @@ fn main() {
     dioxus::launch(ui::App);
 }
 
-/// Unpacks/locates the runtime and starts Python off the UI thread, then runs the
-/// autotest if one was requested.
-async fn start(mut boot: Signal<Boot>, queue: Queue) {
-    let started = Instant::now();
+/// Runs `f` on its own thread; for file and database work that would stall the UI.
+pub async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> anyhow::Result<T> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let spawned = std::thread::Builder::new().name("ytmdl-start".into()).spawn(move || {
-        let result = platform::prepare().and_then(|p| {
-            let rt = Runtime::start(p.config)?;
-            Ok(Services {
-                dl: Downloader::new(rt),
-                output_dir: p.output_dir,
-                fallback_output_dir: p.fallback_output_dir,
-            })
-        });
-        let _ = tx.send(result);
-    });
-    let result = match spawned {
-        Ok(_) => rx.await.unwrap_or_else(|_| Err(anyhow::anyhow!("startup thread panicked"))),
-        Err(e) => Err(e.into()),
-    };
+    std::thread::Builder::new().name("ytmdl-blocking".into()).spawn(move || {
+        let _ = tx.send(f());
+    })?;
+    rx.await.map_err(|_| anyhow::anyhow!("worker thread panicked"))
+}
+
+/// Unpacks/locates the runtime and starts Python off the UI thread, resumes saved
+/// downloads, then runs the autotest if one was requested.
+async fn start(mut boot: Signal<Boot>, dirs: Dirs, queue: Queue) {
+    let started = Instant::now();
+    let result = blocking(move || {
+        let config = platform::prepare(&dirs)?;
+        anyhow::Ok(Services {
+            dl: Downloader::new(Runtime::start(config)?),
+            output_dir: dirs.music,
+            fallback_output_dir: dirs.fallback_music,
+        })
+    })
+    .await
+    .and_then(|r| r);
     let startup_ms = started.elapsed().as_millis();
     let services = match result {
         Ok(s) => {
             tracing::info!(target: "ytmdl", "runtime ready in {startup_ms} ms");
             boot.set(Boot::Ready(s.clone()));
+            let resumed = queue.resume(s.clone());
+            if resumed > 0 {
+                tracing::info!(target: "ytmdl", "resuming {resumed} saved downloads");
+            }
             s
         }
         Err(e) => {

@@ -16,6 +16,17 @@ pub enum Icon {
     Music,
     Folder,
     Alert,
+    Library,
+    Play,
+    Pause,
+    Next,
+    Previous,
+    Shuffle,
+    Repeat,
+    RepeatOne,
+    Person,
+    Disc,
+    ChevronDown,
 }
 
 #[component]
@@ -63,6 +74,46 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         Icon::Alert => rsx! {
             circle { cx: "12", cy: "12", r: "9.5" }
             path { d: "M12 7.5v5.5m0 3.5h.01" }
+        },
+        Icon::Library => rsx! {
+            path { d: "M4 4v16M8 8v12M12 6v14m4-14 4 14" }
+        },
+        Icon::Play => rsx! {
+            path { d: "M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.5-7.2a.8.8 0 0 0 0-1.4L8.2 4.1a.8.8 0 0 0-1.2.7z", fill: "currentColor" }
+        },
+        Icon::Pause => rsx! {
+            rect { x: "6", y: "4.5", width: "4", height: "15", rx: "1", fill: "currentColor" }
+            rect { x: "14", y: "4.5", width: "4", height: "15", rx: "1", fill: "currentColor" }
+        },
+        Icon::Next => rsx! {
+            path { d: "M5 5.5v13l10-6.5z", fill: "currentColor" }
+            path { d: "M19 5v14" }
+        },
+        Icon::Previous => rsx! {
+            path { d: "M19 5.5v13L9 12z", fill: "currentColor" }
+            path { d: "M5 5v14" }
+        },
+        Icon::Shuffle => rsx! {
+            path { d: "M2 18h1.4a4 4 0 0 0 3.3-1.7l6.1-8.6A4 4 0 0 1 16.1 6H22m-4-4 4 4-4 4" }
+            path { d: "M2 6h1.9a4 4 0 0 1 3.6 2.2M22 18h-5.9a4 4 0 0 1-3.3-1.8l-.5-.8m5.7-1.4 4 4-4 4" }
+        },
+        Icon::Repeat => rsx! {
+            path { d: "m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" }
+        },
+        Icon::RepeatOne => rsx! {
+            path { d: "m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" }
+            path { d: "M11 10h1v4" }
+        },
+        Icon::Person => rsx! {
+            circle { cx: "12", cy: "8", r: "4" }
+            path { d: "M4 21a8 8 0 0 1 16 0" }
+        },
+        Icon::Disc => rsx! {
+            circle { cx: "12", cy: "12", r: "9.5" }
+            circle { cx: "12", cy: "12", r: "2.5" }
+        },
+        Icon::ChevronDown => rsx! {
+            path { d: "m6 9 6 6 6-6" }
         },
     };
     rsx! {

@@ -53,7 +53,16 @@ fn workspace() -> PathBuf {
 type Screen = (&'static str, &'static str, fn() -> Element);
 
 const SCREENS: &[Screen] = &[
+    ("library-songs", "Library, songs", library_songs),
+    ("library-playing", "Library with the mini player", library_playing),
+    ("now-playing", "Now playing", now_playing),
+    ("library-albums", "Library, albums", library_albums),
+    ("library-artists", "Library, artists", library_artists),
+    ("library-empty", "Library, empty", library_empty),
+    ("library-album", "Downloaded album", library_album),
+    ("artist", "Artist", artist),
     ("startup", "Starting", startup),
+    ("search-starting", "Search while the downloader starts", search_starting),
     ("search-idle", "Search, nothing typed", search_idle),
     ("search-songs", "Songs, mixed download states", search_songs),
     ("search-albums", "Albums", search_albums),
@@ -143,6 +152,176 @@ fn search_page(source: SearchSource, query: &str, results: ResultsView, storage:
             onallow: |_| {},
         }
     }
+}
+
+fn song_items() -> Vec<SongItem> {
+    let s = sample();
+    s.songs
+        .iter()
+        .chain(&s.album_tracks)
+        .enumerate()
+        .map(|(i, e)| SongItem {
+            id: i as i64,
+            title: e.title.clone(),
+            artists: e.artists.join(", "),
+            album: e.album.clone(),
+            duration_secs: e.duration_secs,
+            art: e.thumbnail.clone(),
+            playing: i == 1,
+        })
+        .collect()
+}
+
+fn album_items() -> Vec<AlbumItem> {
+    sample()
+        .albums
+        .iter()
+        .map(|e| AlbumItem { title: e.title.clone(), artist: e.artists.join(", "), year: e.year, art: e.thumbnail.clone() })
+        .collect()
+}
+
+fn artist_items() -> Vec<ArtistItem> {
+    let songs = &sample().songs;
+    [("Daft Punk", 14, 3), ("Kevin MacLeod", 22, 4), ("Pharrell Williams", 1, 0), ("Nile Rodgers", 2, 1)]
+        .iter()
+        .enumerate()
+        .map(|(i, (name, tracks, albums))| ArtistItem {
+            name: name.to_string(),
+            tracks: *tracks,
+            albums: *albums,
+            art: songs[i % songs.len()].thumbnail.clone(),
+        })
+        .collect()
+}
+
+fn library_page(view: LibraryView, songs: Vec<SongItem>) -> Element {
+    shell(Tab::Library, 0, library_page_body(view, songs))
+}
+
+fn library_page_body(view: LibraryView, songs: Vec<SongItem>) -> Element {
+    rsx! {
+        LibraryPage {
+            view,
+            songs,
+            albums: album_items(),
+            artists: artist_items(),
+            onview: |_| {},
+            onplay: |_| {},
+            onshuffle: |_| {},
+            onalbum: |_| {},
+            onartist: |_| {},
+            onsearch: |_| {},
+        }
+    }
+}
+
+fn library_songs() -> Element {
+    let songs = song_items().into_iter().map(|s| SongItem { playing: false, ..s }).collect();
+    library_page(LibraryView::Songs, songs)
+}
+
+fn now_item() -> NowItem {
+    let e = &sample().songs[1];
+    NowItem {
+        title: e.title.clone(),
+        artists: e.artists.join(", "),
+        album: e.album.clone(),
+        art: e.thumbnail.clone(),
+        art_large: e.thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544)),
+    }
+}
+
+fn library_playing() -> Element {
+    rsx! {
+        div { class: "app has-mini",
+            Page { visible: true, {library_page_body(LibraryView::Songs, song_items())} }
+            MiniPlayer { now: now_item(), progress: 0.37, playing: true, ontoggle: |_| {}, onnext: |_| {}, onopen: |_| {} }
+            BottomNav { tab: Tab::Library, active: 0, onselect: |_| {} }
+        }
+    }
+}
+
+fn now_playing() -> Element {
+    let queue = song_items().into_iter().take(8).collect();
+    rsx! {
+        div { class: "app has-mini",
+            div { class: "overlay sheet",
+                NowPlayingPage {
+                    now: now_item(),
+                    position: 51.0,
+                    duration: 139.0,
+                    playing: true,
+                    buffering: false,
+                    repeat: RepeatMode::All,
+                    queue,
+                    onclose: |_| {},
+                    ontoggle: |_| {},
+                    onnext: |_| {},
+                    onprevious: |_| {},
+                    onseeking: |_| {},
+                    onseek: |_| {},
+                    onrepeat: |_| {},
+                    onskip: |_| {},
+                }
+            }
+        }
+    }
+}
+
+fn library_albums() -> Element {
+    library_page(LibraryView::Albums, song_items())
+}
+
+fn library_artists() -> Element {
+    library_page(LibraryView::Artists, song_items())
+}
+
+fn library_empty() -> Element {
+    library_page(LibraryView::Songs, Vec::new())
+}
+
+fn library_album() -> Element {
+    let album = &sample().albums[0];
+    let mut header = AlbumHeader::from_entry(album);
+    header.kind = None;
+    header.cover = album.thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544));
+    let songs = song_items().into_iter().skip(sample().songs.len()).collect();
+    shell(
+        Tab::Library,
+        0,
+        rsx! {
+            div { class: "overlay",
+                LocalAlbumPage { header, songs, onback: |_| {}, onplay: |_| {}, onshuffle: |_| {} }
+            }
+        },
+    )
+}
+
+fn artist() -> Element {
+    let songs: Vec<SongItem> = song_items().into_iter().take(6).collect();
+    let art = sample().songs[1].thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544));
+    shell(
+        Tab::Library,
+        0,
+        rsx! {
+            div { class: "overlay",
+                ArtistPage {
+                    name: "Kevin MacLeod".to_string(),
+                    art,
+                    songs,
+                    albums: album_items(),
+                    onback: |_| {},
+                    onplay: |_| {},
+                    onshuffle: |_| {},
+                    onalbum: |_| {},
+                }
+            }
+        },
+    )
+}
+
+fn search_starting() -> Element {
+    shell(Tab::Search, 0, search_page(SearchSource::MusicSongs, "", ResultsView::Starting, true))
 }
 
 fn startup() -> Element {
@@ -345,6 +524,7 @@ fn entry(i: usize, title: &str, album: Option<&str>, secs: f64, kind: &str, year
         thumbnail: Some(art(i as u32 * 47 % 360)),
         kind: Some(kind.into()),
         year,
+        track_number: None,
     }
 }
 

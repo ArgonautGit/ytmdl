@@ -49,6 +49,8 @@ pub struct DownloadOptions {
     pub embed_cover: bool,
     /// Extra raw yt-dlp arguments.
     pub extra_args: Vec<String>,
+    /// Track number to tag when yt-dlp has none (see [`Entry::track_number`]).
+    pub track_number: Option<u32>,
 }
 
 impl DownloadOptions {
@@ -60,6 +62,7 @@ impl DownloadOptions {
             write_tags: true,
             embed_cover: true,
             extra_args: Vec::new(),
+            track_number: None,
         }
     }
 }
@@ -106,8 +109,9 @@ impl Downloader {
             let mut entries: Vec<Entry> = info.entries.iter().filter_map(Info::to_entry).collect();
             if kind == CollectionKind::Album {
                 title = model::album_title(&title);
-                for e in &mut entries {
+                for (n, e) in (1..).zip(&mut entries) {
                     e.album.get_or_insert_with(|| title.clone());
+                    e.track_number = Some(n);
                 }
             }
             return Ok(Resolved::Collection { title, kind, entries });
@@ -145,7 +149,10 @@ impl Downloader {
             .iter()
             .find_map(|d| d.filepath.clone())
             .ok_or_else(|| Error::Invalid("yt-dlp reported no output file".into()))?;
-        let meta = info.to_track();
+        let mut meta = info.to_track();
+        if meta.track_number.is_none() {
+            meta.track_number = opts.track_number;
+        }
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
         // YouTube audio is DASH-fragmented; yt-dlp only fixes that when it has ffmpeg.

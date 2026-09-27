@@ -68,6 +68,9 @@ pub struct Entry {
     pub kind: Option<String>,
     #[serde(default)]
     pub year: Option<i32>,
+    /// Position in the album it was listed in (YouTube has no track numbers).
+    #[serde(default)]
+    pub track_number: Option<u32>,
 }
 
 /// Everything we know about one track.
@@ -153,6 +156,7 @@ impl Info {
             thumbnail: self.cover_urls().into_iter().next().map(|u| art_url(&u, LIST_ART_PX)),
             kind: self.ytmdl_kind.clone(),
             year: self.release_year,
+            track_number: None,
             id,
         })
     }

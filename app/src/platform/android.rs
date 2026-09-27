@@ -15,7 +15,7 @@ use jni::objects::{JObject, JString, JValue};
 use jni::{JNIEnv, JavaVM};
 use ytmdl_core::RuntimeConfig;
 
-use super::{DOWNLOAD_WORKERS, Prepared};
+use super::{DOWNLOAD_WORKERS, Dirs};
 
 const RUNTIME_ASSET: &str = "assets/ytmdl/runtime.zip";
 
@@ -31,20 +31,12 @@ pub fn init_logging() {
     std::panic::set_hook(Box::new(|info| tracing::error!(target: "ytmdl", "panic: {info}")));
 }
 
-pub fn prepare() -> Result<Prepared> {
-    let paths = with_env(|env, activity| {
+pub fn dirs() -> Result<Dirs> {
+    let [data, cache, music, fallback_music] = with_env(|env, activity| {
         let files = env.call_method(activity, "getFilesDir", "()Ljava/io/File;", &[])?.l()?;
         let files = file_path(env, files)?;
         let cache = env.call_method(activity, "getCacheDir", "()Ljava/io/File;", &[])?.l()?;
         let cache = file_path(env, cache)?;
-        let info = env
-            .call_method(activity, "getApplicationInfo", "()Landroid/content/pm/ApplicationInfo;", &[])?
-            .l()?;
-        let native = env.get_field(&info, "nativeLibraryDir", "Ljava/lang/String;")?.l()?;
-        let native = string(env, native)?;
-        let apk = env.call_method(activity, "getPackageCodePath", "()Ljava/lang/String;", &[])?.l()?;
-        let apk = string(env, apk)?;
-
         let music = env.new_string("Music")?;
         let shared = env
             .call_static_method(
@@ -59,27 +51,38 @@ pub fn prepare() -> Result<Prepared> {
             .call_method(activity, "getExternalFilesDir", "(Ljava/lang/String;)Ljava/io/File;", &[JValue::Object(&music)])?
             .l()?;
         let private = if private.is_null() { format!("{files}/Music") } else { file_path(env, private)? };
-        Ok([files, cache, native, apk, shared, private].map(PathBuf::from))
+        Ok([files, cache, shared, private].map(PathBuf::from))
     })?;
-    let [files, cache, native, apk, shared, private] = paths;
+    Ok(Dirs { data, cache, music, fallback_music })
+}
+
+/// Unpacks the runtime from the APK (first start after an install) and links qjs.
+pub fn prepare(dirs: &Dirs) -> Result<RuntimeConfig> {
+    let [native, apk] = with_env(|env, activity| {
+        let info = env
+            .call_method(activity, "getApplicationInfo", "()Landroid/content/pm/ApplicationInfo;", &[])?
+            .l()?;
+        let native = env.get_field(&info, "nativeLibraryDir", "Ljava/lang/String;")?.l()?;
+        let native = string(env, native)?;
+        let apk = env.call_method(activity, "getPackageCodePath", "()Ljava/lang/String;", &[])?.l()?;
+        let apk = string(env, apk)?;
+        Ok([native, apk].map(PathBuf::from))
+    })?;
+    let files = &dirs.data;
     tracing::info!(target: "ytmdl", "files={} native={} apk={}", files.display(), native.display(), apk.display());
 
     let runtime = files.join("runtime");
     unpack_runtime(&apk, &runtime).context("unpacking the Python runtime from the APK")?;
     let qjs = link_qjs(&native, &files.join("bin")).context("linking qjs")?;
 
-    Ok(Prepared {
-        config: RuntimeConfig {
-            python_home: runtime.join("python"),
-            ytdlp_seed: runtime.join("yt-dlp.zip"),
-            ytdlp_dir: files.join("yt-dlp"),
-            qjs,
-            cache_dir: cache.join("ytmdl"),
-            tmp_dir: cache.join("tmp"),
-            download_workers: DOWNLOAD_WORKERS,
-        },
-        output_dir: shared,
-        fallback_output_dir: private,
+    Ok(RuntimeConfig {
+        python_home: runtime.join("python"),
+        ytdlp_seed: runtime.join("yt-dlp.zip"),
+        ytdlp_dir: files.join("yt-dlp"),
+        qjs,
+        cache_dir: dirs.cache.join("ytmdl"),
+        tmp_dir: dirs.cache.join("tmp"),
+        download_workers: DOWNLOAD_WORKERS,
     })
 }
 
@@ -202,6 +205,117 @@ pub fn media_scan(path: &Path) {
     });
     if let Err(e) = result {
         tracing::warn!(target: "ytmdl", "media scan of {}: {e:#}", path.display());
+    }
+}
+
+/// Playback through `YtmdlPlayer` (app/android/YtmdlPlayer.kt), which drives the
+/// Media3 service. Every call returns at once; the service reports its state
+/// back as JSON through the channel given to [`player::connect`].
+pub mod player {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    use jni::objects::{GlobalRef, JClass, JObject, JString, JValue, JValueOwned};
+    use jni::{JNIEnv, NativeMethod};
+    use tokio::sync::mpsc::UnboundedSender;
+
+    use super::with_env;
+
+    const CLASS: &str = "dev.nick.ytmdl.YtmdlPlayer";
+    static PLAYER: OnceLock<GlobalRef> = OnceLock::new();
+    static STATES: OnceLock<UnboundedSender<String>> = OnceLock::new();
+
+    pub fn connect(states: UnboundedSender<String>) {
+        let _ = STATES.set(states);
+        let result = with_env(|env, activity| {
+            let class = player_class(env, activity)?;
+            let changed = NativeMethod {
+                name: "nativeChanged".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: native_changed as *mut c_void,
+            };
+            env.register_native_methods(&class, &[changed])?;
+            env.call_static_method(&class, "connect", "(Landroid/content/Context;)V", &[JValue::Object(activity)])?;
+            Ok(())
+        });
+        if let Err(e) = result {
+            tracing::error!(target: "ytmdl", "connecting to the player: {e:#}");
+        }
+    }
+
+    /// Called on the Android main thread for every player change.
+    extern "system" fn native_changed<'local>(mut env: JNIEnv<'local>, _: JClass<'local>, state: JString<'local>) {
+        if let (Ok(state), Some(tx)) = (env.get_string(&state), STATES.get()) {
+            let _ = tx.send(state.into());
+        }
+    }
+
+    /// App classes need the activity's class loader; JNI's FindClass on a native
+    /// thread only sees the system classes.
+    fn player_class<'local>(env: &mut JNIEnv<'local>, activity: &JObject) -> jni::errors::Result<JClass<'local>> {
+        if let Some(class) = PLAYER.get() {
+            return Ok(JClass::from(env.new_local_ref(class)?));
+        }
+        let loader = env.call_method(activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
+        let name = env.new_string(CLASS)?;
+        let class = env
+            .call_method(&loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&name)])?
+            .l()?;
+        let _ = PLAYER.set(env.new_global_ref(&class)?);
+        Ok(JClass::from(class))
+    }
+
+    fn call(method: &str, sig: &str, args: impl for<'a> FnOnce(&mut JNIEnv<'a>) -> jni::errors::Result<Vec<JValueOwned<'a>>>) {
+        let result = with_env(|env, activity| {
+            let class = player_class(env, activity)?;
+            let args = args(env)?;
+            let args: Vec<JValue> = args.iter().map(|a| a.borrow()).collect();
+            env.call_static_method(&class, method, sig, &args)?;
+            Ok(())
+        });
+        if let Err(e) = result {
+            tracing::warn!(target: "ytmdl", "player {method}: {e:#}");
+        }
+    }
+
+    /// `items`: JSON array of `{id, path, title, artist, album, art}`.
+    pub fn set_queue(items: &str, index: usize, position_ms: i64, play: bool) {
+        call("setQueue", "(Ljava/lang/String;IJZ)V", |env| {
+            Ok(vec![
+                JValueOwned::Object(env.new_string(items)?.into()),
+                JValueOwned::Int(index as i32),
+                JValueOwned::Long(position_ms),
+                JValueOwned::Bool(play.into()),
+            ])
+        });
+    }
+
+    pub fn play() {
+        call("play", "()V", |_| Ok(Vec::new()));
+    }
+
+    pub fn pause() {
+        call("pause", "()V", |_| Ok(Vec::new()));
+    }
+
+    pub fn next() {
+        call("next", "()V", |_| Ok(Vec::new()));
+    }
+
+    pub fn previous() {
+        call("previous", "()V", |_| Ok(Vec::new()));
+    }
+
+    pub fn seek_to(position_ms: i64) {
+        call("seekTo", "(J)V", |_| Ok(vec![JValueOwned::Long(position_ms)]));
+    }
+
+    pub fn skip_to(index: usize) {
+        call("skipTo", "(I)V", |_| Ok(vec![JValueOwned::Int(index as i32)]));
+    }
+
+    pub fn set_repeat(mode: i32) {
+        call("setRepeat", "(I)V", |_| Ok(vec![JValueOwned::Int(mode)]));
     }
 }
 

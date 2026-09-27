@@ -9,9 +9,65 @@ use crate::jobs::{Job, JobState};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tab {
+    Library,
     Search,
     Downloads,
     Settings,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LibraryView {
+    Songs,
+    Albums,
+    Artists,
+}
+
+/// A downloaded track as a list row.
+#[derive(Clone, PartialEq, Debug)]
+pub struct SongItem {
+    pub id: i64,
+    pub title: String,
+    pub artists: String,
+    pub album: Option<String>,
+    pub duration_secs: Option<f64>,
+    /// Small cover URL.
+    pub art: Option<String>,
+    pub playing: bool,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct AlbumItem {
+    pub title: String,
+    pub artist: String,
+    pub year: Option<i32>,
+    pub art: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum RepeatMode {
+    Off,
+    All,
+    One,
+}
+
+/// The song the player is on.
+#[derive(Clone, PartialEq, Debug)]
+pub struct NowItem {
+    pub title: String,
+    pub artists: String,
+    pub album: Option<String>,
+    /// Small cover URL (mini player).
+    pub art: Option<String>,
+    /// Large cover URL (now playing).
+    pub art_large: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct ArtistItem {
+    pub name: String,
+    pub tracks: u32,
+    pub albums: u32,
+    pub art: Option<String>,
 }
 
 /// Download state of one search result or album track.
@@ -34,6 +90,10 @@ impl TrackState {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ResultsView {
+    /// The downloader is still starting.
+    Starting,
+    /// The downloader failed to start.
+    Unavailable(String),
     Idle,
     Loading,
     Error(String),
@@ -52,6 +112,12 @@ pub struct AlbumHeader {
 }
 
 impl AlbumHeader {
+    /// "Album • Artist • 2008"
+    fn meta(&self) -> String {
+        let kind = kind_label(self.kind.as_deref()).or(Some("Album".into()));
+        dotted([kind, Some(self.artists.join(", ")), self.year.map(|y| y.to_string())])
+    }
+
     pub fn from_entry(e: &Entry) -> Self {
         AlbumHeader {
             title: e.title.clone(),
@@ -111,7 +177,7 @@ fn kind_label(kind: Option<&str>) -> Option<String> {
     })
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
@@ -141,6 +207,7 @@ pub fn BottomNav(tab: Tab, active: usize, onselect: EventHandler<Tab>) -> Elemen
     };
     rsx! {
         nav { class: "bottomnav",
+            {item(Tab::Library, Icon::Library, "Library", 0)}
             {item(Tab::Search, Icon::Search, "Search", 0)}
             {item(Tab::Downloads, Icon::Download, "Downloads", active)}
             {item(Tab::Settings, Icon::Settings, "Settings", 0)}
@@ -200,10 +267,14 @@ pub fn EmptyState(icon: Icon, title: String, text: String, action: Option<Elemen
 // ---- rows ----
 
 #[component]
-pub fn Cover(url: Option<String>, #[props(default = "cover".to_string())] class: String) -> Element {
+pub fn Cover(
+    url: Option<String>,
+    #[props(default = "cover".to_string())] class: String,
+    #[props(default = Icon::Music)] icon: Icon,
+) -> Element {
     rsx! {
         div { class: "{class}",
-            Svg { icon: Icon::Music, size: 20 }
+            Svg { icon, size: 20 }
             if let Some(url) = url {
                 Img { url }
             }
@@ -401,6 +472,16 @@ pub fn SearchPage(
             StorageBanner { onallow }
         }
         match results {
+            ResultsView::Starting => rsx! {
+                div { class: "empty",
+                    div { class: "spinner" }
+                    h2 { "Getting ready" }
+                    p { "Starting the downloader. Your library already works." }
+                }
+            },
+            ResultsView::Unavailable(e) => rsx! {
+                EmptyState { icon: Icon::Alert, title: "The downloader could not start", text: e }
+            },
             ResultsView::Idle => rsx! {
                 EmptyState {
                     icon: Icon::Search,
@@ -462,29 +543,13 @@ pub fn AlbumPage(
     ondownloadall: EventHandler<()>,
     onretry: EventHandler<()>,
 ) -> Element {
-    let hero = header.cover.as_deref().map(|u| art_url(u, 544));
-    let kind = kind_label(header.kind.as_deref()).or(Some("Album".into()));
-    let meta = dotted([kind, Some(header.artists.join(", ")), header.year.map(|y| y.to_string())]);
     rsx! {
         div { class: "album",
-            button { class: "icon-btn back", "aria-label": "Back", onclick: move |_| onback.call(()),
-                Svg { icon: Icon::Back }
-            }
-            div { class: "album-head",
-                div { class: "hero-wrap",
-                    if let Some(url) = hero.clone() {
-                        Img { url, class: "hero-bg" }
-                    }
-                    div { class: "hero-fade" }
-                }
-                div { class: "hero",
-                    Cover { url: hero, class: "cover hero-cover" }
-                    h1 { "{header.title}" }
-                    div { class: "sub", "{meta}" }
-                    match &tracks {
-                        AlbumTracks::Loaded(rows) => rsx! { AlbumSummary { rows: rows.clone(), ondownloadall } },
-                        _ => rsx! {},
-                    }
+            BackButton { onback }
+            Hero { cover: header.cover.as_deref().map(|u| art_url(u, 544)), title: header.title.clone(), meta: header.meta(),
+                match &tracks {
+                    AlbumTracks::Loaded(rows) => rsx! { AlbumSummary { rows: rows.clone(), ondownloadall } },
+                    _ => rsx! {},
                 }
             }
             match tracks {
@@ -519,6 +584,43 @@ pub fn AlbumPage(
 }
 
 #[component]
+fn BackButton(onback: EventHandler<()>) -> Element {
+    rsx! {
+        button { class: "icon-btn back", "aria-label": "Back", onclick: move |_| onback.call(()),
+            Svg { icon: Icon::Back }
+        }
+    }
+}
+
+/// Big cover over a blurred copy of itself, then the title and `children`.
+#[component]
+fn Hero(
+    cover: Option<String>,
+    title: String,
+    meta: String,
+    #[props(default)] round: bool,
+    #[props(default = Icon::Music)] icon: Icon,
+    children: Element,
+) -> Element {
+    rsx! {
+        div { class: "album-head",
+            div { class: "hero-wrap",
+                if let Some(url) = cover.clone() {
+                    Img { url, class: "hero-bg" }
+                }
+                div { class: "hero-fade" }
+            }
+            div { class: "hero",
+                Cover { url: cover, class: if round { "cover hero-cover round" } else { "cover hero-cover" }, icon }
+                h1 { "{title}" }
+                div { class: "sub", "{meta}" }
+                {children}
+            }
+        }
+    }
+}
+
+#[component]
 fn AlbumSummary(rows: Vec<(Entry, TrackState)>, ondownloadall: EventHandler<()>) -> Element {
     let total: f64 = rows.iter().filter_map(|(e, _)| e.duration_secs).sum();
     let done = rows.iter().filter(|(_, s)| *s == TrackState::Done).count();
@@ -536,6 +638,365 @@ fn AlbumSummary(rows: Vec<(Entry, TrackState)>, ondownloadall: EventHandler<()>)
             div { class: "primary ghost", div { class: "spinner small" } "Downloading {busy}" }
         } else if done > 0 {
             div { class: "primary ghost", Svg { icon: Icon::Check, size: 20 } "Downloaded" }
+        }
+    }
+}
+
+// ---- library ----
+
+#[component]
+pub fn LibraryPage(
+    view: LibraryView,
+    songs: Vec<SongItem>,
+    albums: Vec<AlbumItem>,
+    artists: Vec<ArtistItem>,
+    onview: EventHandler<LibraryView>,
+    onplay: EventHandler<usize>,
+    onshuffle: EventHandler<()>,
+    onalbum: EventHandler<usize>,
+    onartist: EventHandler<usize>,
+    onsearch: EventHandler<()>,
+) -> Element {
+    let views = [("Songs", LibraryView::Songs), ("Albums", LibraryView::Albums), ("Artists", LibraryView::Artists)];
+    rsx! {
+        header { class: "topbar",
+            h1 { "Library" }
+            div { class: "chips",
+                for (label , value) in views {
+                    button {
+                        key: "{label}",
+                        class: if view == value { "chip selected" } else { "chip" },
+                        onclick: move |_| onview.call(value),
+                        "{label}"
+                    }
+                }
+            }
+        }
+        if songs.is_empty() {
+            EmptyState {
+                icon: Icon::Library,
+                title: "Your library is empty",
+                text: "Songs you download show up here, ready to play offline.",
+                action: rsx! {
+                    button { class: "primary", onclick: move |_| onsearch.call(()), Svg { icon: Icon::Search, size: 20 } "Find music" }
+                },
+            }
+        } else {
+            match view {
+                LibraryView::Songs => rsx! {
+                    div { class: "list-head",
+                        span { class: "section-note", {plural(songs.len(), "song", "songs")} }
+                        button { class: "secondary small", onclick: move |_| onshuffle.call(()),
+                            Svg { icon: Icon::Shuffle, size: 18 }
+                            "Shuffle"
+                        }
+                    }
+                    SongList { songs, onplay }
+                },
+                LibraryView::Albums if albums.is_empty() => rsx! {
+                    EmptyState { icon: Icon::Disc, title: "No albums yet", text: "Download a whole album, or songs that belong to one." }
+                },
+                LibraryView::Albums => rsx! { AlbumGrid { albums, onopen: onalbum } },
+                LibraryView::Artists => rsx! {
+                    ul { class: "list",
+                        for (i , artist) in artists.into_iter().enumerate() {
+                            ArtistRow { key: "{artist.name}", artist, onopen: move |_| onartist.call(i) }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// Downloaded songs; `numbered` shows album positions instead of covers.
+#[component]
+pub fn SongList(songs: Vec<SongItem>, onplay: EventHandler<usize>, #[props(default)] numbered: bool) -> Element {
+    rsx! {
+        ul { class: if numbered { "list tracks" } else { "list" },
+            for (i , song) in songs.into_iter().enumerate() {
+                SongItemRow { key: "{song.id}", song, index: numbered.then_some(i + 1), onplay: move |_| onplay.call(i) }
+            }
+        }
+    }
+}
+
+#[component]
+fn SongItemRow(song: SongItem, index: Option<usize>, onplay: EventHandler<()>) -> Element {
+    let duration = song.duration_secs.map(duration_text);
+    let sub = match index {
+        Some(_) => dotted([Some(song.artists.clone()), duration]),
+        None => dotted([Some(song.artists.clone()), song.album.clone().filter(|a| *a != song.title), duration]),
+    };
+    rsx! {
+        li { class: if song.playing { "row tappable song playing" } else { "row tappable song" }, onclick: move |_| onplay.call(()),
+            match index {
+                Some(n) => rsx! {
+                    span { class: "index",
+                        if song.playing { Equalizer {} } else { "{n}" }
+                    }
+                },
+                None => rsx! {
+                    div { class: "cover-wrap",
+                        Cover { url: song.art.clone() }
+                        if song.playing { div { class: "cover-eq", Equalizer {} } }
+                    }
+                },
+            }
+            div { class: "meta",
+                div { class: "title", "{song.title}" }
+                div { class: "sub", "{sub}" }
+            }
+        }
+    }
+}
+
+/// Bouncing bars marking the playing song.
+#[component]
+fn Equalizer() -> Element {
+    rsx! {
+        span { class: "eq", "aria-label": "Playing", span {} span {} span {} }
+    }
+}
+
+#[component]
+pub fn AlbumGrid(albums: Vec<AlbumItem>, onopen: EventHandler<usize>, #[props(default)] shelf: bool) -> Element {
+    rsx! {
+        ul { class: if shelf { "grid shelf" } else { "grid" },
+            for (i , album) in albums.into_iter().enumerate() {
+                li { key: "{album.artist}/{album.title}", class: "tile", onclick: move |_| onopen.call(i),
+                    Cover { url: album.art.clone(), class: "cover square", icon: Icon::Disc }
+                    div { class: "title", "{album.title}" }
+                    div { class: "sub", {dotted([Some(album.artist.clone()), album.year.map(|y| y.to_string())])} }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ArtistRow(artist: ArtistItem, onopen: EventHandler<()>) -> Element {
+    let sub = dotted([
+        Some(plural(artist.tracks as usize, "song", "songs")),
+        (artist.albums > 0).then(|| plural(artist.albums as usize, "album", "albums")),
+    ]);
+    rsx! {
+        li { class: "row tappable", onclick: move |_| onopen.call(()),
+            Cover { url: artist.art.clone(), class: "cover round", icon: Icon::Person }
+            div { class: "meta",
+                div { class: "title", "{artist.name}" }
+                div { class: "sub", "{sub}" }
+            }
+            span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+        }
+    }
+}
+
+#[component]
+fn PlayButtons(onplay: EventHandler<()>, onshuffle: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "hero-actions",
+            button { class: "primary", onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
+            button { class: "secondary", onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle" }
+        }
+    }
+}
+
+/// A downloaded album. `header.cover` is the large art.
+#[component]
+pub fn LocalAlbumPage(
+    header: AlbumHeader,
+    songs: Vec<SongItem>,
+    onback: EventHandler<()>,
+    onplay: EventHandler<usize>,
+    onshuffle: EventHandler<()>,
+) -> Element {
+    let total: f64 = songs.iter().filter_map(|s| s.duration_secs).sum();
+    let line = dotted([Some(plural(songs.len(), "song", "songs")), (total > 0.0).then(|| total_text(total))]);
+    rsx! {
+        div { class: "album",
+            BackButton { onback }
+            Hero { cover: header.cover.clone(), title: header.title.clone(), meta: header.meta(), icon: Icon::Disc,
+                div { class: "sub", "{line}" }
+                PlayButtons { onplay: move |_| onplay.call(0), onshuffle }
+            }
+            SongList { songs, onplay, numbered: true }
+        }
+    }
+}
+
+#[component]
+pub fn ArtistPage(
+    name: String,
+    art: Option<String>,
+    songs: Vec<SongItem>,
+    albums: Vec<AlbumItem>,
+    onback: EventHandler<()>,
+    onplay: EventHandler<usize>,
+    onshuffle: EventHandler<()>,
+    onalbum: EventHandler<usize>,
+) -> Element {
+    let meta = dotted([
+        Some(plural(songs.len(), "song", "songs")),
+        (!albums.is_empty()).then(|| plural(albums.len(), "album", "albums")),
+    ]);
+    rsx! {
+        div { class: "album",
+            BackButton { onback }
+            Hero { cover: art, title: name, meta, round: true, icon: Icon::Person,
+                PlayButtons { onplay: move |_| onplay.call(0), onshuffle }
+            }
+            if !albums.is_empty() {
+                h2 { class: "section", "Albums" }
+                AlbumGrid { albums, onopen: onalbum, shelf: true }
+            }
+            h2 { class: "section", "Songs" }
+            SongList { songs, onplay }
+        }
+    }
+}
+
+// ---- player ----
+
+/// The bar above the tabs while something is loaded; tapping it opens the player.
+#[component]
+pub fn MiniPlayer(
+    now: NowItem,
+    /// 0..1 through the song.
+    progress: f64,
+    playing: bool,
+    ontoggle: EventHandler<()>,
+    onnext: EventHandler<()>,
+    onopen: EventHandler<()>,
+) -> Element {
+    let pct = progress.clamp(0.0, 1.0) * 100.0;
+    rsx! {
+        div { class: "mini", onclick: move |_| onopen.call(()),
+            div { class: "mini-progress", div { class: "mini-progress-fill", style: "width: {pct:.2}%" } }
+            Cover { url: now.art.clone() }
+            div { class: "meta",
+                div { class: "title", "{now.title}" }
+                div { class: "sub", "{now.artists}" }
+            }
+            button {
+                class: "icon-btn",
+                "aria-label": if playing { "Pause" } else { "Play" },
+                onclick: move |e| {
+                    e.stop_propagation();
+                    ontoggle.call(());
+                },
+                Svg { icon: if playing { Icon::Pause } else { Icon::Play } }
+            }
+            button {
+                class: "icon-btn",
+                "aria-label": "Next",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    onnext.call(());
+                },
+                Svg { icon: Icon::Next }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn NowPlayingPage(
+    now: NowItem,
+    position: f64,
+    duration: f64,
+    playing: bool,
+    buffering: bool,
+    repeat: RepeatMode,
+    /// The whole queue; the current song is marked playing.
+    queue: Vec<SongItem>,
+    onclose: EventHandler<()>,
+    ontoggle: EventHandler<()>,
+    onnext: EventHandler<()>,
+    onprevious: EventHandler<()>,
+    /// While the slider is dragged.
+    onseeking: EventHandler<f64>,
+    /// When it is let go.
+    onseek: EventHandler<f64>,
+    onrepeat: EventHandler<()>,
+    onskip: EventHandler<usize>,
+) -> Element {
+    let max = duration.max(1.0);
+    let pct = (position / max * 100.0).clamp(0.0, 100.0);
+    let sub = dotted([Some(now.artists.clone()), now.album.clone().filter(|a| *a != now.title)]);
+    let parse = |v: String| v.parse::<f64>().ok();
+    rsx! {
+        div { class: "now",
+            div { class: "now-backdrop",
+                if let Some(url) = now.art_large.clone() {
+                    Img { url, class: "hero-bg" }
+                }
+            }
+            header { class: "now-bar",
+                button { class: "icon-btn", "aria-label": "Close", onclick: move |_| onclose.call(()),
+                    Svg { icon: Icon::ChevronDown, size: 28 }
+                }
+                span { "Now playing" }
+                div { class: "icon-btn" }
+            }
+            Cover { url: now.art_large.clone(), class: "cover now-cover" }
+            div { class: "now-meta",
+                h1 { "{now.title}" }
+                div { class: "sub", "{sub}" }
+            }
+            div { class: "seek",
+                input {
+                    r#type: "range",
+                    "aria-label": "Position",
+                    min: "0",
+                    max: "{max}",
+                    step: "0.1",
+                    value: "{position}",
+                    style: "--p: {pct:.2}%",
+                    oninput: move |e| {
+                        if let Some(v) = parse(e.value()) {
+                            onseeking.call(v);
+                        }
+                    },
+                    onchange: move |e| {
+                        if let Some(v) = parse(e.value()) {
+                            onseek.call(v);
+                        }
+                    },
+                }
+                div { class: "times",
+                    span { {duration_text(position)} }
+                    span { {duration_text(duration)} }
+                }
+            }
+            div { class: "controls",
+                button {
+                    class: if repeat == RepeatMode::Off { "icon-btn" } else { "icon-btn on" },
+                    "aria-label": match repeat {
+                        RepeatMode::Off => "Repeat off",
+                        RepeatMode::All => "Repeat all",
+                        RepeatMode::One => "Repeat one",
+                    },
+                    onclick: move |_| onrepeat.call(()),
+                    Svg { icon: if repeat == RepeatMode::One { Icon::RepeatOne } else { Icon::Repeat } }
+                }
+                button { class: "icon-btn big", "aria-label": "Previous", onclick: move |_| onprevious.call(()),
+                    Svg { icon: Icon::Previous, size: 32 }
+                }
+                button { class: "play-btn", "aria-label": if playing { "Pause" } else { "Play" }, onclick: move |_| ontoggle.call(()),
+                    if playing && buffering {
+                        div { class: "spinner dark" }
+                    } else {
+                        Svg { icon: if playing { Icon::Pause } else { Icon::Play }, size: 34 }
+                    }
+                }
+                button { class: "icon-btn big", "aria-label": "Next", onclick: move |_| onnext.call(()),
+                    Svg { icon: Icon::Next, size: 32 }
+                }
+                div { class: "icon-btn" }
+            }
+            h2 { class: "section", "Queue" span { class: "section-note", {plural(queue.len(), "song", "songs")} } }
+            SongList { songs: queue, onplay: onskip }
         }
     }
 }

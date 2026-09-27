@@ -3,6 +3,7 @@
 # about to its generated Gradle project and re-runs Gradle:
 #   jniLibs/arm64-v8a: libpython3.14.so, lib*_python.so, libqjs.so (QuickJS-NG)
 #   assets/ytmdl/runtime.zip: pruned CPython stdlib + seed yt-dlp
+#   playback: the Media3 service and its JNI bridge (tools/patch-gradle-project)
 #
 # Rust is built optimized and without DWARF by default: a debug libmain.so is
 # ~170 MB, and on emulated arm64 Cuttlefish system_server's finalizer watchdog
@@ -40,12 +41,15 @@ export PYO3_CROSS_LIB_DIR="$prefix/lib"
 export PYO3_CROSS_PYTHON_VERSION=3.14
 export _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__android_aarch64-linux-android
 
+project="$root/target/dx/ytmdl-app/$profile/android/app"
+main="$project/app/src/main"
+# dx regenerates build.gradle.kts (without Media3) but keeps other sources, and
+# assembles once itself; our playback Kotlin from a previous run would fail that.
+rm -rf "$main/kotlin/dev/nick"
+
 cd "$root"
 dx build --android --target aarch64-linux-android --package ytmdl-app \
     --no-default-features --features "$features" "${dx_flags[@]}"
-
-project="$root/target/dx/ytmdl-app/$profile/android/app"
-main="$project/app/src/main"
 [ -d "$main" ] || { echo "dx did not produce $main" >&2; exit 1; }
 
 # dx labels the app after the crate ("YtmdlApp").
@@ -64,6 +68,8 @@ cat >"$main/res/values/styles.xml" <<'EOF'
     </style>
 </resources>
 EOF
+
+"$root/tools/patch-gradle-project" "$project" "$root"
 
 jni="$main/jniLibs/arm64-v8a"
 mkdir -p "$jni"

@@ -1,0 +1,16 @@
+[package]
+name = "ytmdl-library"
+description = "The downloaded-music library: SQLite index, download queue and cover art cache"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+ytmdl-core.workspace = true
+rusqlite = { version = "0.40", features = ["bundled"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+lofty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

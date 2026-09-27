@@ -1,9 +1,10 @@
 # ytmdl
 
-Search YouTube Music and download tagged tracks on an arm64 Android phone. The
-app is Dioxus; the extraction is upstream yt-dlp, embedded rather than
-reimplemented, so YouTube changes are fixed by updating yt-dlp from inside the
-app instead of shipping a new APK.
+A music player for an arm64 Android phone that downloads from YouTube Music:
+search, download tagged tracks, and play them offline. The app is Dioxus; the
+extraction is upstream yt-dlp, embedded rather than reimplemented, so YouTube
+changes are fixed by updating yt-dlp from inside the app instead of shipping a
+new APK.
 
 - `crates/core`: embeds CPython 3.14 (python.org's Android build) through PyO3
   and runs the yt-dlp zipimport build with QuickJS-NG for YouTube's JS
@@ -14,10 +15,22 @@ app instead of shipping a new APK.
   `inspect`, `remux`, `update`, `selftest`).
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
-- `app`: the Dioxus app (search, download queue, settings).
+- `crates/library`: the library, an SQLite index (rusqlite) of downloaded
+  tracks, the download queue (so it survives restarts) and the saved play
+  queue, plus cover art resized for the UI. The files stay the record: a scan
+  of the music folders re-indexes them from their tags and forgets deleted ones.
+- `app`: the Dioxus app (library, search, downloads, settings, player).
+- `app/android`: Kotlin for playback, a Media3 ExoPlayer service in its own
+  `:player` process (notification, lock screen and headset controls) driven
+  from Rust over JNI. `tools/patch-gradle-project` adds it to the Gradle
+  project dx generates.
 
 Files land in `Music/<Artist>/<Album>/<Title> [<id>].m4a` on shared storage
 (after the all-files access prompt) and are added to MediaStore.
+
+The Rust side can't start twice in one process, and tao starts it again for a
+second activity, so the app's process ends with its activity (music plays on
+in the `:player` process) and back on the root page only hides the app.
 
 ## Setup
 
@@ -39,6 +52,7 @@ cargo run -p ytmdl-cli -- get <url> -o ~/Music     # desktop, same core
 | What | Command |
 |---|---|
 | Unit tests | `cargo test` |
+| Every screen as static HTML with sample data | `tools/ui-preview [--sample QUERY]`, then open `target/ui-preview/index.html` |
 | Native stack on arm64 bionic under qemu-user (offline) | `tools/arm64-sysroot` once, then `tools/qemu-smoke` |
 | Full app on a phone over adb | `tools/device-e2e [--build]` |
 | Full app on emulated arm64 (Cuttlefish) | `tools/cf up && tools/cf wait`, `tools/device-e2e --cf` |

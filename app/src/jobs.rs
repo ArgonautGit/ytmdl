@@ -1,13 +1,13 @@
 //! Download queue shared by the UI and the autotest hook.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
 use ytmdl_core::{CancelToken, DownloadOptions, Downloaded, Downloader, Entry, Error, Progress, TrackMeta};
+use ytmdl_library::{SavedDownload, SavedState};
 
+use crate::library::LibraryHandle;
 use crate::platform;
 
 /// Started runtime plus where downloads go.
@@ -53,6 +53,27 @@ impl Job {
     pub fn is_active(&self) -> bool {
         matches!(self.state, JobState::Queued | JobState::Downloading)
     }
+
+    fn from_saved(saved: SavedDownload) -> Job {
+        let state = match saved.state {
+            SavedState::Pending => JobState::Queued,
+            SavedState::Done { path, tagged } => JobState::Done { path, tagged },
+            SavedState::Failed(e) => JobState::Failed(e),
+            SavedState::Cancelled => JobState::Cancelled,
+        };
+        Job { id: saved.id as u64, entry: saved.entry, state, progress: None, cancel: CancelToken::new() }
+    }
+}
+
+impl JobState {
+    fn saved(&self) -> SavedState {
+        match self {
+            JobState::Queued | JobState::Downloading => SavedState::Pending,
+            JobState::Done { path, tagged } => SavedState::Done { path: path.clone(), tagged: *tagged },
+            JobState::Failed(e) => SavedState::Failed(e.clone()),
+            JobState::Cancelled => SavedState::Cancelled,
+        }
+    }
 }
 
 /// A track resolved from a pasted link, as a list entry.
@@ -67,22 +88,31 @@ pub fn entry_from_track(t: TrackMeta) -> Entry {
         thumbnail: t.cover_urls.first().map(|u| ytmdl_core::art_url(u, 226)),
         kind: Some("song".into()),
         year: t.year,
+        track_number: t.track_number,
     }
 }
 
-/// Handle to the job list. Progress arrives on Python worker threads and is
-/// funnelled back to the UI task through a channel.
+/// Handle to the job list, which is saved in the library database so downloads
+/// survive restarts. Progress arrives on Python worker threads and is funnelled
+/// back to the UI task through a channel.
 #[derive(Clone, Copy)]
 pub struct Queue {
     jobs: Signal<Vec<Job>>,
     tx: Signal<mpsc::UnboundedSender<(u64, Progress)>>,
-    next_id: Signal<Arc<AtomicU64>>,
+    library: LibraryHandle,
+    /// Ids for jobs the database could not record (not saved; far above row ids).
+    unsaved_ids: Signal<u64>,
 }
 
 impl Queue {
-    /// Must be called from a component (creates signals and a task).
-    pub fn new() -> Self {
-        let jobs = Signal::new(Vec::<Job>::new());
+    /// Must be called from a component (creates signals and a task). Loads the
+    /// saved jobs; pending ones wait for [`Queue::resume`].
+    pub fn new(library: LibraryHandle) -> Self {
+        let saved = library.get().download_jobs().unwrap_or_else(|e| {
+            tracing::warn!(target: "ytmdl", "loading saved downloads: {e}");
+            Vec::new()
+        });
+        let jobs = Signal::new(saved.into_iter().map(Job::from_saved).collect::<Vec<_>>());
         let (tx, mut rx) = mpsc::unbounded_channel::<(u64, Progress)>();
         let mut writer = jobs;
         spawn(async move {
@@ -95,16 +125,35 @@ impl Queue {
                 }
             }
         });
-        Queue { jobs, tx: Signal::new(tx), next_id: Signal::new(Arc::new(AtomicU64::new(1))) }
+        Queue { jobs, tx: Signal::new(tx), library, unsaved_ids: Signal::new(1 << 48) }
     }
 
     pub fn jobs(&self) -> Signal<Vec<Job>> {
         self.jobs
     }
 
+    /// Starts the jobs that were pending when the app last stopped; returns how many.
+    pub fn resume(&self, svc: Services) -> usize {
+        let pending: Vec<u64> =
+            self.jobs.peek().iter().filter(|j| j.state == JobState::Queued).map(|j| j.id).collect();
+        for &id in &pending {
+            self.spawn_execute(svc.clone(), id);
+        }
+        pending.len()
+    }
+
     /// Queues one track and returns once it finished (or failed).
     pub async fn run(&self, svc: Services, entry: Entry) -> Result<Downloaded, Error> {
-        let id = self.next_id.read().fetch_add(1, Ordering::Relaxed);
+        let id = match self.library.get().add_download_job(&entry) {
+            Ok(id) => id as u64,
+            Err(e) => {
+                tracing::warn!(target: "ytmdl", "saving download: {e}");
+                let mut next = self.unsaved_ids;
+                let id = *next.peek();
+                next.set(id + 1);
+                id
+            }
+        };
         let mut jobs = self.jobs;
         jobs.write().push(Job { id, entry, state: JobState::Queued, progress: None, cancel: CancelToken::new() });
         self.execute(svc, id).await
@@ -133,22 +182,28 @@ impl Queue {
             job.progress = None;
             job.cancel = CancelToken::new();
         }
+        self.save(id, &JobState::Queued);
+        self.spawn_execute(svc, id);
+    }
+
+    fn spawn_execute(&self, svc: Services, id: u64) {
         let queue = *self;
         dioxus::core::spawn_forever(async move {
             if let Err(e) = queue.execute(svc, id).await {
-                tracing::warn!(target: "ytmdl", "retry of job {id} failed: {e}");
+                tracing::warn!(target: "ytmdl", "download job {id} failed: {e}");
             }
         });
     }
 
     async fn execute(&self, svc: Services, id: u64) -> Result<Downloaded, Error> {
         let mut jobs = self.jobs;
-        let Some((url, cancel)) = jobs.read().iter().find(|j| j.id == id).map(|j| (j.entry.url.clone(), j.cancel.clone()))
+        let Some((entry, cancel)) = jobs.read().iter().find(|j| j.id == id).map(|j| (j.entry.clone(), j.cancel.clone()))
         else {
             return Err(Error::Cancelled);
         };
         let tx = self.tx.read().clone();
-        let opts = DownloadOptions::new(svc.current_output_dir());
+        let mut opts = DownloadOptions::new(svc.current_output_dir());
+        opts.track_number = entry.track_number;
         let token = cancel.clone();
         let on_progress = move |p| {
             // A cancelled run may have been retried already; keep its last report off the new one.
@@ -156,9 +211,10 @@ impl Queue {
                 drop(tx.send((id, p)));
             }
         };
-        let result = svc.dl.download(&url, &opts, on_progress, cancel.clone()).await;
+        let result = svc.dl.download(&entry.url, &opts, on_progress, cancel.clone()).await;
         if let Ok(done) = &result {
             platform::media_scan(&done.path);
+            self.add_to_library(done.clone()).await;
         }
         let state = match &result {
             Ok(done) => JobState::Done { path: done.path.clone(), tagged: done.tagged },
@@ -166,37 +222,77 @@ impl Queue {
             Err(e) => JobState::Failed(e.to_string()),
         };
         // Only if the job wasn't retried meanwhile (a retry swaps in a new token).
-        if let Some(job) = jobs.write().iter_mut().find(|j| j.id == id && j.cancel.ptr_eq(&cancel)) {
-            job.state = state;
+        let current = jobs.write().iter_mut().find(|j| j.id == id && j.cancel.ptr_eq(&cancel)).map(|job| {
+            job.state = state.clone();
+        });
+        if current.is_some() {
+            self.save(id, &state);
         }
         result
     }
 
+    /// Indexes a finished download (reads its cover art, so off the UI thread).
+    async fn add_to_library(&self, done: Downloaded) {
+        let library = self.library.get();
+        match crate::blocking(move || library.add_download(&done)).await {
+            Ok(Ok(_)) => self.library.changed(),
+            Ok(Err(e)) => tracing::warn!(target: "ytmdl", "adding to the library: {e}"),
+            Err(e) => tracing::warn!(target: "ytmdl", "adding to the library: {e:#}"),
+        }
+    }
+
+    fn save(&self, id: u64, state: &JobState) {
+        if let Err(e) = self.library.get().set_download_state(id as i64, &state.saved()) {
+            tracing::warn!(target: "ytmdl", "saving download {id}: {e}");
+        }
+    }
+
     pub fn cancel(&self, id: u64) {
         let mut jobs = self.jobs;
-        if let Some(job) = jobs.write().iter_mut().find(|j| j.id == id) {
-            Self::cancel_job(job);
+        let was_queued = jobs.write().iter_mut().find(|j| j.id == id).is_some_and(Self::cancel_job);
+        if was_queued {
+            self.save(id, &JobState::Cancelled);
         }
     }
 
     /// Cancels every queued and running job; returns how many there were.
     pub fn cancel_all(&self) -> usize {
         let mut jobs = self.jobs;
-        let mut list = jobs.write();
-        list.iter_mut().filter(|j| j.is_active()).map(Self::cancel_job).count()
+        let mut queued = Vec::new();
+        let count = jobs
+            .write()
+            .iter_mut()
+            .filter(|j| j.is_active())
+            .inspect(|j| {
+                if j.state == JobState::Queued {
+                    queued.push(j.id);
+                }
+            })
+            .map(Self::cancel_job)
+            .count();
+        for id in queued {
+            self.save(id, &JobState::Cancelled);
+        }
+        count
     }
 
     /// A running job stops at its next progress report; a waiting one is shown as
-    /// cancelled right away rather than when a worker frees up.
-    fn cancel_job(job: &mut Job) {
+    /// cancelled right away rather than when a worker frees up (it may not have
+    /// been started at all). Returns whether it was waiting.
+    fn cancel_job(job: &mut Job) -> bool {
         job.cancel.cancel();
-        if job.state == JobState::Queued {
+        let queued = job.state == JobState::Queued;
+        if queued {
             job.state = JobState::Cancelled;
         }
+        queued
     }
 
     pub fn clear_finished(&self) {
         let mut jobs = self.jobs;
         jobs.write().retain(Job::is_active);
+        if let Err(e) = self.library.get().remove_finished_jobs() {
+            tracing::warn!(target: "ytmdl", "clearing finished downloads: {e}");
+        }
     }
 }

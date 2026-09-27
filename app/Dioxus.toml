@@ -16,8 +16,12 @@ compile_sdk = 36
 
 # INTERNET is always added. Downloads go to the shared Music folder, which needs
 # all-files access on API 30+ (granted in Settings, or by appops in tests).
+# Playback is a media foreground service (declared by tools/patch-gradle-project).
 [android.raw]
 manifest = """
 <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
 """

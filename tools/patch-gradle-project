@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Adds playback to the Gradle project `dx build` generates (run by tools/build-apk).
+
+  tools/patch-gradle-project <gradle project dir> <repo root>
+
+- app/android/*.kt: the Media3 playback service, its JNI bridge (YtmdlPlayer),
+  and a MainActivity replacing the generated one.
+- Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
+  generated project compiles with (1.10+ pulls in kotlin-stdlib 2.2).
+- The manifest: the service, in its own ":player" process, and every
+  configuration change handled by the activity. The Rust side can't survive the
+  activity being re-created in one process (see MainActivity.kt).
+
+Safe to run again on an already patched project.
+"""
+
+import re
+import shutil
+import sys
+from pathlib import Path
+
+MEDIA3 = "1.9.4"
+
+CONFIG_CHANGES = (
+    "orientation|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+    "|uiMode|density|fontScale|locale|layoutDirection|colorMode|touchscreen|mcc|mnc"
+)
+
+SERVICE = """\
+        <service android:name="dev.nick.ytmdl.PlaybackService" android:process=":player"
+            android:exported="true" android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+"""
+
+
+def main() -> None:
+    project, root = map(Path, sys.argv[1:])
+    main_dir = project / "app/src/main"
+    sources = root / "app/android"
+
+    kotlin = main_dir / "kotlin"
+    shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
+    ours = kotlin / "dev/nick/ytmdl"
+    ours.mkdir(parents=True, exist_ok=True)
+    for name in ("PlaybackService.kt", "YtmdlPlayer.kt"):
+        shutil.copy(sources / name, ours / name)
+
+    gradle = project / "app/build.gradle.kts"
+    text = gradle.read_text()
+    if "androidx.media3" not in text:
+        deps = "".join(
+            f'    implementation("androidx.media3:{name}:{MEDIA3}")\n' for name in ("media3-exoplayer", "media3-session")
+        )
+        text, n = re.subn(r"^dependencies \{\n", lambda m: m.group(0) + deps, text, count=1, flags=re.M)
+        assert n == 1, "no dependencies block in build.gradle.kts"
+        gradle.write_text(text)
+
+    manifest = main_dir / "AndroidManifest.xml"
+    text = manifest.read_text()
+    text, n = re.subn(r'android:configChanges="[^"]*"', f'android:configChanges="{CONFIG_CHANGES}"', text)
+    assert n == 1, "the activity's configChanges not found"
+    if "PlaybackService" not in text:
+        assert text.count("</application>") == 1
+        text = text.replace("    </application>", SERVICE + "    </application>")
+        assert "PlaybackService" in text, "could not place the service"
+    manifest.write_text(text)
+
+
+if __name__ == "__main__":
+    main()
