@@ -9,10 +9,11 @@ new APK.
 - `crates/core`: embeds CPython 3.14 (python.org's Android build) through PyO3
   and runs the yt-dlp zipimport build with QuickJS-NG for YouTube's JS
   challenges. Search, resolve, download with progress and cancellation, M4A
-  defragmenting (no ffmpeg), tagging with cover art (lofty), and the yt-dlp
-  updater.
+  defragmenting (no ffmpeg), tagging with cover art (lofty), lyrics from
+  [LRCLIB](https://lrclib.net) (time-synced where it has them, stored in the
+  file as LRC), and the yt-dlp updater.
 - `crates/cli`: desktop harness (`version`, `search`, `resolve`, `get`,
-  `inspect`, `remux`, `update`, `selftest`).
+  `lyrics`, `inspect`, `remux`, `update`, `selftest`).
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
@@ -22,8 +23,10 @@ new APK.
   re-indexes them from their tags and forgets deleted ones.
 - `app`: the Dioxus app (library with search and sorting, playlists, search,
   downloads, settings, listening stats, player with A-B loops over part of a
-  song or a run of the queue, saved sections, a sleep timer and a reorderable
-  queue). Playlists downloaded from a link stay synced with YouTube: new songs
+  song or a run of the queue, saved sections, a sleep timer, a reorderable
+  queue and lyrics that follow the song). Songs without lyrics are looked up
+  when their lyrics are opened, and what is found is saved into the file; a
+  switch in Settings turns the LRCLIB lookups off. Playlists downloaded from a link stay synced with YouTube: new songs
   there are downloaded, removed ones leave the playlist (the files stay), and
   the order follows. They sync when the app starts or returns to the screen
   (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
