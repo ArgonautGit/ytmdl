@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Prints a hash of the source an APK build reads: the committed tree plus
+# uncommitted changes and untracked files, leaving out ignored paths (target/,
+# .deps/, which tracked files pin) and the top-level docs. tools/build-apk saves
+# it beside the APK, so `nix run .#install` can tell when the APK is out of date.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+docs=':(exclude,glob)*.md'
+{
+    git ls-tree HEAD | grep -v $'\t[^/]*\\.md$' || true
+    git -c core.quotepath=off diff --no-ext-diff --no-textconv --no-color --binary HEAD -- . "$docs"
+    git ls-files -z --others --exclude-standard -- . "$docs" | xargs -0 -r sha256sum --
+} | sha256sum | cut -d' ' -f1

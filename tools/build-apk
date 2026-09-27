@@ -11,6 +11,7 @@
 # always a debuggable, debug-signed build with the `autotest` hook compiled in.
 #
 #   tools/build-apk [--debug] [--no-autotest]   -> target/ytmdl-arm64.apk
+#                                                  (+ .stamp, see tools/source-stamp)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,6 +32,11 @@ if [ "$profile" = release ]; then
     dx_flags+=(--release)
     export CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_STRIP=debuginfo
 fi
+
+# The source this build reads, saved beside the APK for `nix run .#install`.
+# Taken before building, so edits made meanwhile count as changes.
+stamp="$("$root/tools/source-stamp" 2>/dev/null || true)"
+rm -f "$root/target/ytmdl-arm64.apk.stamp"
 
 for f in "$prefix/lib/libpython3.14.so" "$deps/qjs/arm64-v8a/qjs" "$deps/yt-dlp/yt-dlp.zip"; do
     [ -e "$f" ] || { echo "missing $f (tools/fetch-deps, tools/build-qjs)" >&2; exit 1; }
@@ -105,5 +111,8 @@ rm -f "$apk"
 (cd "$project" && ./gradlew --quiet assembleDebug)
 out="$root/target/ytmdl-arm64.apk"
 cp -f "$apk" "$out"
+if [ -n "$stamp" ]; then
+    echo "$stamp" >"$out.stamp"
+fi
 echo "$out ($(du -h "$out" | cut -f1))"
 unzip -l "$out" | grep -E "lib/arm64-v8a/|assets/ytmdl/" | awk '{printf "  %8d  %s\n", $1, $4}'

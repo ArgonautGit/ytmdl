@@ -98,49 +98,117 @@
         kotlin.compiler.execution.strategy=in-process
         android.aapt2FromMavenOverride=${sdk}/build-tools/${builtins.head versions.buildTools}/aapt2
       '';
+
+      tools = [
+        android.androidsdk
+        pkgs.jdk17
+        rust
+        pkgs.dioxus-cli
+        pkgs.cargo-ndk
+        python
+        pkgs.quickjs-ng
+        pkgs.pkg-config
+        pkgs.openssl
+        pkgs.cmake
+        pkgs.ninja
+        pkgs.git
+        pkgs.curl
+        pkgs.wget
+        pkgs.unzip
+        pkgs.file
+        pkgs.jq
+        pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
+        # arm64 test layers
+        pkgs.qemu-user
+        pkgs.erofs-utils
+        pkgs.e2fsprogs
+      ];
+
+      # Shared by the dev shell and the apps; sets $root to the checkout.
+      setup = ''
+        export ANDROID_USER_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}/android-nix"
+        export GRADLE_USER_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}/android-nix/gradle"
+        mkdir -p "$GRADLE_USER_HOME"
+        ln -sfn ${gradleProperties} "$GRADLE_USER_HOME/gradle.properties"
+        export PATH="${sdk}/cmake/${versions.cmake}/bin:${ndkBin}:$PATH"
+        export RUST_SRC_PATH="${rust}/lib/rustlib/src/rust/library"
+        # Pieces downloaded by tools/fetch-deps.
+        root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+        export YTMDL_YTDLP="$root/.deps/yt-dlp/yt-dlp.zip"
+      '';
+
+      # `nix run .#<name>` in the checkout: `text` runs there with the dev
+      # shell's tools and environment.
+      app = name: description: text: {
+        type = "app";
+        meta.description = description;
+        program = lib.getExe (
+          pkgs.writeShellApplication {
+            name = "ytmdl-${name}";
+            runtimeInputs = tools;
+            text =
+              lib.concatStrings (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}\n") env)
+              + setup
+              + ''
+                if [ ! -x "$root/tools/build-apk" ]; then
+                  echo "Run this inside the ytmdl checkout." >&2
+                  exit 1
+                fi
+                cd "$root"
+              ''
+              + text;
+          }
+        );
+      };
     in
     {
       devShells.${system}.default = pkgs.mkShell (
         env
         // {
-          packages = [
-            android.androidsdk
-            pkgs.jdk17
-            rust
-            pkgs.dioxus-cli
-            pkgs.cargo-ndk
-            python
-            pkgs.quickjs-ng
-            pkgs.pkg-config
-            pkgs.openssl
-            pkgs.cmake
-            pkgs.ninja
-            pkgs.git
-            pkgs.curl
-            pkgs.wget
-            pkgs.unzip
-            pkgs.file
-            pkgs.jq
-            pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
-            # arm64 test layers
-            pkgs.qemu-user
-            pkgs.erofs-utils
-            pkgs.e2fsprogs
-          ];
+          packages = tools;
           RA_SERVER_PATH = "${rust}/bin/rust-analyzer";
-          shellHook = ''
-            export ANDROID_USER_HOME="''${XDG_DATA_HOME:-$HOME/.local/share}/android-nix"
-            export GRADLE_USER_HOME="''${XDG_CACHE_HOME:-$HOME/.cache}/android-nix/gradle"
-            mkdir -p "$GRADLE_USER_HOME"
-            ln -sfn ${gradleProperties} "$GRADLE_USER_HOME/gradle.properties"
-            export PATH="${sdk}/cmake/${versions.cmake}/bin:${ndkBin}:$PATH"
-            export RUST_SRC_PATH="${rust}/lib/rustlib/src/rust/library"
-            # Pieces downloaded by tools/fetch-deps.
-            root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-            export YTMDL_YTDLP="$root/.deps/yt-dlp/yt-dlp.zip"
-          '';
+          shellHook = setup;
         }
       );
+
+      apps.${system} = {
+        # nix run .#build-apk [-- --debug | --no-autotest]
+        build-apk = app "build-apk" "Build target/ytmdl-arm64.apk" ''
+          exec tools/build-apk "$@"
+        '';
+
+        # nix run .#install [-- [--build] [build-apk options]]
+        install =
+          app "install"
+            "Install the APK on the phone over adb, building it first if the source changed (--build: always)"
+            ''
+              force=false
+              if [ "''${1:-}" = --build ]; then
+                force=true
+                shift
+              fi
+              # Before building, so a missing phone doesn't cost a build.
+              if ! state="$(adb get-state 2>&1)"; then
+                echo "adb: $state" >&2
+                echo "Connect the phone with USB debugging on (with several devices, set ANDROID_SERIAL)." >&2
+                exit 1
+              fi
+              apk=target/ytmdl-arm64.apk
+              if $force; then
+                tools/build-apk "$@"
+              elif [ ! -f "$apk" ]; then
+                echo "No APK yet; building it."
+                tools/build-apk "$@"
+              elif [ "$(tools/source-stamp)" != "$(cat "$apk.stamp" 2>/dev/null)" ]; then
+                echo "The source changed since the APK was built; building it again."
+                tools/build-apk "$@"
+              else
+                echo "The APK is up to date with the source."
+              fi
+              # -r keeps the app's data: library, playlists, settings.
+              adb install -r "$apk"
+            '';
+      };
 
       formatter.${system} = pkgs.nixfmt;
     };

@@ -58,6 +58,20 @@ tools/build-apk        # -> target/ytmdl-arm64.apk (release Rust, debug-signed, 
 cargo run -p ytmdl-cli -- get <url> -o ~/Music     # desktop, same core
 ```
 
+Without entering the dev shell (run in the checkout):
+
+```sh
+nix run .#build-apk                # tools/build-apk; options after --
+nix run .#install                  # adb install -r, building first if the source changed
+nix run .#install -- --build       # always build first (build-apk options after --build)
+```
+
+Install keeps the app's data (library, playlists, settings). It rebuilds when
+the source differs from what the APK was built from (`tools/source-stamp`,
+recorded by `tools/build-apk`), whatever build options that was. The phone
+needs USB debugging on; with several devices attached, pick one with
+`ANDROID_SERIAL`.
+
 ## Test
 
 | What | Command |
