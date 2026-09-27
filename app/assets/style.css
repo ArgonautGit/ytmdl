@@ -603,6 +603,50 @@ button.icon-btn:active { background: var(--press); }
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 .cover.now-cover > .icon { width: 72px; height: 72px; }
+.now-actions { display: flex; align-items: center; }
+
+/* Lyrics, in place of the cover. */
+.lyrics {
+    position: relative;
+    width: min(calc(100vw - 56px), 44vh);
+    aspect-ratio: 1;
+    margin: 12px auto 0;
+    padding: 8px 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12%, #000 88%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 12%, #000 88%, transparent 100%);
+}
+.lyrics .line {
+    display: block;
+    width: 100%;
+    padding: 6px 12px;
+    color: var(--muted);
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    transition: color 0.2s;
+}
+.lyrics button.line:first-child { margin-top: 30%; }
+.lyrics button.line:last-child { margin-bottom: 30%; }
+.lyrics .line.past { color: rgba(255, 255, 255, 0.55); }
+.lyrics .line.current { color: var(--fg); }
+.lyrics .line.plain { color: var(--fg); font-size: 17px; font-weight: 500; padding: 2px 12px; }
+.lyrics .line.gap { height: 16px; padding: 0; }
+.lyrics-note {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    height: 100%;
+    padding: 0 24px;
+    color: var(--muted);
+    text-align: center;
+}
 .now-meta { position: relative; padding: 24px 28px 0; }
 .now-meta h1 {
     font-size: 22px;

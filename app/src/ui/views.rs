@@ -142,6 +142,20 @@ pub enum RepeatMode {
 }
 
 /// The song the player is on.
+/// What the lyrics box in Now Playing shows.
+#[derive(Clone, PartialEq, Debug)]
+pub enum LyricsView {
+    Loading,
+    Searching,
+    /// Timed lines; `current` is the one being sung.
+    Synced { lines: Vec<String>, current: Option<usize> },
+    Plain(Vec<String>),
+    Instrumental,
+    /// `searched`: LRCLIB was asked and doesn't have them.
+    Missing { searched: bool },
+    Failed(String),
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct NowItem {
     pub title: String,
@@ -1366,6 +1380,15 @@ pub fn NowPlayingPage(
     onsection: EventHandler<usize>,
     onsavesection: EventHandler<()>,
     oneditsections: EventHandler<()>,
+    /// The lyrics, shown instead of the cover while open.
+    #[props(default)]
+    lyrics: Option<LyricsView>,
+    /// The lyrics button: opens or closes them.
+    onlyrics: EventHandler<()>,
+    /// A synced line tapped: plays from it.
+    onlyricsline: EventHandler<usize>,
+    /// Look the lyrics up on LRCLIB.
+    onlyricssearch: EventHandler<()>,
 ) -> Element {
     let max = duration.max(1.0);
     let pct = (position / max * 100.0).clamp(0.0, 100.0);
@@ -1394,17 +1417,29 @@ pub fn NowPlayingPage(
                     Svg { icon: Icon::ChevronDown, size: 28 }
                 }
                 span { class: "now-title", "Now playing" }
-                button {
-                    class: if sleep.is_some() { "sleep-btn on" } else { "sleep-btn" },
-                    "aria-label": "Sleep timer",
-                    onclick: move |_| onsleep.call(()),
-                    Svg { icon: Icon::Moon, size: 22 }
-                    if let Some(left) = sleep.clone() {
-                        span { "{left}" }
+                div { class: "now-actions",
+                    button {
+                        class: if lyrics.is_some() { "sleep-btn on" } else { "sleep-btn" },
+                        "aria-label": if lyrics.is_some() { "Hide lyrics" } else { "Show lyrics" },
+                        "aria-pressed": "{lyrics.is_some()}",
+                        onclick: move |_| onlyrics.call(()),
+                        Svg { icon: Icon::Lyrics, size: 22 }
+                    }
+                    button {
+                        class: if sleep.is_some() { "sleep-btn on" } else { "sleep-btn" },
+                        "aria-label": "Sleep timer",
+                        onclick: move |_| onsleep.call(()),
+                        Svg { icon: Icon::Moon, size: 22 }
+                        if let Some(left) = sleep.clone() {
+                            span { "{left}" }
+                        }
                     }
                 }
             }
-            Cover { url: now.art_large.clone(), class: "cover now-cover" }
+            match lyrics.clone() {
+                Some(view) => rsx! { LyricsPanel { view, online: onlyricsline, onsearch: onlyricssearch } },
+                None => rsx! { Cover { url: now.art_large.clone(), class: "cover now-cover" } },
+            }
             div { class: "now-meta",
                 h1 { "{now.title}" }
                 div { class: "sub", "{sub}" }
@@ -1523,6 +1558,57 @@ pub fn NowPlayingPage(
             }
             div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
                 SongList { songs: queue, onplay: onskip, onmore, handles: true }
+            }
+        }
+    }
+}
+
+/// The lyrics box of Now Playing, the size of the cover it replaces.
+#[component]
+fn LyricsPanel(view: LyricsView, online: EventHandler<usize>, onsearch: EventHandler<()>) -> Element {
+    let note = |text: &str, action: Option<&'static str>| {
+        rsx! {
+            div { class: "lyrics-note",
+                p { "{text}" }
+                if let Some(label) = action {
+                    button { class: "secondary", onclick: move |_| onsearch.call(()), "{label}" }
+                }
+            }
+        }
+    };
+    rsx! {
+        div { class: "lyrics",
+            match view {
+                LyricsView::Loading => rsx! { div { class: "lyrics-note", div { class: "spinner" } } },
+                LyricsView::Searching => rsx! {
+                    div { class: "lyrics-note",
+                        div { class: "spinner" }
+                        p { "Looking up the lyrics…" }
+                    }
+                },
+                LyricsView::Synced { lines, current } => rsx! {
+                    for (i , line) in lines.into_iter().enumerate() {
+                        button {
+                            key: "{i}",
+                            class: match current {
+                                Some(c) if c == i => "line current",
+                                Some(c) if i < c => "line past",
+                                _ => "line",
+                            },
+                            onclick: move |_| online.call(i),
+                            if line.is_empty() { "♪" } else { "{line}" }
+                        }
+                    }
+                },
+                LyricsView::Plain(lines) => rsx! {
+                    for (i , line) in lines.into_iter().enumerate() {
+                        p { key: "{i}", class: if line.is_empty() { "line gap" } else { "line plain" }, "{line}" }
+                    }
+                },
+                LyricsView::Instrumental => note("Instrumental", None),
+                LyricsView::Missing { searched: true } => note("No lyrics found for this song.", Some("Try again")),
+                LyricsView::Missing { searched: false } => note("This song has no lyrics saved.", Some("Look up on LRCLIB")),
+                LyricsView::Failed(e) => note(&e, Some("Try again")),
             }
         }
     }
@@ -1775,6 +1861,9 @@ pub fn SettingsPage(
     /// Songs play at an even loudness.
     normalize: bool,
     ontogglenormalize: EventHandler<()>,
+    /// Songs without lyrics are looked up on LRCLIB.
+    lyrics_lookup: bool,
+    ontogglelyrics: EventHandler<()>,
 ) -> Element {
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
@@ -1856,6 +1945,26 @@ pub fn SettingsPage(
                 }
             }
             p { class: "hint", "YouTube changes often. If downloads start failing, update yt-dlp, then restart the app (swipe it away in recent apps)." }
+        }
+        section { class: "group",
+            h2 { "Lyrics" }
+            div { class: "card",
+                div { class: "item",
+                    Svg { icon: Icon::Lyrics }
+                    div { class: "meta",
+                        div { class: "title", "Look up lyrics" }
+                        div { class: "sub", "From LRCLIB, for new downloads and songs whose lyrics you open" }
+                    }
+                    button {
+                        class: if lyrics_lookup { "switch on" } else { "switch" },
+                        role: "switch",
+                        "aria-checked": "{lyrics_lookup}",
+                        "aria-label": "Look up lyrics",
+                        onclick: move |_| ontogglelyrics.call(()),
+                        span { class: "knob" }
+                    }
+                }
+            }
         }
         section { class: "group",
             h2 { "About" }

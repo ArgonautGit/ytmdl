@@ -272,12 +272,40 @@ impl Runtime {
 
     /// HTTP GET through yt-dlp's networking (cookies, proxies and TLS settings apply).
     pub async fn fetch(&self, url: String, max_bytes: usize) -> Result<Vec<u8>> {
+        let missing = url.clone();
+        self.fetch_with(url, max_bytes, Vec::new(), false)
+            .await?
+            .ok_or_else(|| Error::Invalid(format!("{missing} returned nothing")))
+    }
+
+    /// Like [`Runtime::fetch`] with extra request headers; `None` when the
+    /// server answers 404 Not Found.
+    pub async fn fetch_optional(
+        &self,
+        url: String,
+        max_bytes: usize,
+        headers: Vec<(String, String)>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.fetch_with(url, max_bytes, headers, true).await
+    }
+
+    async fn fetch_with(
+        &self,
+        url: String,
+        max_bytes: usize,
+        headers: Vec<(String, String)>,
+        missing_ok: bool,
+    ) -> Result<Option<Vec<u8>>> {
         self.run(&self.0.meta, move |py, bridge| {
+            let headers: std::collections::HashMap<String, String> = headers.into_iter().collect();
             let data = bridge
-                .call_method1("fetch", (url, max_bytes))
+                .call_method1("fetch", (url, max_bytes, serde_json::to_string(&headers)?, missing_ok))
                 .map_err(|e| py_error(py, e))?;
+            if data.is_none() {
+                return Ok(None);
+            }
             let bytes = data.cast::<PyBytes>().map_err(|e| Error::Python(e.to_string()))?;
-            Ok(bytes.as_bytes().to_vec())
+            Ok(Some(bytes.as_bytes().to_vec()))
         })
         .await
     }

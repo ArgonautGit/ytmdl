@@ -204,6 +204,7 @@ impl Queue {
         let tx = self.tx.read().clone();
         let mut opts = DownloadOptions::new(svc.current_output_dir());
         opts.track_number = entry.track_number;
+        opts.lyrics = crate::ui::lyrics_lookup_enabled(&self.library.get());
         let token = cancel.clone();
         let on_progress = move |p| {
             // A cancelled run may have been retried already; keep its last report off the new one.

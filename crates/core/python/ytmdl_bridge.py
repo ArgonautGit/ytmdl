@@ -263,13 +263,22 @@ def download(args_json, url, on_progress):
         return _result(ydl, ydl.extract_info(url, download=True), url)
 
 
-def fetch(url, max_bytes):
-    """Small HTTP GET through yt-dlp's networking stack (e.g. cover art)."""
+def fetch(url, max_bytes, headers_json="{}", missing_ok=False):
+    """Small HTTP GET through yt-dlp's networking stack (e.g. cover art).
+    With `missing_ok`, a 404 answer returns None instead of raising."""
     import yt_dlp
+    from yt_dlp.networking import Request
+    from yt_dlp.networking.exceptions import HTTPError
 
+    request = Request(url, headers=json.loads(headers_json))
     with yt_dlp.YoutubeDL({"quiet": True, "logger": _Logger()}) as ydl:
-        with ydl.urlopen(url) as resp:
-            data = resp.read(max_bytes + 1)
+        try:
+            with ydl.urlopen(request) as resp:
+                data = resp.read(max_bytes + 1)
+        except HTTPError as e:
+            if missing_ok and e.status == 404:
+                return None
+            raise
     if len(data) > max_bytes:
         raise ValueError(f"response from {url} exceeds {max_bytes} bytes")
     return data

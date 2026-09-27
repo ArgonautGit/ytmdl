@@ -54,6 +54,21 @@ enum Cmd {
         /// Don't measure the loudness for ReplayGain.
         #[arg(long)]
         no_replaygain: bool,
+        /// Don't look up lyrics on LRCLIB.
+        #[arg(long)]
+        no_lyrics: bool,
+    },
+    /// Look a song's lyrics up on LRCLIB.
+    Lyrics {
+        title: String,
+        /// Repeat for several artists; the first is looked up.
+        #[arg(long)]
+        artist: Vec<String>,
+        #[arg(long)]
+        album: Option<String>,
+        /// Length in seconds, to tell recordings apart.
+        #[arg(long)]
+        duration: Option<f64>,
     },
     /// Read back a file's tags and audio properties.
     Inspect { file: PathBuf },
@@ -167,16 +182,30 @@ async fn main() -> Result<()> {
                 s
             }
         })?,
-        Cmd::Get { url, output, no_tags, no_replaygain } => {
+        Cmd::Get { url, output, no_tags, no_replaygain, no_lyrics } => {
             let mut opts = DownloadOptions::new(output);
             opts.write_tags = !no_tags;
             opts.measure_loudness = !no_replaygain;
+            opts.lyrics = !no_lyrics;
             let done = dl
                 .download(url, &opts, report_progress, CancelToken::new())
                 .await
                 .inspect_err(|_| eprintln!())?;
             eprintln!();
             print(&cli, &done, |d| format!("{} (tagged: {})", d.path.display(), d.tagged))?
+        }
+        Cmd::Lyrics { title, artist, album, duration } => {
+            let song = ytmdl_core::lyrics::Song {
+                title,
+                artists: artist,
+                album: album.as_deref(),
+                duration_secs: *duration,
+            };
+            let found = dl.lyrics(song).await?.context("LRCLIB has no lyrics for this song")?;
+            print(&cli, &found, |l| match l.text() {
+                Some(text) => text.to_owned(),
+                None => "(instrumental)".into(),
+            })?
         }
         Cmd::Update { channel } => {
             let channel = match channel {
