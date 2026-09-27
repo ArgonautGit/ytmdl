@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Prints the build number of the checkout: its commit count, so builds count up
+# along one line of history. tools/build-apk makes it the APK's versionCode and
+# compiles it into the app, which offers a published build (see
+# .github/workflows/apk.yml) when its number is higher.
+#
+#   tools/build-number          e.g. 57
+#   tools/build-number --commit the commit hash too: "57 <sha>[-dirty]"
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+    echo "a shallow clone can't count its commits; fetch the full history (git fetch --unshallow)" >&2
+    exit 1
+fi
+count="$(git rev-list --count HEAD)"
+if [ "${1:-}" = --commit ]; then
+    commit="$(git rev-parse HEAD)"
+    git diff --quiet HEAD -- || commit="$commit-dirty"
+    echo "$count $commit"
+else
+    echo "$count"
+fi

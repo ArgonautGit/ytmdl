@@ -1,0 +1,142 @@
+# Builds the APK on GitHub and publishes it as the build the app updates to
+# (app/src/ui/app_update.rs). Start it from the Actions tab ("APK", then "Run
+# workflow", for any branch) or with
+#
+#   gh workflow run apk.yml [--ref <branch>] [-f publish=false]
+#
+# A published build is the release `build-<n>`, n from tools/build-number,
+# holding ytmdl-arm64.apk and ytmdl-update.json, which describes it. The app
+# reads the newest release's ytmdl-update.json and offers the build when n is
+# higher than its own. Every run also keeps the APK as a workflow artifact.
+#
+# Android only installs an update signed with the key of the installed app.
+# The APK is debug-signed, so publishing needs your debug keystore as the
+# repository secret ANDROID_DEBUG_KEYSTORE (see README.md, "Published
+# builds"); then these builds and tools/build-apk's update one another.
+name: APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish it for the app to update to
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # tools/build-number counts the commits.
+          fetch-depth: 0
+
+      - name: Number the build
+        id: number
+        env:
+          HAS_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE != '' }}
+        run: |
+          build="$(tools/build-number)"
+          echo "build=$build" >>"$GITHUB_OUTPUT"
+          echo "tag=build-$build" >>"$GITHUB_OUTPUT"
+          echo "Build $build of $GITHUB_REF_NAME ($GITHUB_SHA)"
+          if [ "$PUBLISH" = true ]; then
+            if [ "$HAS_KEYSTORE" != true ]; then
+              echo "::error::Publishing needs the ANDROID_DEBUG_KEYSTORE secret: without it the APK is signed with a throwaway key and can't update the installed app (see README.md, \"Published builds\")."
+              exit 1
+            fi
+            if gh release view "build-$build" >/dev/null 2>&1; then
+              echo "::error::Build $build (release build-$build) is already published. Builds are numbered by commit count; push a commit to publish another."
+              exit 1
+            fi
+          fi
+
+      # The runner's preinstalled SDKs; the build uses the flake's.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .deps/dl
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cache/android-nix/gradle/caches
+            ~/.cache/android-nix/gradle/wrapper
+            target/aarch64-linux-android
+          key: apk-${{ hashFiles('Cargo.lock', 'flake.lock', 'nix/versions.nix', 'tools/deps.sha256') }}
+          restore-keys: apk-
+
+      - name: Signing key
+        shell: nix develop .#ci --command bash -euo pipefail {0}
+        env:
+          DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE" ]; then
+            echo "No ANDROID_DEBUG_KEYSTORE: signing with a new debug key."
+            exit 0
+          fi
+          # Where the Android Gradle plugin looks for the debug keystore.
+          mkdir -p "$ANDROID_USER_HOME"
+          base64 -d <<<"$DEBUG_KEYSTORE" >"$ANDROID_USER_HOME/debug.keystore"
+          # "android" is the password of every debug keystore.
+          keytool -list -v -keystore "$ANDROID_USER_HOME/debug.keystore" -storepass android | grep -m1 "SHA256:"
+
+      - name: Build
+        shell: nix develop .#ci --command bash -euo pipefail {0}
+        run: |
+          # The dev shell keeps a desktop responsive; the runner is all ours.
+          export CARGO_BUILD_JOBS="$(nproc)" CMAKE_BUILD_PARALLEL_LEVEL="$(nproc)"
+          tools/fetch-deps
+          tools/build-qjs
+          tools/build-apk --no-autotest
+
+      - name: Describe the build
+        env:
+          BUILD: ${{ steps.number.outputs.build }}
+          TAG: ${{ steps.number.outputs.tag }}
+        run: |
+          apk=target/ytmdl-arm64.apk
+          jq -n \
+            --argjson build "$BUILD" \
+            --arg commit "$GITHUB_SHA" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/ytmdl-arm64.apk" \
+            --arg sha256 "$(sha256sum "$apk" | cut -d' ' -f1)" \
+            --argjson size "$(stat -c %s "$apk")" \
+            '{build: $build, commit: $commit, url: $url, sha256: $sha256, size: $size}' \
+            >target/ytmdl-update.json
+          cat target/ytmdl-update.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ytmdl-build-${{ steps.number.outputs.build }}
+          path: |
+            target/ytmdl-arm64.apk
+            target/ytmdl-update.json
+          if-no-files-found: error
+
+      - name: Publish
+        if: inputs.publish
+        env:
+          BUILD: ${{ steps.number.outputs.build }}
+          TAG: ${{ steps.number.outputs.tag }}
+        run: |
+          gh release create "$TAG" target/ytmdl-arm64.apk target/ytmdl-update.json \
+            --target "$GITHUB_SHA" --title "Build $BUILD" --generate-notes --latest

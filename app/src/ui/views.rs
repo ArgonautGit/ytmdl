@@ -249,6 +249,22 @@ pub struct About {
     pub openssl: String,
 }
 
+/// Updates of the app itself, for builds that can install them.
+#[derive(Clone, PartialEq, Debug)]
+pub struct AppUpdateInfo {
+    /// This build's number.
+    pub build: u32,
+    /// A newer build downloaded and ready to install.
+    pub ready: Option<u32>,
+    /// A check or download is running.
+    pub busy: bool,
+    pub message: Option<String>,
+    /// Daily checks.
+    pub auto: bool,
+    /// Under the automatic updates switch.
+    pub auto_note: String,
+}
+
 pub fn duration_text(secs: f64) -> String {
     let s = secs.round() as u64;
     if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }
@@ -1856,6 +1872,12 @@ pub fn SettingsPage(
     auto_note: String,
     onupdate: EventHandler<Channel>,
     ontoggleauto: EventHandler<()>,
+    /// No section on builds that can't update themselves.
+    #[props(default)]
+    app_update: Option<AppUpdateInfo>,
+    oncheckapp: EventHandler<()>,
+    oninstallapp: EventHandler<()>,
+    ontoggleautoapp: EventHandler<()>,
     onallow: EventHandler<()>,
     onlicenses: EventHandler<()>,
     /// Songs play at an even loudness.
@@ -1945,6 +1967,47 @@ pub fn SettingsPage(
                 }
             }
             p { class: "hint", "YouTube changes often. If downloads start failing, update yt-dlp, then restart the app (swipe it away in recent apps)." }
+        }
+        if let Some(app) = app_update {
+            section { class: "group",
+                h2 { "App" }
+                div { class: "card",
+                    div { class: "item",
+                        Svg { icon: Icon::DownloadCircle }
+                        div { class: "meta",
+                            div { class: "title", "Build" }
+                            div { class: "sub",
+                                {dotted([Some(app.build.to_string()), app.ready.map(|b| format!("build {b} ready to install"))])}
+                            }
+                        }
+                    }
+                    div { class: "actions",
+                        button { class: "secondary", disabled: app.busy, onclick: move |_| oncheckapp.call(()), "Check for updates" }
+                        if let Some(build) = app.ready {
+                            button { class: "primary", disabled: app.busy, onclick: move |_| oninstallapp.call(()), "Install build {build}" }
+                        }
+                    }
+                    if let Some(msg) = app.message {
+                        div { class: "note", "{msg}" }
+                    }
+                    div { class: "item divided",
+                        Svg { icon: Icon::Sync }
+                        div { class: "meta",
+                            div { class: "title", "Update automatically" }
+                            div { class: "sub", "{app.auto_note}" }
+                        }
+                        button {
+                            class: if app.auto { "switch on" } else { "switch" },
+                            role: "switch",
+                            "aria-checked": "{app.auto}",
+                            "aria-label": "Update the app automatically",
+                            onclick: move |_| ontoggleautoapp.call(()),
+                            span { class: "knob" }
+                        }
+                    }
+                }
+                p { class: "hint", "New builds come from the project's GitHub releases. Installing one closes the app and stops playback; your library and settings stay." }
+            }
         }
         section { class: "group",
             h2 { "Lyrics" }
