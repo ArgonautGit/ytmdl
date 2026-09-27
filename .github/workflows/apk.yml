@@ -54,7 +54,8 @@ jobs:
           echo "Build $build of $GITHUB_REF_NAME ($GITHUB_SHA)"
           if [ "$PUBLISH" = true ]; then
             if [ "$HAS_KEYSTORE" != true ]; then
-              echo "::error::Publishing needs the ANDROID_DEBUG_KEYSTORE secret: without it the APK is signed with a throwaway key and can't update the installed app (see README.md, \"Published builds\")."
+              # An empty secret reads the same as a missing one.
+              echo "::error::The ANDROID_DEBUG_KEYSTORE secret is missing or empty. Publishing needs it: without it the APK is signed with a throwaway key and can't update the installed app. It must be a repository secret (Settings, Secrets and variables, Actions, Repository secrets); variables and environment secrets don't reach this workflow. See README.md, \"Published builds\"."
               exit 1
             fi
             if gh release view "build-$build" >/dev/null 2>&1; then
