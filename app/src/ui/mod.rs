@@ -3,6 +3,7 @@
 
 mod icons;
 mod licenses;
+mod lyrics;
 #[cfg(test)]
 mod preview;
 mod sort;
@@ -23,6 +24,8 @@ use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat, Sleep};
 use icons::Icon;
 use licenses::{LicenseScreen, LicensesScreen, Notice};
+use lyrics::LyricsCache;
+pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
 use sort::Sorts;
 use stats::StatsScreen;
 use sync::SyncState;
@@ -59,6 +62,12 @@ struct Ctx {
     /// The sort of each library tab.
     sorts: Signal<Sorts>,
     updates: Signal<Updates>,
+    /// Lyrics read or looked up this run, by track id.
+    lyrics: Signal<LyricsCache>,
+    /// Now Playing shows the lyrics instead of the cover.
+    lyrics_open: Signal<bool>,
+    /// Songs without lyrics are looked up on LRCLIB.
+    lyrics_lookup: Signal<bool>,
 }
 
 impl Ctx {
@@ -394,6 +403,9 @@ fn Shell(setup: Setup) -> Element {
     let shared = use_signal(|| None);
     let sorts = use_signal(|| Sorts::load(&setup.library));
     let updates = use_signal(|| Updates::load(&setup.library));
+    let lyrics = use_signal(LyricsCache::new);
+    let lyrics_open = use_signal(|| false);
+    let lyrics_lookup = use_signal(|| lyrics::lookup_enabled(&setup.library));
     let ctx = use_context_provider(|| Ctx {
         boot,
         queue,
@@ -408,6 +420,9 @@ fn Shell(setup: Setup) -> Element {
         shared,
         sorts,
         updates,
+        lyrics,
+        lyrics_open,
+        lyrics_lookup,
     });
 
     let dirs = setup.dirs.clone();
@@ -682,6 +697,32 @@ fn NowPlayingScreen() -> Element {
             }
         })
     });
+    // The lyrics of the song playing, while they are open.
+    let lyrics_track = use_memo(move || player.current().filter(|_| (ctx.lyrics_open)()));
+    use_effect(move || {
+        if let Some(track) = lyrics_track() {
+            ctx.load_lyrics(&track);
+        }
+    });
+    let lyrics_view = use_memo(move || {
+        let track = lyrics_track()?;
+        let position_ms = (player.position_secs() * 1000.0) as i64;
+        Some(ctx.lyrics.read().get(&track.id).map_or(LyricsView::Loading, |s| s.view(position_ms)))
+    });
+    // Keep the line being sung in the middle of the lyrics box.
+    let lyrics_line = use_memo(move || match lyrics_view() {
+        Some(LyricsView::Synced { current, .. }) => current,
+        _ => None,
+    });
+    use_effect(move || {
+        if lyrics_line().is_some() {
+            document::eval(
+                "const box = document.querySelector('.lyrics'); \
+                 const line = box && box.querySelector('.line.current'); \
+                 if (line) box.scrollTo({ top: line.offsetTop - (box.clientHeight - line.offsetHeight) / 2, behavior: 'smooth' });",
+            );
+        }
+    });
     let Some(track) = player.current() else {
         return rsx! {
             EmptyState { icon: Icon::Music, title: "Nothing is playing", text: "Pick a song in your library." }
@@ -741,6 +782,11 @@ fn NowPlayingScreen() -> Element {
     });
     let (video_id, title) = (track.video_id.clone(), track.title.clone());
     let section_count = sections.read().len();
+    let lyrics_lines: Vec<i64> = match ctx.lyrics.read().get(&track.id) {
+        Some(lyrics::LyricsState::Found(lines)) => lines.iter().filter_map(|l| l.at_ms).collect(),
+        _ => Vec::new(),
+    };
+    let search_track = track.clone();
     rsx! {
         NowPlayingPage {
             now: now_item(&track),
@@ -817,6 +863,17 @@ fn NowPlayingScreen() -> Element {
             oneditsections: move |_| {
                 ctx.nav.push(Overlay::Sheet(Sheet::Sections { video_id: video_id.clone(), title: title.clone() }))
             },
+            lyrics: lyrics_view(),
+            onlyrics: move |_| {
+                let mut open = ctx.lyrics_open;
+                open.toggle();
+            },
+            onlyricsline: move |i: usize| {
+                if let Some(&at) = lyrics_lines.get(i) {
+                    player.seek(at as f64 / 1000.0);
+                }
+            },
+            onlyricssearch: move |_| ctx.search_lyrics(search_track.clone()),
         }
     }
 }
@@ -1923,6 +1980,8 @@ fn SettingsScreen() -> Element {
             ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
             onallow: move |_| platform::request_storage_access(),
             onlicenses: move |_| ctx.nav.push(Overlay::Licenses),
+            lyrics_lookup: (ctx.lyrics_lookup)(),
+            ontogglelyrics: move |_| ctx.set_lyrics_lookup(!*ctx.lyrics_lookup.peek()),
         }
     }
 }

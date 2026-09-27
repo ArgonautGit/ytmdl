@@ -61,6 +61,9 @@ const SCREENS: &[Screen] = &[
     ("now-playing-loops", "Now playing, A-B loops on the song and the queue", now_playing_loops),
     ("now-playing-pick", "Now playing, picking the queue loop's B", now_playing_pick),
     ("now-playing-sections", "Now playing, a saved section looping and the sleep timer on", now_playing_sections),
+    ("now-playing-lyrics", "Now playing, synced lyrics", now_playing_lyrics),
+    ("now-playing-lyrics-plain", "Now playing, plain lyrics", now_playing_lyrics_plain),
+    ("now-playing-lyrics-missing", "Now playing, no lyrics found", now_playing_lyrics_missing),
     ("sleep-menu", "Sleep timer", sleep_menu),
     ("section-name", "Saving a loop as a section", section_name),
     ("library-search", "Library, searching", library_search),
@@ -328,6 +331,18 @@ fn now_playing_with(
     sections: Vec<SectionChip>,
     can_save: bool,
 ) -> Element {
+    now_playing_full(song_loop, marks, queue_loop, sleep, sections, can_save, None)
+}
+
+fn now_playing_full(
+    song_loop: Option<(f64, Option<f64>)>,
+    marks: &[(usize, LoopMark)],
+    queue_loop: QueueLoopView,
+    sleep: Option<&str>,
+    sections: Vec<SectionChip>,
+    can_save: bool,
+    lyrics: Option<LyricsView>,
+) -> Element {
     let queue = song_items()
         .into_iter()
         .take(8)
@@ -365,6 +380,10 @@ fn now_playing_with(
                     onsection: |_| {},
                     onsavesection: |_| {},
                     oneditsections: |_| {},
+                    lyrics,
+                    onlyrics: |_| {},
+                    onlyricsline: |_| {},
+                    onlyricssearch: |_| {},
                 }
             }
         }
@@ -382,6 +401,35 @@ fn now_playing_loops() -> Element {
 
 fn now_playing_pick() -> Element {
     now_playing_with(Some((32.0, None)), &[(1, LoopMark::A)], QueueLoopView::PickB, None, Vec::new(), false)
+}
+
+const SAMPLE_LYRICS: &[&str] = &[
+    "Walking down the avenue tonight",
+    "Every window glowing gold and bright",
+    "",
+    "Hold on, hold on",
+    "The night is young and so are we",
+    "Hold on, hold on",
+    "There's nowhere else I'd rather be",
+    "",
+    "Streetlights humming out a tune",
+    "Dancing underneath the moon",
+];
+
+fn now_playing_lyrics() -> Element {
+    let lines = SAMPLE_LYRICS.iter().map(|l| l.to_string()).collect();
+    let lyrics = LyricsView::Synced { lines, current: Some(4) };
+    now_playing_full(None, &[], QueueLoopView::Off, None, Vec::new(), false, Some(lyrics))
+}
+
+fn now_playing_lyrics_plain() -> Element {
+    let lyrics = LyricsView::Plain(SAMPLE_LYRICS.iter().map(|l| l.to_string()).collect());
+    now_playing_full(None, &[], QueueLoopView::Off, None, Vec::new(), false, Some(lyrics))
+}
+
+fn now_playing_lyrics_missing() -> Element {
+    let lyrics = LyricsView::Missing { searched: true };
+    now_playing_full(None, &[], QueueLoopView::Off, None, Vec::new(), false, Some(lyrics))
 }
 
 fn section_chips() -> Vec<SectionChip> {
@@ -793,6 +841,8 @@ fn settings() -> Element {
                 ontoggleauto: |_| {},
                 onallow: |_| {},
                 onlicenses: |_| {},
+                lyrics_lookup: true,
+                ontogglelyrics: |_| {},
             }
         },
     )

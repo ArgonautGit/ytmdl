@@ -79,6 +79,11 @@ pub fn add_artists(path: &Path, artists: &[String]) -> Result<bool> {
 }
 
 pub fn write_tags(path: &Path, meta: &TrackMeta, cover: Option<Cover>) -> Result<()> {
+    write_tags_and_lyrics(path, meta, cover, None)
+}
+
+/// [`write_tags`], plus the lyrics when there are some (see [`crate::lyrics`]).
+pub fn write_tags_and_lyrics(path: &Path, meta: &TrackMeta, cover: Option<Cover>, lyrics: Option<&str>) -> Result<()> {
     let err = |e: &dyn Display| Error::Tag {
         path: path.to_owned(),
         message: e.to_string(),
@@ -114,6 +119,9 @@ pub fn write_tags(path: &Path, meta: &TrackMeta, cover: Option<Cover>) -> Result
         });
     }
     tag.set_comment(meta.url.clone());
+    if let Some(lyrics) = lyrics {
+        tag.insert_text(ItemKey::Lyrics, lyrics.to_owned());
+    }
     if let Some(cover) = cover {
         tag.remove_picture_type(PictureType::CoverFront);
         tag.push_picture(
@@ -123,6 +131,33 @@ pub fn write_tags(path: &Path, meta: &TrackMeta, cover: Option<Cover>) -> Result
                 .build(),
         );
     }
+    file.save_to_path(path, WriteOptions::default()).map_err(|e| err(&e))?;
+    Ok(())
+}
+
+/// The lyrics stored in the file, if any.
+pub fn read_lyrics(path: &Path) -> Result<Option<String>> {
+    let file = lofty::read_from_path(path).map_err(|e| Error::Tag {
+        path: path.to_owned(),
+        message: e.to_string(),
+    })?;
+    let tag = file.primary_tag().or_else(|| file.first_tag());
+    Ok(tag.and_then(|t| t.get_string(ItemKey::Lyrics)).map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned))
+}
+
+/// Stores lyrics in a file, leaving its other tags alone.
+pub fn write_lyrics(path: &Path, lyrics: &str) -> Result<()> {
+    let err = |e: &dyn Display| Error::Tag {
+        path: path.to_owned(),
+        message: e.to_string(),
+    };
+    let mut file = lofty::read_from_path(path).map_err(|e| err(&e))?;
+    if file.primary_tag().is_none() {
+        let tag_type = file.primary_tag_type();
+        file.insert_tag(Tag::new(tag_type));
+    }
+    let tag = file.primary_tag_mut().expect("primary tag was just inserted");
+    tag.insert_text(ItemKey::Lyrics, lyrics.to_owned());
     file.save_to_path(path, WriteOptions::default()).map_err(|e| err(&e))?;
     Ok(())
 }
@@ -145,6 +180,8 @@ pub struct TagReport {
     pub disk: Option<u32>,
     pub year: Option<u16>,
     pub comment: Option<String>,
+    /// Whether the file holds lyrics.
+    pub has_lyrics: bool,
     /// (mime type, size in bytes) of each embedded picture.
     pub pictures: Vec<(String, usize)>,
 }
@@ -173,6 +210,7 @@ pub fn read_tags(path: &Path) -> Result<TagReport> {
         report.disk = tag.disk();
         report.year = tag.date().map(|d| d.year);
         report.comment = tag.comment().map(|s| s.into_owned());
+        report.has_lyrics = tag.get_string(ItemKey::Lyrics).is_some_and(|l| !l.trim().is_empty());
         report.pictures = tag
             .pictures()
             .iter()
