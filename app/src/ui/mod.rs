@@ -476,6 +476,7 @@ fn Shell(setup: Setup) -> Element {
     use_background_work(ctx);
     use_shared_links(ctx);
     app_update::use_install_results(ctx);
+    app_update::use_updated_notice(ctx);
 
     // Playback errors (a file deleted elsewhere, say) show once each.
     let mut shown_error = use_signal(|| None::<String>);

@@ -3,7 +3,7 @@
 //! it; the newest release's copy says which build is out. Once a day (unless
 //! that is turned off) the app reads it and downloads a build newer than its
 //! own. Installing one ends the app, and playback with it, so that waits for
-//! the Install button in Settings.
+//! the Install button in Settings. The first start of the new build says so.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -30,6 +30,8 @@ const RETRY_AFTER: Duration = Duration::from_secs(3600);
 
 const AUTO: &str = "app_update_auto";
 const CHECKED: &str = "app_update_checked_at";
+/// The build that ran last, to notice that an update was installed.
+const LAST_BUILD: &str = "app_last_build";
 
 /// This build's number (tools/build-number), which tools/build-apk compiles in.
 pub fn this_build() -> Option<u32> {
@@ -313,6 +315,39 @@ impl Ctx {
     }
 }
 
+/// What to say on start: that an update was installed, on the first start of
+/// a build newer than the one that ran before (`last`; `None` when none did).
+/// A first install says nothing.
+fn updated_message(last: Option<u32>, current: u32) -> Option<String> {
+    (last? < current).then(|| format!("Updated to build {current}"))
+}
+
+/// The build that ran before this start, if one did. Builds from before the
+/// record didn't write it; one that checked for updates (as installing one
+/// from Settings takes) was such a build, so it counts as older than any.
+fn last_build(library: &Library) -> Option<u32> {
+    let get = |key| library.setting(key).ok().flatten();
+    get(LAST_BUILD).and_then(|s| s.parse().ok()).or(get(CHECKED).map(|_| 0))
+}
+
+/// Records this build as the one that ran, and says so when it is an update.
+pub(super) fn use_updated_notice(ctx: Ctx) {
+    use_hook(move || {
+        let Some(current) = this_build() else { return };
+        let library = ctx.library.get();
+        let last = last_build(&library);
+        if last == Some(current) {
+            return;
+        }
+        if let Err(e) = library.set_setting(LAST_BUILD, &current.to_string()) {
+            tracing::warn!(target: "ytmdl", "saving the build that ran: {e}");
+        }
+        if let Some(message) = updated_message(last, current) {
+            ctx.notify(message);
+        }
+    });
+}
+
 /// Installs that did not replace the app report back here.
 pub(super) fn use_install_results(ctx: Ctx) {
     use_hook(move || {
@@ -362,6 +397,27 @@ mod tests {
         assert_eq!(apk_build(Path::new("/x/ytmdl-58.apk")), Some(58));
         assert_eq!(apk_build(Path::new("/x/ytmdl-58.apk.part")), None);
         assert!(MANIFEST_URL.ends_with("/releases/latest/download/ytmdl-update.json"));
+    }
+
+    #[test]
+    fn says_when_an_update_was_installed() {
+        assert_eq!(updated_message(Some(14), 15).as_deref(), Some("Updated to build 15"));
+        // A first install, the same build again, or an older one installed by hand.
+        assert_eq!(updated_message(None, 15), None);
+        assert_eq!(updated_message(Some(15), 15), None);
+        assert_eq!(updated_message(Some(16), 15), None);
+    }
+
+    #[test]
+    fn remembers_the_build_that_ran() {
+        let art = std::env::temp_dir().join(format!("ytmdl-app-update-art-{}", std::process::id()));
+        let library = Library::open_in_memory(&art).unwrap();
+        assert_eq!(last_build(&library), None);
+        // An older build with the updater ran: it checked, but didn't record itself.
+        library.set_setting(CHECKED, "1790000000").unwrap();
+        assert_eq!(last_build(&library), Some(0));
+        library.set_setting(LAST_BUILD, "15").unwrap();
+        assert_eq!(last_build(&library), Some(15));
     }
 
     #[test]

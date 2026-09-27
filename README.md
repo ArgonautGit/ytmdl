@@ -115,7 +115,8 @@ switch turns that off and "Check for updates" checks now) and downloads a
 build numbered higher than its own. Installing waits for the "Install build
 <n>" button, since it closes the app and stops playback. The first time,
 Android asks to allow ytmdl to install apps; after that, on Android 12 and
-later, updates install without asking. The library and settings stay.
+later, updates install without asking. The library and settings stay, and
+the first start of the new build says "Updated to build <n>".
 
 Android installs an update only when it is signed with the same key as the
 installed app, and the APK is debug-signed, so publishing needs the debug
