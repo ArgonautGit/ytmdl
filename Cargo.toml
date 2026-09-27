@@ -8,6 +8,8 @@ default-members = ["crates/core", "crates/library", "crates/cli", "crates/smoke"
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ArgonautGit/ytmdl"
 
 [workspace.dependencies]
 ytmdl-core = { path = "crates/core" }

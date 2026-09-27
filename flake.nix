@@ -118,6 +118,7 @@
         pkgs.file
         pkgs.jq
         pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
+        pkgs.cargo-about # tools/gen-notices
         # arm64 test layers
         pkgs.qemu-user
         pkgs.erofs-utils

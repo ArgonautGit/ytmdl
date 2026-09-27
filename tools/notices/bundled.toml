@@ -1,0 +1,161 @@
+# Third-party code in the APK besides the Rust crates (which tools/gen-notices
+# gets from cargo-about). `texts` are files beside this one, copied from each
+# project's release:
+#   python.txt      CPython v3.14.7 LICENSE, then Doc/license.rst's
+#                   "Licenses and Acknowledgements for Incorporated Software"
+#                   as plain text (covers expat, libffi, libmpdec and more)
+#   openssl.txt     openssl-3.5.7 LICENSE.txt
+#   sqlite.txt      the notice at the top of sqlite3.h
+#   bzip2.txt       bzip2-1.0.8 LICENSE
+#   xz.txt          xz v5.4.6 COPYING
+#   zstd.txt        zstd v1.5.7 LICENSE
+#   yt-dlp.txt      yt-dlp 2026.08.19 LICENSE
+#   yt-dlp-ejs.txt  yt-dlp/ejs 0.8.0 LICENSE
+#   meriyah.txt, astring.txt
+#                   the notices bundled in yt-dlp-ejs's lib.min.js
+#   quickjs-ng.txt  quickjs-ng v0.17.0 LICENSE
+#   apache-2.0.txt  https://www.apache.org/licenses/LICENSE-2.0.txt
+#
+# `pin` names a version setting in another file; tools/gen-notices fails when
+# the two differ, since the texts may need updating with the version.
+
+[[group]]
+title = "Bundled software"
+
+[[group.item]]
+name = "Python"
+version = "3.14.7"
+pin = ["tools/fetch-deps", "PYTHON_VERSION"]
+license = "PSF-2.0"
+by = "Python Software Foundation"
+url = "https://www.python.org"
+texts = ["python.txt"]
+
+[[group.item]]
+name = "yt-dlp"
+version = "2026.08.19"
+pin = ["tools/fetch-deps", "YTDLP_VERSION"]
+license = "Unlicense"
+url = "https://github.com/yt-dlp/yt-dlp"
+texts = ["yt-dlp.txt"]
+
+[[group.item]]
+name = "yt-dlp-ejs"
+version = "0.8.0"
+license = "Unlicense"
+url = "https://github.com/yt-dlp/ejs"
+texts = ["yt-dlp-ejs.txt"]
+
+[[group.item]]
+name = "meriyah"
+version = "6.1.4"
+license = "ISC"
+by = "KFlash and others"
+url = "https://github.com/meriyah/meriyah"
+texts = ["meriyah.txt"]
+
+[[group.item]]
+name = "astring"
+version = "1.9.0"
+license = "MIT"
+by = "David Bonnet"
+url = "https://github.com/davidbonnet/astring"
+texts = ["astring.txt"]
+
+[[group.item]]
+name = "QuickJS-NG"
+version = "0.17.0"
+pin = ["tools/fetch-deps", "QJS_VERSION"]
+license = "MIT"
+url = "https://github.com/quickjs-ng/quickjs"
+texts = ["quickjs-ng.txt"]
+
+[[group.item]]
+name = "OpenSSL"
+version = "3.5.7"
+license = "Apache-2.0"
+url = "https://www.openssl.org"
+texts = ["openssl.txt"]
+
+[[group.item]]
+name = "SQLite"
+version = "3.50.4"
+license = "Public domain"
+url = "https://sqlite.org"
+texts = ["sqlite.txt"]
+
+[[group.item]]
+name = "bzip2"
+version = "1.0.8"
+license = "bzip2-1.0.6"
+by = "Julian Seward"
+url = "https://sourceware.org/bzip2/"
+texts = ["bzip2.txt"]
+
+[[group.item]]
+name = "XZ Utils (liblzma)"
+version = "5.4.6"
+license = "Public domain"
+url = "https://tukaani.org/xz/"
+texts = ["xz.txt"]
+
+[[group.item]]
+name = "Zstandard"
+version = "1.5.7"
+license = "BSD-3-Clause"
+by = "Meta Platforms, Inc. and affiliates"
+url = "https://github.com/facebook/zstd"
+texts = ["zstd.txt"]
+
+[[group]]
+title = "Android libraries"
+
+[[group.item]]
+name = "AndroidX Media3"
+version = "1.9.4"
+pin = ["tools/patch-gradle-project", "MEDIA3"]
+license = "Apache-2.0"
+by = "The Android Open Source Project"
+url = "https://developer.android.com/jetpack/androidx/releases/media3"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "AndroidX (AppCompat, Core, WebKit, Lifecycle and others)"
+license = "Apache-2.0"
+by = "The Android Open Source Project"
+url = "https://developer.android.com/jetpack/androidx"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "Material Components for Android"
+license = "Apache-2.0"
+by = "The Android Open Source Project"
+url = "https://github.com/material-components/material-components-android"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "Kotlin standard library"
+license = "Apache-2.0"
+by = "JetBrains s.r.o. and Kotlin Programming Language contributors"
+url = "https://kotlinlang.org"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "kotlinx.coroutines"
+license = "Apache-2.0"
+by = "JetBrains s.r.o. and Kotlin Programming Language contributors"
+url = "https://github.com/Kotlin/kotlinx.coroutines"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "Guava"
+license = "Apache-2.0"
+by = "The Guava Authors"
+url = "https://github.com/google/guava"
+texts = ["apache-2.0.txt"]
+
+[[group.item]]
+name = "JSpecify, Error Prone and JetBrains annotations"
+license = "Apache-2.0"
+url = "https://jspecify.dev"
+texts = ["apache-2.0.txt"]

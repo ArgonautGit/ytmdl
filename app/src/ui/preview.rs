@@ -93,6 +93,10 @@ const SCREENS: &[Screen] = &[
     ("downloads", "Downloads", downloads),
     ("downloads-empty", "Downloads, empty", downloads_empty),
     ("settings", "Settings, no storage access", settings),
+    ("licenses", "Open-source licenses", licenses),
+    ("license-gpl", "ytmdl's license", license_gpl),
+    ("license-python", "Python's license", license_python),
+    ("license-crate", "A crate under two licenses", license_crate),
     ("startup-failed", "Startup failed", startup_failed),
 ];
 
@@ -788,9 +792,56 @@ fn settings() -> Element {
                 onupdate: |_| {},
                 ontoggleauto: |_| {},
                 onallow: |_| {},
+                onlicenses: |_| {},
             }
         },
     )
+}
+
+fn licenses() -> Element {
+    shell(
+        Tab::Settings,
+        0,
+        rsx! {
+            div { class: "overlay",
+                LicensesPage {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    source: env!("CARGO_PKG_REPOSITORY").to_string(),
+                    groups: super::licenses::groups(),
+                    onback: |_| {},
+                    onown: |_| {},
+                    onopen: |_| {},
+                }
+            }
+        },
+    )
+}
+
+fn license_page(notice: super::licenses::Notice) -> Element {
+    shell(
+        Tab::Settings,
+        0,
+        rsx! {
+            div { class: "overlay",
+                LicensePage { license: super::licenses::license_view(notice), onback: |_| {} }
+            }
+        },
+    )
+}
+
+fn license_gpl() -> Element {
+    license_page(super::licenses::Notice::Own)
+}
+
+fn license_python() -> Element {
+    license_page(super::licenses::Notice::Item(0, 0))
+}
+
+/// A crate with two license texts.
+fn license_crate() -> Element {
+    let n = super::licenses::groups();
+    let i = n[2].rows.iter().position(|r| r.title == "unicode-ident").unwrap_or(0);
+    license_page(super::licenses::Notice::Item(2, i))
 }
 
 fn stats_page(period: Period, stats: Option<StatsView>) -> Element {

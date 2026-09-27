@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Writes app/notices.json, what the app's "Open-source licenses" page shows:
+the other code bundled in the APK (tools/notices/bundled.toml) and the Rust
+crates built into it (from cargo-about; see tools/notices/about.toml).
+
+  tools/gen-notices           rewrite app/notices.json
+  tools/gen-notices --check   fail if it is out of date (run by tools/build-apk)
+
+Run it after changing dependencies. Needs cargo-about, which the dev shell has.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NOTICES = os.path.join(ROOT, "tools", "notices")
+OUT = os.path.join(ROOT, "app", "notices.json")
+
+
+class Texts:
+    """License texts, each stored once however many items use it."""
+
+    def __init__(self):
+        self.list = []
+        self.index = {}
+
+    def add(self, license, text):
+        text = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n")).strip("\n") + "\n"
+        key = (license, text)
+        if key not in self.index:
+            self.index[key] = len(self.list)
+            self.list.append({"license": license, "text": text})
+        return self.index[key]
+
+
+def pinned_version(path, name):
+    with open(os.path.join(ROOT, path), encoding="utf-8") as f:
+        m = re.search(rf'^\s*{name}\s*=\s*"?([^"\s]+)', f.read(), re.M)
+    if not m:
+        sys.exit(f"{name} not found in {path}")
+    return m.group(1)
+
+
+def bundled(texts):
+    with open(os.path.join(NOTICES, "bundled.toml"), "rb") as f:
+        manifest = tomllib.load(f)
+    groups = []
+    for group in manifest["group"]:
+        items = []
+        for item in group["item"]:
+            if "pin" in item:
+                want = pinned_version(*item["pin"])
+                if want != item["version"]:
+                    sys.exit(
+                        f"{item['name']} is {want} in {item['pin'][0]} but {item['version']} in "
+                        "tools/notices/bundled.toml; update the version and its license text"
+                    )
+            ids = []
+            for name in item["texts"]:
+                with open(os.path.join(NOTICES, name), encoding="utf-8") as f:
+                    ids.append(texts.add(item["license"], f.read()))
+            out = {"name": item["name"]}
+            for key in ("version", "license", "by", "url"):
+                if key in item:
+                    out[key] = item[key]
+            out["texts"] = ids
+            items.append(out)
+        groups.append({"title": group["title"], "items": items})
+    return groups
+
+
+def authors(package):
+    names = [re.sub(r"\s*<[^>]*>", "", a).strip() for a in package.get("authors") or []]
+    return ", ".join(n for n in names if n)
+
+
+# The copyright line of the standard texts cargo-about falls back to when a
+# crate ships no license file.
+PLACEHOLDER = re.compile(r"Copyright \(c\) <year> <(?:copyright holders|owner)>\.?")
+
+
+def rust_crates(texts):
+    run = subprocess.run(
+        [
+            "cargo", "about", "generate", "--format", "json",
+            "-c", os.path.join(NOTICES, "about.toml"),
+            "-m", os.path.join(ROOT, "app", "Cargo.toml"),
+            "--no-default-features", "--features", "mobile",
+        ],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if run.returncode != 0:
+        sys.exit(f"cargo about failed:\n{run.stderr}")
+    about = json.loads(run.stdout)
+    by_crate = {}
+    for lic in about["licenses"]:
+        for use in lic["used_by"]:
+            package = use["crate"]
+            text = lic["text"]
+            if lic["source_path"] is None:
+                holders = authors(package) or f"the {package['name']} authors"
+                text = PLACEHOLDER.sub(f"Copyright (c) {holders}", text)
+            key = (package["name"], package["version"])
+            by_crate.setdefault(key, []).append(texts.add(lic["id"], text))
+    items = []
+    for crate in about["crates"]:
+        package = crate["package"]
+        key = (package["name"], package["version"])
+        if key not in by_crate:
+            sys.exit(f"no license text for {key[0]} {key[1]}")
+        item = {"name": package["name"], "version": package["version"], "license": crate["license"]}
+        if by := authors(package):
+            item["by"] = by
+        if url := package.get("repository") or package.get("homepage"):
+            item["url"] = url
+        item["texts"] = by_crate[key]
+        items.append(item)
+    items.sort(key=lambda i: (i["name"].lower(), i["version"]))
+    return {"title": "Rust crates", "items": items}
+
+
+def main():
+    check = sys.argv[1:] == ["--check"]
+    if sys.argv[1:] and not check:
+        sys.exit(__doc__)
+    texts = Texts()
+    groups = bundled(texts)
+    groups.append(rust_crates(texts))
+    output = json.dumps({"groups": groups, "texts": texts.list}, indent=1, ensure_ascii=False) + "\n"
+    try:
+        with open(OUT, encoding="utf-8") as f:
+            current = f.read()
+    except FileNotFoundError:
+        current = None
+    if check:
+        if output != current:
+            sys.exit("app/notices.json is out of date; run tools/gen-notices")
+        return
+    if output != current:
+        with open(OUT, "w", encoding="utf-8") as f:
+            f.write(output)
+    crates = len(groups[-1]["items"])
+    size = len(output.encode()) / 1000
+    print(f"app/notices.json: {crates} crates, {len(texts.list)} texts, {size:.0f} kB")
+
+
+main()

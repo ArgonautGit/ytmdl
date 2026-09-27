@@ -28,7 +28,8 @@ new APK.
   the order follows. They sync when the app starts or returns to the screen
   (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
   for updates once a day (a switch in Settings turns that off); a new build
-  loads on the next start.
+  loads on the next start. Settings also has the open-source licenses: ytmdl's
+  own and those of everything bundled with it.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they
@@ -73,6 +74,11 @@ nix run .#install                  # adb install -r, building first if the sourc
 nix run .#install -- --build       # always build first (build-apk options after --build)
 ```
 
+After changing dependencies, run `tools/gen-notices` to refresh
+`app/notices.json`, what the licenses page lists: the Rust crates built into
+the app (from cargo-about) and the other bundled code in
+`tools/notices/bundled.toml`. `tools/build-apk` stops while it is out of date.
+
 Install keeps the app's data (library, playlists, settings). It rebuilds when
 the source differs from what the APK was built from (`tools/source-stamp`,
 recorded by `tools/build-apk`), whatever build options that was. The phone
@@ -96,3 +102,15 @@ tags. It needs USB debugging enabled on the phone.
 Cuttlefish under QEMU emulation needs most of a 16 GB machine. Build the APK
 before `tools/cf up`, never alongside it; the container is capped with
 `CF_MEM_LIMIT` (default 6g).
+
+## License
+
+ytmdl is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It comes with no warranty. See [LICENSE](LICENSE).
+
+The APK also carries third-party code under its own licenses: CPython, yt-dlp,
+QuickJS-NG, OpenSSL and other libraries, the AndroidX and Kotlin libraries, and
+the Rust crates. Settings → Open-source licenses lists each with its license
+text.

@@ -1771,6 +1771,7 @@ pub fn SettingsPage(
     onupdate: EventHandler<Channel>,
     ontoggleauto: EventHandler<()>,
     onallow: EventHandler<()>,
+    onlicenses: EventHandler<()>,
 ) -> Element {
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
@@ -1839,6 +1840,13 @@ pub fn SettingsPage(
                 AboutItem { label: "ytmdl", value: about.app }
                 AboutItem { label: "Python", value: about.python }
                 AboutItem { label: "TLS", value: about.openssl }
+                div { class: "item tappable", role: "button", onclick: move |_| onlicenses.call(()),
+                    div { class: "meta",
+                        div { class: "title", "Open-source licenses" }
+                        div { class: "sub", "ytmdl is free software under the GNU GPL" }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                }
             }
         }
     }
@@ -2021,6 +2029,169 @@ fn RankRow(rank: usize, item: RankItem, #[props(default)] round: bool, onopen: E
             div { class: "meta",
                 div { class: "title", "{item.title}" }
                 div { class: "sub", "{item.sub}" }
+            }
+        }
+    }
+}
+
+// ---- licenses ----
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct NoticeRow {
+    pub title: String,
+    /// Version and license.
+    pub sub: String,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct NoticeGroup {
+    pub title: String,
+    pub rows: Vec<NoticeRow>,
+}
+
+/// Lines of license texts indented this far are centred titles.
+pub const CENTRED: usize = 12;
+
+/// A piece of a license text, laid out for the screen.
+#[derive(Clone, PartialEq, Debug)]
+pub enum TextBlock {
+    Heading(String),
+    /// `indent`: in columns of the original text; `CENTRED` or more is
+    /// centred, and a first-line indent of a column or two is ignored.
+    Para { indent: usize, text: String },
+    /// A table, kept as written.
+    Pre(String),
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct LicenseView {
+    pub title: String,
+    /// Version and license.
+    pub sub: String,
+    pub by: Option<String>,
+    pub url: Option<String>,
+    /// The texts, each with a heading when there are several.
+    pub texts: Vec<(Option<String>, Vec<TextBlock>)>,
+}
+
+#[component]
+pub fn LicensesPage(
+    version: String,
+    /// Where the source code is.
+    source: String,
+    groups: Vec<NoticeGroup>,
+    onback: EventHandler<()>,
+    /// Opens ytmdl's own license.
+    onown: EventHandler<()>,
+    /// Opens (group, row).
+    onopen: EventHandler<(usize, usize)>,
+) -> Element {
+    rsx! {
+        div { class: "licenses",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Open-source licenses" }
+                }
+            }
+            section { class: "group",
+                div { class: "card",
+                    div { class: "item",
+                        div { class: "meta",
+                            div { class: "title", "ytmdl {version}" }
+                            div { class: "sub", "Copyright © 2026 the ytmdl authors" }
+                        }
+                    }
+                    p { class: "legal",
+                        "ytmdl is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It comes with ABSOLUTELY NO WARRANTY; see the license for details."
+                    }
+                    div { class: "item tappable divided", role: "button", onclick: move |_| onown.call(()),
+                        div { class: "meta",
+                            div { class: "title", "GNU General Public License" }
+                            div { class: "sub", "Version 3 or later" }
+                        }
+                        span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                    }
+                    div { class: "item divided",
+                        div { class: "meta",
+                            div { class: "title", "Source code" }
+                            div { class: "sub selectable", "{source}" }
+                        }
+                    }
+                }
+                p { class: "hint", "ytmdl includes the software below. Tap one for its license." }
+            }
+            for (g , group) in groups.into_iter().enumerate() {
+                section { key: "{g}", class: "group",
+                    h2 { "{group.title}" }
+                    div { class: "card",
+                        for (i , row) in group.rows.into_iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                class: "item tappable",
+                                role: "button",
+                                onclick: move |_| onopen.call((g, i)),
+                                div { class: "meta",
+                                    div { class: "title", "{row.title}" }
+                                    div { class: "sub", "{row.sub}" }
+                                }
+                                span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn LicensePage(license: LicenseView, onback: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "license",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "{license.title}" }
+                }
+            }
+            div { class: "license-head",
+                div { class: "sub", "{license.sub}" }
+                if let Some(by) = license.by {
+                    div { class: "sub", "By {by}" }
+                }
+                if let Some(url) = license.url {
+                    div { class: "sub selectable", "{url}" }
+                }
+            }
+            for (i , (heading , blocks)) in license.texts.into_iter().enumerate() {
+                section { key: "{i}", class: "license-text",
+                    if let Some(heading) = heading {
+                        h2 { "{heading}" }
+                    }
+                    for (j , block) in blocks.into_iter().enumerate() {
+                        match block {
+                            TextBlock::Heading(text) => rsx! {
+                                h3 { key: "{j}", "{text}" }
+                            },
+                            TextBlock::Para { indent, text } => rsx! {
+                                p {
+                                    key: "{j}",
+                                    class: if indent >= CENTRED { "center" },
+                                    style: if (3..CENTRED).contains(&indent) { format!("padding-left: {}px", indent * 3) },
+                                    "{text}"
+                                }
+                            },
+                            TextBlock::Pre(text) => rsx! {
+                                pre { key: "{j}", "{text}" }
+                            },
+                        }
+                    }
+                }
             }
         }
     }

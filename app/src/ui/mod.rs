@@ -2,6 +2,7 @@
 //! which `preview` also renders to static HTML with sample data.
 
 mod icons;
+mod licenses;
 #[cfg(test)]
 mod preview;
 mod sort;
@@ -21,6 +22,7 @@ use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat, Sleep};
 use icons::Icon;
+use licenses::{LicenseScreen, LicensesScreen, Notice};
 use sort::Sorts;
 use stats::StatsScreen;
 use sync::SyncState;
@@ -174,6 +176,9 @@ enum Overlay {
     /// The full-screen player, over the tabs.
     NowPlaying,
     Stats,
+    /// Open-source licenses, from Settings.
+    Licenses,
+    License(Notice),
     /// A menu or dialog over the page below.
     Sheet(Sheet),
 }
@@ -608,6 +613,8 @@ fn Overlays() -> Element {
                             Overlay::Playlist(id) => rsx! { PlaylistScreen { id } },
                             Overlay::NowPlaying => rsx! { NowPlayingScreen {} },
                             Overlay::Stats => rsx! { StatsScreen {} },
+                            Overlay::Licenses => rsx! { LicensesScreen {} },
+                            Overlay::License(notice) => rsx! { LicenseScreen { notice } },
                             Overlay::Sheet(_) => rsx! {},
                         }
                     }
@@ -1915,6 +1922,7 @@ fn SettingsScreen() -> Element {
             onupdate: move |channel: Channel| ctx.check_ytdlp(channel, true),
             ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
             onallow: move |_| platform::request_storage_access(),
+            onlicenses: move |_| ctx.nav.push(Overlay::Licenses),
         }
     }
 }
