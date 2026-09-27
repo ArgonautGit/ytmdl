@@ -819,7 +819,7 @@ fn downloads_empty() -> Element {
 
 fn settings() -> Element {
     let about = About {
-        app: env!("CARGO_PKG_VERSION").into(),
+        app: format!("{} • build 57 • 1a2b3c4", env!("CARGO_PKG_VERSION")),
         yt_dlp: "2026.08.19".into(),
         python: "3.14.7 (android)".into(),
         openssl: "OpenSSL 3.5.7 9 Jun 2026".into(),
@@ -839,6 +839,17 @@ fn settings() -> Element {
                 auto_note: "Checks daily for stable builds · last checked just now".to_string(),
                 onupdate: |_| {},
                 ontoggleauto: |_| {},
+                app_update: Some(AppUpdateInfo {
+                    build: 57,
+                    ready: Some(58),
+                    busy: false,
+                    message: Some("Build 58 is downloaded. Installing it closes the app.".to_string()),
+                    auto: true,
+                    auto_note: "Checks daily and downloads new builds · last checked just now".to_string(),
+                }),
+                oncheckapp: |_| {},
+                oninstallapp: |_| {},
+                ontoggleautoapp: |_| {},
                 onallow: |_| {},
                 onlicenses: |_| {},
                 normalize: true,

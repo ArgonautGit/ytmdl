@@ -153,6 +153,8 @@ struct Inner {
     version: VersionInfo,
     meta: Lane,
     downloads: Lane,
+    /// Large files (app updates), so searches don't wait behind them.
+    bulk: Lane,
 }
 
 /// Handle to the process-wide yt-dlp runtime. Cheap to clone.
@@ -198,7 +200,8 @@ impl Runtime {
         let bridge = Arc::new(bridge);
         Ok(Runtime(Arc::new(Inner {
             meta: Lane::spawn("meta", 1, bridge.clone()),
-            downloads: Lane::spawn("dl", config.download_workers, bridge),
+            downloads: Lane::spawn("dl", config.download_workers, bridge.clone()),
+            bulk: Lane::spawn("bulk", 1, bridge),
             config,
             ytdlp_zip,
             version,
@@ -306,6 +309,16 @@ impl Runtime {
             }
             let bytes = data.cast::<PyBytes>().map_err(|e| Error::Python(e.to_string()))?;
             Ok(Some(bytes.as_bytes().to_vec()))
+        })
+        .await
+    }
+
+    /// Streams the file at `url` to `path` through yt-dlp's networking, failing
+    /// past `max_bytes`; returns its SHA-256 in hex. `path` is left partly
+    /// written on failure.
+    pub async fn download_to(&self, url: String, path: PathBuf, max_bytes: u64) -> Result<String> {
+        self.run(&self.0.bulk, move |py, bridge| {
+            call(py, bridge, "fetch_to_file", (url, path_str(&path)?, max_bytes))
         })
         .await
     }

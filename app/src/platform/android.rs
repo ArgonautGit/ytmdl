@@ -424,6 +424,63 @@ pub mod downloads {
     }
 }
 
+/// Installing app updates (`YtmdlUpdate` in app/android/Update.kt).
+pub mod app_update {
+    use std::ffi::c_void;
+    use std::path::Path;
+    use std::sync::OnceLock;
+
+    use jni::objects::{GlobalRef, JClass, JString, JValueOwned};
+    use jni::sys::jint;
+    use jni::{JNIEnv, NativeMethod};
+    use tokio::sync::mpsc::UnboundedSender;
+
+    use super::{app_class, call_static, with_env};
+
+    /// This build can install its updates.
+    pub const SUPPORTED: bool = true;
+
+    const CLASS: &str = "dev.nick.ytmdl.YtmdlUpdate";
+    static UPDATE: OnceLock<GlobalRef> = OnceLock::new();
+    static STATUSES: OnceLock<UnboundedSender<(i32, String)>> = OnceLock::new();
+
+    /// Sends each install that did not replace the app to `statuses`: a
+    /// PackageInstaller status and Android's message.
+    pub fn listen(statuses: UnboundedSender<(i32, String)>) {
+        let _ = STATUSES.set(statuses);
+        let result = with_env(|env, activity| {
+            let class = app_class(env, activity, CLASS, &UPDATE)?;
+            let status = NativeMethod {
+                name: "nativeStatus".into(),
+                sig: "(ILjava/lang/String;)V".into(),
+                fn_ptr: native_status as *mut c_void,
+            };
+            env.register_native_methods(&class, &[status])?;
+            Ok(())
+        });
+        if let Err(e) = result {
+            tracing::error!(target: "ytmdl", "listening for update installs: {e:#}");
+        }
+    }
+
+    /// Called on the Android main thread.
+    extern "system" fn native_status<'local>(mut env: JNIEnv<'local>, _: JClass<'local>, status: jint, message: JString<'local>) {
+        if let (Ok(message), Some(tx)) = (env.get_string(&message), STATUSES.get()) {
+            let _ = tx.send((status, message.into()));
+        }
+    }
+
+    /// Hands the APK at `path` to Android's installer; returns at once.
+    pub fn install(path: &Path) {
+        call_static(CLASS, &UPDATE, "install", "(Landroid/app/Activity;Ljava/lang/String;)V", |env, activity| {
+            Ok(vec![
+                JValueOwned::Object(env.new_local_ref(activity)?),
+                JValueOwned::Object(env.new_string(path.to_string_lossy())?.into()),
+            ])
+        });
+    }
+}
+
 /// Loads one of the app's classes, cached in `cache`. App classes need the
 /// activity's class loader; JNI's FindClass on a native thread only sees the
 /// system classes.

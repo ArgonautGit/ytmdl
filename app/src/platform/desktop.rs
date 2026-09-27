@@ -102,3 +102,15 @@ pub mod downloads {
     pub fn stop() {}
     pub fn ask_notifications() {}
 }
+
+/// Desktop builds don't update themselves.
+pub mod app_update {
+    use std::path::Path;
+
+    use tokio::sync::mpsc::UnboundedSender;
+
+    pub const SUPPORTED: bool = false;
+
+    pub fn listen(_statuses: UnboundedSender<(i32, String)>) {}
+    pub fn install(_path: &Path) {}
+}
