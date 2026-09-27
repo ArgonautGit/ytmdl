@@ -29,6 +29,10 @@ class Texts:
 
     def add(self, license, text):
         text = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n")).strip("\n") + "\n"
+        # A crate can ship a license twice, differing only in blank lines
+        # (miniz_oxide's LICENSE and LICENSE-MIT.md), and which copy
+        # cargo-about reads depends on the file system's directory order.
+        text = re.sub(r"\n{3,}", "\n\n", text)
         key = (license, text)
         if key not in self.index:
             self.index[key] = len(self.list)
