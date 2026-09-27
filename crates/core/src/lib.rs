@@ -13,7 +13,7 @@ pub mod tag;
 use std::path::PathBuf;
 
 pub use error::{Error, Result};
-pub use model::{CollectionKind, Downloaded, Entry, Resolved, TrackMeta};
+pub use model::{CollectionKind, Downloaded, Entry, Resolved, TrackMeta, art_url};
 pub use runtime::{CancelToken, Channel, Progress, Runtime, RuntimeConfig, UpdateOutcome, VersionInfo};
 
 use model::Info;
@@ -102,11 +102,15 @@ impl Downloader {
             } else {
                 CollectionKind::Playlist
             };
-            return Ok(Resolved::Collection {
-                title: info.title.clone().unwrap_or_default(),
-                kind,
-                entries: info.entries.iter().filter_map(Info::to_entry).collect(),
-            });
+            let mut title = info.title.clone().unwrap_or_default();
+            let mut entries: Vec<Entry> = info.entries.iter().filter_map(Info::to_entry).collect();
+            if kind == CollectionKind::Album {
+                title = model::album_title(&title);
+                for e in &mut entries {
+                    e.album.get_or_insert_with(|| title.clone());
+                }
+            }
+            return Ok(Resolved::Collection { title, kind, entries });
         }
         Ok(Resolved::Track(info.to_track()))
     }

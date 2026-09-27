@@ -31,7 +31,8 @@ class _Logger:
         _emit("info", msg)
 
     def warning(self, msg):
-        _emit("warning", msg)
+        # The host rewrites DASH m4a itself (remux.rs), so this advice doesn't apply.
+        _emit("debug" if "writing DASH m4a" in msg else "warning", msg)
 
     def error(self, msg):
         _emit("error", msg)
@@ -142,7 +143,104 @@ def _result(ydl, info, url):
 def extract(args_json, url):
     """Metadata only (no download). Returns sanitized info JSON."""
     with _ydl(json.loads(args_json)) as ydl:
+        _install_music_metadata(ydl)
         return _result(ydl, ydl.extract_info(url, download=False), url)
+
+
+# yt-dlp reduces YouTube Music search results to id + title (albums to a bare
+# browse id). The rows YouTube sends also carry artists, album, duration, year and
+# square art, which is what a results list needs; add them to yt-dlp's entries.
+# yt-dlp still makes every request, and when YouTube changes the row layout only
+# these extras are lost.
+_MUSIC_HOOKS = ("_music_reponsive_list_entry", "_music_responsive_list_entry")
+_music_hooked = False
+_KINDS = {"song", "video", "album", "ep", "single", "playlist", "episode", "podcast", "artist", "profile"}
+
+
+def _install_music_metadata(ydl):
+    global _music_hooked
+    if _music_hooked:
+        return
+    _music_hooked = True
+    try:
+        ie = ydl.get_info_extractor("YoutubeMusicSearchURL")
+        owner, name = next(
+            (c, n) for c in type(ie).__mro__ for n in _MUSIC_HOOKS if n in vars(c)
+        )
+    except Exception as e:  # layout of yt-dlp's extractors changed
+        _emit("warning", f"music search rows stay minimal: {e!r}")
+        return
+    original = getattr(owner, name)
+
+    def entry(self, renderer):
+        result = original(self, renderer)
+        if isinstance(result, dict):
+            try:
+                for key, value in _music_row(renderer).items():
+                    if result.get(key) is None:
+                        result[key] = value
+            except Exception as e:
+                _emit("debug", f"music row not understood: {e!r}")
+        return result
+
+    setattr(owner, name, entry)
+
+
+def _music_row(renderer):
+    """Fields of one musicResponsiveListItemRenderer (a search result row)."""
+    import re
+
+    from yt_dlp.utils import parse_duration, traverse_obj
+
+    columns = traverse_obj(renderer, (
+        "flexColumns", ..., "musicResponsiveListItemFlexColumnRenderer", "text", "runs"))
+    if not columns:
+        return {}
+
+    def page_type(run):
+        return traverse_obj(run, ("navigationEndpoint", "browseEndpoint",
+                                  "browseEndpointContextSupportedConfigs",
+                                  "browseEndpointContextMusicConfig", "pageType"))
+
+    # The columns after the title read "Artist & Artist • Album • 3:12 • 1M plays";
+    # split them into those " • " groups.
+    groups, group = [], []
+    for column in columns[1:]:
+        for run in [*column, {"text": " • "}]:
+            if run.get("text", "").strip() == "•":
+                groups.append(group)
+                group = []
+            else:
+                group.append(run)
+
+    row = {"title": "".join(r.get("text", "") for r in columns[0]).strip() or None}
+    artists = []
+    for group in groups:
+        text = "".join(r.get("text", "") for r in group).strip()
+        types = {page_type(r) for r in group}
+        if not text:
+            continue
+        if "MUSIC_PAGE_TYPE_ALBUM" in types:
+            row["album"] = text
+        elif types & {"MUSIC_PAGE_TYPE_ARTIST", "MUSIC_PAGE_TYPE_USER_CHANNEL"}:
+            artists += [t for t in (r.get("text", "").strip() for r in group) if t not in ("", "&", ",")]
+        elif re.fullmatch(r"\d{1,2}(:\d{2}){1,2}", text):
+            row["duration"] = parse_duration(text)
+        elif re.fullmatch(r"\d{4}", text):
+            row["release_year"] = int(text)
+        elif text.lower() in _KINDS and "ytmdl_kind" not in row:
+            row["ytmdl_kind"] = text.lower()
+        elif not artists and not re.search(r"\d.*\b(plays|views|songs|subscribers)$", text):
+            artists = [a for a in re.split(r", | & ", text) if a]
+    if artists:
+        row["artists"] = artists
+    thumbnails = traverse_obj(renderer, (
+        "thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails",
+        lambda _, t: t.get("url")))
+    if thumbnails:
+        row["thumbnails"] = [
+            {"url": t["url"], "width": t.get("width"), "height": t.get("height")} for t in thumbnails]
+    return row
 
 
 def download(args_json, url, on_progress):

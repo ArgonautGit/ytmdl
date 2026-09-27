@@ -18,6 +18,10 @@ jni = "0.21"
 ndk-context = "0.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+[dev-dependencies]
+# Static HTML of every screen for browser previews (src/ui/preview.rs).
+dioxus-ssr = "=0.7.9"
+
 [features]
 default = ["desktop"]
 desktop = ["dioxus/desktop"]

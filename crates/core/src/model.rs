@@ -30,6 +30,9 @@ pub(crate) struct Info {
     pub thumbnail: Option<String>,
     #[serde(default)]
     pub thumbnails: Vec<Thumbnail>,
+    /// Row label of a YouTube Music search result ("song", "album", "ep", ...),
+    /// added by the bridge.
+    pub ytmdl_kind: Option<String>,
     #[serde(default)]
     pub entries: Vec<Info>,
     #[serde(default)]
@@ -58,7 +61,13 @@ pub struct Entry {
     pub artists: Vec<String>,
     pub album: Option<String>,
     pub duration_secs: Option<f64>,
+    /// Small (list-row sized) art or video thumbnail; see [`art_url`] for other sizes.
     pub thumbnail: Option<String>,
+    /// YouTube Music's label for the result: "song", "video", "album", "ep", "single".
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub year: Option<i32>,
 }
 
 /// Everything we know about one track.
@@ -141,7 +150,9 @@ impl Info {
             artists: self.primary_artists(),
             album: self.album.clone(),
             duration_secs: self.duration,
-            thumbnail: self.cover_urls().into_iter().next(),
+            thumbnail: self.cover_urls().into_iter().next().map(|u| art_url(&u, LIST_ART_PX)),
+            kind: self.ytmdl_kind.clone(),
+            year: self.release_year,
             id,
         })
     }
@@ -177,7 +188,7 @@ impl Info {
         let mut video: Vec<&Thumbnail> = Vec::new();
         for t in &self.thumbnails {
             if t.url.contains("googleusercontent.com") || t.url.contains("ggpht.com") {
-                square.push(upsize_art(&t.url));
+                square.push(art_url(&t.url, COVER_ART_PX));
             } else if !t.url.contains("webp") {
                 video.push(t);
             }
@@ -201,20 +212,36 @@ impl Info {
     }
 }
 
-/// `...=w120-h120-l90-rj` -> `...=w1200-h1200-l90-rj` (Google image sizing params).
-fn upsize_art(url: &str) -> String {
+/// Edge of the art embedded in files.
+const COVER_ART_PX: u32 = 1200;
+/// Edge of the art in [`Entry::thumbnail`]: enough for a list row on a 3.5x screen.
+const LIST_ART_PX: u32 = 226;
+
+/// YouTube Music art at `px` square: `...=w120-h120-l90-rj` -> `...=w544-h544-l90-rj`
+/// (Google image sizing params). Other URLs (video thumbnails) come back unchanged.
+pub fn art_url(url: &str, px: u32) -> String {
+    if !(url.contains("googleusercontent.com") || url.contains("ggpht.com")) {
+        return url.to_owned();
+    }
     match url.rsplit_once('=') {
         Some((base, params)) if params.starts_with('w') || params.starts_with('s') => {
-            let rest: Vec<&str> = params
+            let rest = params
                 .split('-')
-                .filter(|p| !(p.starts_with('w') || p.starts_with('h') || p.starts_with('s')))
-                .collect();
-            let mut sized = vec!["w1200", "h1200"];
-            sized.extend(rest);
+                .filter(|p| !(p.starts_with('w') || p.starts_with('h') || p.starts_with('s')));
+            let sized: Vec<String> = [format!("w{px}"), format!("h{px}")].into_iter().chain(rest.map(str::to_owned)).collect();
             format!("{base}={}", sized.join("-"))
         }
         _ => url.to_owned(),
     }
+}
+
+/// YouTube names album playlists "Album - <title>" (also "EP - ", "Single - ").
+pub(crate) fn album_title(title: &str) -> String {
+    ["Album - ", "EP - ", "Single - "]
+        .iter()
+        .find_map(|p| title.strip_prefix(p))
+        .unwrap_or(title)
+        .to_owned()
 }
 
 /// YouTube Music sometimes lists a truncated duplicate of an artist
@@ -232,15 +259,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn upsizes_google_art() {
+    fn resizes_google_art() {
         assert_eq!(
-            upsize_art("https://lh3.googleusercontent.com/abc=w120-h120-l90-rj"),
+            art_url("https://lh3.googleusercontent.com/abc=w120-h120-l90-rj", 1200),
             "https://lh3.googleusercontent.com/abc=w1200-h1200-l90-rj"
         );
         assert_eq!(
-            upsize_art("https://i.ytimg.com/vi/x/hqdefault.jpg"),
-            "https://i.ytimg.com/vi/x/hqdefault.jpg"
+            art_url("https://yt3.googleusercontent.com/abc=w60-h60-l90-rj", 226),
+            "https://yt3.googleusercontent.com/abc=w226-h226-l90-rj"
         );
+        let video = "https://i.ytimg.com/vi/x/hqdefault.jpg?sqp=-oaymwE&rs=w123";
+        assert_eq!(art_url(video, 1200), video);
+    }
+
+    #[test]
+    fn cleans_album_titles() {
+        assert_eq!(album_title("Album - Action Cuts"), "Action Cuts");
+        assert_eq!(album_title("EP - Four - Five"), "Four - Five");
+        assert_eq!(album_title("Mixtape - Tape"), "Mixtape - Tape");
+    }
+
+    #[test]
+    fn maps_enriched_music_search_row() {
+        let info: Info = serde_json::from_value(serde_json::json!({
+            "_type": "url", "id": "MPREb_x", "url": "https://music.youtube.com/browse/MPREb_x",
+            "title": "Random Access Memories", "artists": ["Daft Punk"], "release_year": 2013,
+            "ytmdl_kind": "album",
+            "thumbnails": [
+                {"url": "https://yt3.googleusercontent.com/a=w60-h60-l90-rj", "width": 60, "height": 60},
+                {"url": "https://yt3.googleusercontent.com/a=w544-h544-l90-rj", "width": 544, "height": 544}
+            ]
+        }))
+        .unwrap();
+        let e = info.to_entry().unwrap();
+        assert_eq!(e.title, "Random Access Memories");
+        assert_eq!(e.artists, ["Daft Punk"]);
+        assert_eq!(e.kind.as_deref(), Some("album"));
+        assert_eq!(e.year, Some(2013));
+        assert_eq!(e.thumbnail.as_deref(), Some("https://yt3.googleusercontent.com/a=w226-h226-l90-rj"));
     }
 
     #[test]

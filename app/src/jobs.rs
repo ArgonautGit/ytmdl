@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
-use ytmdl_core::{CancelToken, DownloadOptions, Downloaded, Downloader, Error, Progress};
+use ytmdl_core::{CancelToken, DownloadOptions, Downloaded, Downloader, Entry, Error, Progress, TrackMeta};
 
 use crate::platform;
 
@@ -24,7 +24,7 @@ impl Services {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum JobState {
     Queued,
     Downloading,
@@ -33,19 +33,40 @@ pub enum JobState {
     Cancelled,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Job {
     pub id: u64,
-    pub title: String,
-    pub artist: String,
+    /// What was asked for: the search result or collection member.
+    pub entry: Entry,
     pub state: JobState,
     pub progress: Option<Progress>,
     pub cancel: CancelToken,
 }
 
+impl PartialEq for Job {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.entry == other.entry && self.state == other.state && self.progress == other.progress
+    }
+}
+
 impl Job {
     pub fn is_active(&self) -> bool {
         matches!(self.state, JobState::Queued | JobState::Downloading)
+    }
+}
+
+/// A track resolved from a pasted link, as a list entry.
+pub fn entry_from_track(t: TrackMeta) -> Entry {
+    Entry {
+        id: t.id,
+        url: t.url,
+        title: t.title,
+        artists: t.artists,
+        album: t.album,
+        duration_secs: t.duration_secs,
+        thumbnail: t.cover_urls.first().map(|u| ytmdl_core::art_url(u, 226)),
+        kind: Some("song".into()),
+        year: t.year,
     }
 }
 
@@ -82,22 +103,60 @@ impl Queue {
     }
 
     /// Queues one track and returns once it finished (or failed).
-    pub async fn run(&self, svc: Services, url: String, title: String, artist: String) -> Result<Downloaded, Error> {
+    pub async fn run(&self, svc: Services, entry: Entry) -> Result<Downloaded, Error> {
         let id = self.next_id.read().fetch_add(1, Ordering::Relaxed);
-        let cancel = CancelToken::new();
         let mut jobs = self.jobs;
-        jobs.write().push(Job {
-            id,
-            title,
-            artist,
-            state: JobState::Queued,
-            progress: None,
-            cancel: cancel.clone(),
-        });
+        jobs.write().push(Job { id, entry, state: JobState::Queued, progress: None, cancel: CancelToken::new() });
+        self.execute(svc, id).await
+    }
 
+    /// Fire-and-forget [`Queue::run`] for UI buttons. The task belongs to the root
+    /// scope: with plain `spawn` it would die with the row that was tapped, leaving
+    /// the job "downloading" forever and the file unscanned.
+    pub fn start(&self, svc: Services, entry: Entry) {
+        let queue = *self;
+        dioxus::core::spawn_forever(async move {
+            let title = entry.title.clone();
+            if let Err(e) = queue.run(svc, entry).await {
+                tracing::warn!(target: "ytmdl", "download of {title:?} failed: {e}");
+            }
+        });
+    }
+
+    /// Runs a failed or cancelled job again, in place.
+    pub fn retry(&self, svc: Services, id: u64) {
+        let mut jobs = self.jobs;
+        {
+            let mut list = jobs.write();
+            let Some(job) = list.iter_mut().find(|j| j.id == id && !j.is_active()) else { return };
+            job.state = JobState::Queued;
+            job.progress = None;
+            job.cancel = CancelToken::new();
+        }
+        let queue = *self;
+        dioxus::core::spawn_forever(async move {
+            if let Err(e) = queue.execute(svc, id).await {
+                tracing::warn!(target: "ytmdl", "retry of job {id} failed: {e}");
+            }
+        });
+    }
+
+    async fn execute(&self, svc: Services, id: u64) -> Result<Downloaded, Error> {
+        let mut jobs = self.jobs;
+        let Some((url, cancel)) = jobs.read().iter().find(|j| j.id == id).map(|j| (j.entry.url.clone(), j.cancel.clone()))
+        else {
+            return Err(Error::Cancelled);
+        };
         let tx = self.tx.read().clone();
         let opts = DownloadOptions::new(svc.current_output_dir());
-        let result = svc.dl.download(&url, &opts, move |p| drop(tx.send((id, p))), cancel).await;
+        let token = cancel.clone();
+        let on_progress = move |p| {
+            // A cancelled run may have been retried already; keep its last report off the new one.
+            if !token.is_cancelled() {
+                drop(tx.send((id, p)));
+            }
+        };
+        let result = svc.dl.download(&url, &opts, on_progress, cancel.clone()).await;
         if let Ok(done) = &result {
             platform::media_scan(&done.path);
         }
@@ -106,22 +165,34 @@ impl Queue {
             Err(Error::Cancelled) => JobState::Cancelled,
             Err(e) => JobState::Failed(e.to_string()),
         };
-        if let Some(job) = jobs.write().iter_mut().find(|j| j.id == id) {
+        // Only if the job wasn't retried meanwhile (a retry swaps in a new token).
+        if let Some(job) = jobs.write().iter_mut().find(|j| j.id == id && j.cancel.ptr_eq(&cancel)) {
             job.state = state;
         }
         result
     }
 
-    /// Fire-and-forget [`Queue::run`] for UI buttons. The task belongs to the root
-    /// scope: with plain `spawn` it would die with the row that was tapped, leaving
-    /// the job "downloading" forever and the file unscanned.
-    pub fn start(&self, svc: Services, url: String, title: String, artist: String) {
-        let queue = *self;
-        dioxus::core::spawn_forever(async move {
-            if let Err(e) = queue.run(svc, url, title.clone(), artist).await {
-                tracing::warn!(target: "ytmdl", "download of {title:?} failed: {e}");
-            }
-        });
+    pub fn cancel(&self, id: u64) {
+        let mut jobs = self.jobs;
+        if let Some(job) = jobs.write().iter_mut().find(|j| j.id == id) {
+            Self::cancel_job(job);
+        }
+    }
+
+    /// Cancels every queued and running job; returns how many there were.
+    pub fn cancel_all(&self) -> usize {
+        let mut jobs = self.jobs;
+        let mut list = jobs.write();
+        list.iter_mut().filter(|j| j.is_active()).map(Self::cancel_job).count()
+    }
+
+    /// A running job stops at its next progress report; a waiting one is shown as
+    /// cancelled right away rather than when a worker frees up.
+    fn cancel_job(job: &mut Job) {
+        job.cancel.cancel();
+        if job.state == JobState::Queued {
+            job.state = JobState::Cancelled;
+        }
     }
 
     pub fn clear_finished(&self) {

@@ -53,7 +53,7 @@ pub struct VersionInfo {
 }
 
 /// One progress report from yt-dlp.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Progress {
     /// `downloading`, `finished` or `error`.
     pub status: String,
@@ -88,6 +88,10 @@ impl CancelToken {
     }
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+    /// Whether both handles belong to the same token (not just the same state).
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -243,6 +247,10 @@ impl Runtime {
         cancel: CancelToken,
     ) -> Result<String> {
         self.run(&self.0.downloads, move |py, bridge| {
+            // Cancelled while waiting for a worker: skip the extraction entirely.
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
             let on_progress = PyCFunction::new_closure(
                 py,
                 None,

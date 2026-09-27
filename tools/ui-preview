@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Renders every app screen from the real Dioxus components, with sample data, to
+# target/ui-preview/ (index.html shows them all at phone size). Pages link
+# app/assets/style.css, so CSS edits need only a reload; component edits need a
+# re-run.
+#
+#   tools/ui-preview                  placeholder data, or .deps/ui-sample.json if present
+#   tools/ui-preview --sample QUERY   first save real search results for QUERY there
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+if [ "${1:-}" = --sample ]; then
+    query="${2:?--sample needs a search query}"
+    cli() { cargo run -q -p ytmdl-cli -- --json "$@" 2>/dev/null; }
+    songs="$(cli search -n 10 "$query")"
+    albums="$(cli search -n 8 --source albums "$query")"
+    videos="$(cli search -n 6 --source youtube "$query")"
+    album="$(cli resolve "$(jq -r '.[0].url' <<<"$albums")")"
+    mkdir -p .deps
+    jq -n --argjson songs "$songs" --argjson albums "$albums" --argjson videos "$videos" --argjson album "$album" \
+        '{songs: $songs, albums: $albums, videos: $videos, album: {title: $album.title, entries: $album.entries}}' \
+        >.deps/ui-sample.json
+    echo "saved .deps/ui-sample.json" >&2
+fi
+
+cargo test -q -p ytmdl-app --no-default-features ui::preview -- --ignored --nocapture 2>&1 |
+    grep -E 'ui-preview|panicked|error' || true
+[ -f target/ui-preview/index.html ] || { echo "rendering failed" >&2; exit 1; }

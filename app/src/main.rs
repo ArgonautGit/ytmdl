@@ -70,7 +70,7 @@ async fn autotest(svc: Services, queue: Queue, url: String, startup_ms: u128) {
             ytmdl_core::Resolved::Collection { .. } => anyhow::bail!("autotest URL must be a single track"),
         };
         let resolve_ms = started.elapsed().as_millis();
-        let done = queue.run(svc.clone(), url.clone(), track.title.clone(), track.artists.join(", ")).await?;
+        let done = queue.run(svc.clone(), jobs::entry_from_track(track)).await?;
         let tags = ytmdl_core::tag::read_tags(&done.path)?;
         let v = svc.dl.runtime().version();
         anyhow::Ok(serde_json::json!({

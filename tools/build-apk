@@ -50,6 +50,20 @@ main="$project/app/src/main"
 
 # dx labels the app after the crate ("YtmdlApp").
 sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">ytmdl</string>|' "$main/res/values/strings.xml"
+# dx's theme is AppCompat Light; the UI is dark. Match the system bars and the
+# window behind the WebView to app/assets/style.css (--bg, --bar).
+cat >"$main/res/values/styles.xml" <<'EOF'
+<resources>
+    <style name="AppTheme" parent="@style/Theme.AppCompat.NoActionBar">
+        <item name="colorPrimaryDark">#030303</item>
+        <item name="android:statusBarColor">#030303</item>
+        <item name="android:navigationBarColor">#0f0f0f</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>
+EOF
 
 jni="$main/jniLibs/arm64-v8a"
 mkdir -p "$jni"
