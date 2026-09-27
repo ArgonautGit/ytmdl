@@ -490,6 +490,10 @@ button.icon-btn:active { background: var(--press); }
 .grid.shelf .tile { flex: none; width: 150px; }
 
 .hero-actions { display: flex; gap: 10px; margin-top: 14px; }
+.sync-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--muted); font-size: 13px; }
+.sync-line.failed { color: #ff6b81; }
+.sub > .icon { display: inline-block; margin-right: 4px; vertical-align: -2px; }
+.spinner.tiny { width: 14px; height: 14px; border-width: 2px; }
 .hero .hero-actions .primary { margin-top: 0; }
 .album .section { margin-top: 18px; }
 

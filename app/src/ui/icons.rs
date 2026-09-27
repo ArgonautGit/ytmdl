@@ -40,6 +40,8 @@ pub enum Icon {
     Playlist,
     /// Remove from a list.
     CircleMinus,
+    Sync,
+    Unlink,
 }
 
 #[component]
@@ -158,6 +160,12 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         Icon::CircleMinus => rsx! {
             circle { cx: "12", cy: "12", r: "10" }
             path { d: "M8 12h8" }
+        },
+        Icon::Sync => rsx! {
+            path { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" }
+        },
+        Icon::Unlink => rsx! {
+            path { d: "m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71M5.17 11.75l-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71M8 2v3M2 8h3M16 19v3M19 16h3" }
         },
     };
     rsx! {

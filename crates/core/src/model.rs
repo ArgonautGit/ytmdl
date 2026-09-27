@@ -239,6 +239,16 @@ pub fn art_url(url: &str, px: u32) -> String {
     }
 }
 
+/// One address per playlist, whatever link it came from: the `list` parameter
+/// of a YouTube or YouTube Music link, as a YouTube Music playlist URL. `None`
+/// when the link names no playlist.
+pub fn playlist_url(url: &str) -> Option<String> {
+    let query = url.split_once('?')?.1.split('#').next()?;
+    let id = query.split('&').find_map(|p| p.strip_prefix("list="))?;
+    let valid = !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    valid.then(|| format!("https://music.youtube.com/playlist?list={id}"))
+}
+
 /// YouTube names album playlists "Album - <title>" (also "EP - ", "Single - ").
 pub(crate) fn album_title(title: &str) -> String {
     ["Album - ", "EP - ", "Single - "]
@@ -274,6 +284,22 @@ mod tests {
         );
         let video = "https://i.ytimg.com/vi/x/hqdefault.jpg?sqp=-oaymwE&rs=w123";
         assert_eq!(art_url(video, 1200), video);
+    }
+
+    #[test]
+    fn finds_playlist_ids() {
+        let canonical = "https://music.youtube.com/playlist?list=PLx-y_1";
+        for url in [
+            "https://music.youtube.com/playlist?list=PLx-y_1",
+            "https://www.youtube.com/playlist?list=PLx-y_1&si=abc",
+            "https://music.youtube.com/watch?v=abc&list=PLx-y_1#x",
+            "https://youtube.com/watch?v=abc&feature=share&list=PLx-y_1",
+        ] {
+            assert_eq!(playlist_url(url).as_deref(), Some(canonical), "{url}");
+        }
+        assert_eq!(playlist_url("https://music.youtube.com/watch?v=abc"), None);
+        assert_eq!(playlist_url("https://music.youtube.com/playlist?list="), None);
+        assert_eq!(playlist_url("https://www.youtube.com/playlist?list=PL<script>"), None);
     }
 
     #[test]

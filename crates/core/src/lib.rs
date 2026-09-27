@@ -13,7 +13,7 @@ pub mod tag;
 use std::path::PathBuf;
 
 pub use error::{Error, Result};
-pub use model::{CollectionKind, Downloaded, Entry, Resolved, TrackMeta, art_url};
+pub use model::{CollectionKind, Downloaded, Entry, Resolved, TrackMeta, art_url, playlist_url};
 pub use runtime::{CancelToken, Channel, Progress, Runtime, RuntimeConfig, UpdateOutcome, VersionInfo};
 
 use model::Info;

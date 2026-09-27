@@ -88,6 +88,20 @@ CREATE TABLE playlist_tracks (
 );
 CREATE INDEX playlist_tracks_order ON playlist_tracks (playlist_id, position);
 CREATE INDEX playlist_tracks_track ON playlist_tracks (track_id);
+"#, r#"
+ALTER TABLE playlists ADD COLUMN source_url TEXT;   -- YouTube playlist a synced playlist follows
+ALTER TABLE playlists ADD COLUMN synced_at INTEGER; -- unix seconds
+CREATE UNIQUE INDEX playlists_source ON playlists (source_url);
+-- A synced playlist as YouTube last listed it; its downloaded songs are its
+-- playlist_tracks, in this order.
+CREATE TABLE playlist_remote (
+    playlist_id INTEGER NOT NULL REFERENCES playlists (id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    video_id    TEXT NOT NULL,
+    skipped     INTEGER NOT NULL DEFAULT 0,     -- deleted here: not downloaded again
+    PRIMARY KEY (playlist_id, position)
+);
+CREATE INDEX playlist_remote_video ON playlist_remote (video_id);
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
@@ -277,6 +291,7 @@ impl Library {
             ],
             track_from_row,
         )?;
+        playlists::place_in_synced(&db, &track)?;
         Ok(track)
     }
 
@@ -373,8 +388,9 @@ impl Library {
     }
 
     /// Forgets a track (and its playlist entries) and deletes its file, then the
-    /// album and artist folders if that left them empty. The cover art stays
-    /// cached (other tracks of the album share it). Returns the deleted track.
+    /// album and artist folders if that left them empty. Synced playlists won't
+    /// download it again. The cover art stays cached (other tracks of the album
+    /// share it). Returns the deleted track.
     pub fn delete_track(&self, id: i64) -> Result<Option<Track>> {
         let Some(track) = self.track(id)? else { return Ok(None) };
         match fs::remove_file(&track.path) {
@@ -382,7 +398,10 @@ impl Library {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        self.db().execute("DELETE FROM tracks WHERE id = ?1", [id])?;
+        let db = self.db();
+        db.execute("UPDATE playlist_remote SET skipped = 1 WHERE video_id = ?1", [&track.video_id])?;
+        db.execute("DELETE FROM tracks WHERE id = ?1", [id])?;
+        drop(db);
         // `<Artist>/<Album>/<file>`: remove_dir only succeeds on empty folders.
         for dir in track.path.ancestors().skip(1).take(2) {
             if fs::remove_dir(dir).is_err() {

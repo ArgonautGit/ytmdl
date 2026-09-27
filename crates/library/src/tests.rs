@@ -175,6 +175,55 @@ fn playlists_keep_order_skip_duplicates_and_follow_deletes() {
 }
 
 #[test]
+fn synced_playlists_follow_youtube() {
+    let tmp = TempDir::new("synced");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    let url = "https://music.youtube.com/playlist?list=PL1";
+    let id = lib.create_synced_playlist("Road trip", url).unwrap();
+    assert_eq!(lib.create_synced_playlist("Again", url).unwrap(), id);
+    assert_eq!(lib.synced_playlist(url).unwrap(), Some(id));
+
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let titles = || lib.playlist_tracks(id).unwrap().into_iter().map(|e| e.track.title).collect::<Vec<_>>();
+    // YouTube lists C (not downloaded yet), B, A.
+    let missing = lib.sync_playlist(id, &ids(&["ccccccccccc", "bbbbbbbbbbb", "aaaaaaaaaaa"])).unwrap();
+    assert_eq!(missing, ["ccccccccccc"]);
+    assert_eq!(titles(), ["B", "A"]);
+    let p = lib.playlist(id).unwrap().unwrap();
+    assert!(p.is_synced() && p.synced_at.is_some());
+    assert_eq!((p.tracks, p.wanted), (2, 3));
+
+    // C's download finishes and takes its place.
+    add(&lib, &tmp.0, meta("ccccccccccc", "C", None, &["X"], None));
+    assert_eq!(titles(), ["C", "B", "A"]);
+    let b_entry = lib.playlist_tracks(id).unwrap()[1].entry_id;
+
+    // YouTube drops A, adds D and reorders; B keeps its entry.
+    let missing = lib.sync_playlist(id, &ids(&["bbbbbbbbbbb", "ddddddddddd", "ccccccccccc"])).unwrap();
+    assert_eq!(missing, ["ddddddddddd"]);
+    assert_eq!(titles(), ["B", "C"]);
+    assert_eq!(lib.playlist_tracks(id).unwrap()[0].entry_id, b_entry);
+    assert!(lib.track(a.id).unwrap().is_some(), "songs leaving the playlist stay in the library");
+
+    // A song deleted here isn't downloaded again by the next sync...
+    lib.delete_track(b.id).unwrap();
+    let missing = lib.sync_playlist(id, &ids(&["bbbbbbbbbbb", "ddddddddddd", "ccccccccccc"])).unwrap();
+    assert_eq!(missing, ["ddddddddddd"]);
+    assert_eq!(lib.playlist(id).unwrap().unwrap().wanted, 2);
+    // ...unless it is downloaded again by hand.
+    add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    assert_eq!(titles(), ["B", "C"]);
+    assert_eq!(lib.playlist(id).unwrap().unwrap().wanted, 3);
+
+    lib.stop_syncing(id).unwrap();
+    assert!(!lib.playlist(id).unwrap().unwrap().is_synced());
+    assert_eq!(titles(), ["B", "C"]);
+    assert_eq!(lib.synced_playlist(url).unwrap(), None);
+}
+
+#[test]
 fn saves_download_queue() {
     let tmp = TempDir::new("jobs");
     let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();

@@ -4,6 +4,7 @@
 mod icons;
 #[cfg(test)]
 mod preview;
+mod sync;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -17,6 +18,7 @@ use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat};
 use icons::Icon;
+use sync::SyncState;
 use views::*;
 
 const CSS: &str = include_str!("../../assets/style.css");
@@ -41,6 +43,8 @@ struct Ctx {
     /// All-files access, i.e. whether downloads go to the shared Music folder.
     storage: Signal<bool>,
     toast: Signal<Option<(u64, String)>>,
+    /// Synced playlists syncing now, or whose last sync failed.
+    syncs: Signal<HashMap<i64, SyncState>>,
 }
 
 impl Ctx {
@@ -57,19 +61,25 @@ impl Ctx {
         toast.set(Some((id, message)));
     }
 
-    /// Starts `entry`, or retries its failed or cancelled job; no-op while one is
-    /// running, or when the song is already in the library.
+    /// Starts `entry`, or retries its failed or cancelled job.
     fn download(&self, entry: Entry) {
-        let Some(svc) = self.services() else { return };
+        self.download_entry(entry, true);
+    }
+
+    /// Starts `entry` unless it is in the library or has a job running (or,
+    /// without `retry`, a failed or cancelled one); returns whether it started.
+    fn download_entry(&self, entry: Entry, retry: bool) -> bool {
+        let Some(svc) = self.services() else { return false };
         if self.owned.peek().contains(&entry.id) {
-            return;
+            return false;
         }
         let previous = self.queue.jobs().peek().iter().rev().find(|j| j.entry.id == entry.id).map(|j| (j.id, j.state.clone()));
         match previous {
             None | Some((_, JobState::Done { .. })) => self.queue.start(svc, entry),
-            Some((id, JobState::Failed(_) | JobState::Cancelled)) => self.queue.retry(svc, id),
-            Some(_) => {}
+            Some((id, JobState::Failed(_) | JobState::Cancelled)) if retry => self.queue.retry(svc, id),
+            Some(_) => return false,
         }
+        true
     }
 
     /// Deletes songs from the device, the library and the queue.
@@ -164,8 +174,8 @@ enum From {
     Library,
     Album,
     Artist(String),
-    /// The playlist entry.
-    Playlist(i64),
+    /// A synced playlist's songs follow YouTube, so they can't be removed.
+    Playlist { entry: i64, synced: bool },
     /// The queue entry's key.
     Queue(String),
 }
@@ -279,7 +289,13 @@ fn song_item(t: &Track, playing: bool) -> SongItem {
 }
 
 fn playlist_item(p: &Playlist) -> PlaylistItem {
-    PlaylistItem { name: p.name.clone(), tracks: p.tracks, duration_secs: p.duration_secs, art: art_src(p.art.as_deref(), ART_SMALL) }
+    PlaylistItem {
+        name: p.name.clone(),
+        tracks: p.tracks,
+        duration_secs: p.duration_secs,
+        art: art_src(p.art.as_deref(), ART_SMALL),
+        synced: p.is_synced(),
+    }
 }
 
 /// Grid tiles are half the screen wide, so they get the large art.
@@ -335,7 +351,8 @@ fn Shell(setup: Setup) -> Element {
     let nav = use_hook(Nav::new);
     let storage = use_signal(platform::has_storage_access);
     let toast = use_signal(|| None);
-    let ctx = use_context_provider(|| Ctx { boot, queue, library, owned, player, nav, storage, toast });
+    let syncs = use_signal(HashMap::new);
+    let ctx = use_context_provider(|| Ctx { boot, queue, library, owned, player, nav, storage, toast, syncs });
     let mut tab = use_signal(|| Tab::Library);
 
     let dirs = setup.dirs.clone();
@@ -355,6 +372,7 @@ fn Shell(setup: Setup) -> Element {
         player.refresh();
     });
     downloads_notification(queue);
+    sync::use_auto_sync(ctx);
 
     // Playback errors (a file deleted elsewhere, say) show once each.
     let mut shown_error = use_signal(|| None::<String>);
@@ -763,18 +781,29 @@ fn PlaylistScreen(id: i64) -> Element {
             item
         })
         .collect();
+    let synced = p.is_synced();
+    let sync = synced.then(|| match ctx.syncs.read().get(&id) {
+        Some(SyncState::Running) => SyncView::Syncing,
+        Some(SyncState::Failed(e)) => SyncView::Failed(e.clone()),
+        None => SyncView::Synced {
+            ago: p.synced_at.map_or_else(|| "never".into(), |t| sync::ago(sync::unix_now() - t)),
+            pending: p.wanted.saturating_sub(p.tracks),
+        },
+    });
     rsx! {
         PlaylistPage {
             name: p.name.clone(),
             cover: art_src(p.art.as_deref(), ART_LARGE),
             songs,
+            sync,
             onback: move |_| ctx.nav.back(),
             onplay: move |i| ctx.player.play(tracks(), i),
             onshuffle: move |_| ctx.player.shuffle(tracks()),
             onmore: move |i| {
                 let entry: Option<PlaylistEntry> = entries.peek().get(i).cloned();
                 if let Some(e) = entry {
-                    ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track), from: From::Playlist(e.entry_id) }));
+                    let from = From::Playlist { entry: e.entry_id, synced };
+                    ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track), from }));
                 }
             },
             onplaylistmore: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Playlist { id, open: true })),
@@ -874,7 +903,9 @@ fn SongMenu(track: Track, from: From) -> Element {
     }
     add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
     match &from {
-        From::Playlist(entry) => add(Icon::CircleMinus, "Remove from playlist", SongAction::RemoveFromPlaylist(*entry)),
+        From::Playlist { entry, synced: false } => {
+            add(Icon::CircleMinus, "Remove from playlist", SongAction::RemoveFromPlaylist(*entry))
+        }
         From::Queue(key) => add(Icon::CircleMinus, "Remove from queue", SongAction::RemoveFromQueue(key.clone())),
         _ => {}
     }
@@ -989,40 +1020,83 @@ fn AlbumMenu(title: String, artist: String) -> Element {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PlaylistAction {
+    PlayNext,
+    AddToQueue,
+    Sync,
+    Rename,
+    StopSyncing,
+    Delete,
+}
+
 #[component]
 fn PlaylistMenu(id: i64, open: bool) -> Element {
     let ctx = use_context::<Ctx>();
     let Some(playlist) = ctx.library.get().playlist(id).ok().flatten() else {
         return rsx! {};
     };
+    let synced = playlist.is_synced();
     let head = MenuHead {
         title: playlist.name.clone(),
-        sub: dotted_text(&["Playlist".into(), plural(playlist.tracks as usize, "song", "songs")]),
+        sub: dotted_text(&[
+            if synced { "Synced playlist" } else { "Playlist" }.into(),
+            plural(playlist.tracks as usize, "song", "songs"),
+        ]),
         art: art_src(playlist.art.as_deref(), ART_SMALL),
         icon: Icon::Playlist,
     };
-    let items = vec![
-        MenuItem::new(Icon::ListStart, "Play next"),
-        MenuItem::new(Icon::ListEnd, "Add to queue"),
-        MenuItem::new(Icon::Pencil, "Rename"),
-        MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete playlist") },
+    let mut items = vec![
+        (MenuItem::new(Icon::ListStart, "Play next"), PlaylistAction::PlayNext),
+        (MenuItem::new(Icon::ListEnd, "Add to queue"), PlaylistAction::AddToQueue),
     ];
+    if synced {
+        items.push((MenuItem::new(Icon::Sync, "Sync now"), PlaylistAction::Sync));
+    }
+    items.push((MenuItem::new(Icon::Pencil, "Rename"), PlaylistAction::Rename));
+    if synced {
+        let item = MenuItem { sub: Some("Keep the songs it has now".into()), ..MenuItem::new(Icon::Unlink, "Stop syncing") };
+        items.push((item, PlaylistAction::StopSyncing));
+    }
+    items.push((MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete playlist") }, PlaylistAction::Delete));
+    let (menu, actions): (Vec<MenuItem>, Vec<PlaylistAction>) = items.into_iter().unzip();
     rsx! {
         MenuSheet {
             head,
-            items,
+            items: menu,
             onclose: move |_| ctx.nav.back(),
-            onpick: move |i: usize| match i {
-                0 => {
+            onpick: move |i: usize| match actions.get(i).copied() {
+                Some(PlaylistAction::PlayNext) => {
                     ctx.nav.back();
                     ctx.play_next(&ctx.playlist_tracks(id));
                 }
-                1 => {
+                Some(PlaylistAction::AddToQueue) => {
                     ctx.nav.back();
                     ctx.add_to_queue(&ctx.playlist_tracks(id));
                 }
-                2 => ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), tracks: Vec::new() })),
-                _ => ctx.nav.replace(Overlay::Sheet(Sheet::DeletePlaylist { id, name: playlist.name.clone(), open })),
+                Some(PlaylistAction::Sync) => {
+                    ctx.nav.back();
+                    ctx.sync_playlist(id, true);
+                }
+                Some(PlaylistAction::Rename) => {
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), tracks: Vec::new() }))
+                }
+                Some(PlaylistAction::StopSyncing) => {
+                    ctx.nav.back();
+                    match ctx.library.get().stop_syncing(id) {
+                        Ok(()) => {
+                            let mut syncs = ctx.syncs;
+                            syncs.write().remove(&id);
+                            ctx.library.changed();
+                            ctx.notify(format!("{} no longer syncs", playlist.name));
+                        }
+                        Err(e) => ctx.notify(format!("Couldn't change the playlist: {e}")),
+                    }
+                }
+                Some(PlaylistAction::Delete) => {
+                    ctx.nav.replace(Overlay::Sheet(Sheet::DeletePlaylist { id, name: playlist.name.clone(), open }))
+                }
+                None => {}
             },
         }
     }
@@ -1031,7 +1105,8 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
 #[component]
 fn AddToPlaylist(tracks: Vec<i64>) -> Element {
     let ctx = use_context::<Ctx>();
-    let playlists = ctx.library.get().playlists().unwrap_or_default();
+    // A synced playlist's songs come from YouTube.
+    let playlists: Vec<Playlist> = ctx.library.get().playlists().unwrap_or_default().into_iter().filter(|p| !p.is_synced()).collect();
     let items = std::iter::once(MenuItem::new(Icon::Plus, "New playlist"))
         .chain(playlists.iter().map(|p| MenuItem {
             sub: Some(plural(p.tracks as usize, "song", "songs")),
@@ -1266,6 +1341,14 @@ fn SearchScreen() -> Element {
 #[component]
 fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
     let ctx = use_context::<Ctx>();
+    let lib = ctx.library;
+    // Playlists (not albums) are saved as synced playlists.
+    let source = (open.header.kind.as_deref() == Some("playlist")).then(|| ytmdl_core::playlist_url(&open.url)).flatten();
+    let is_playlist = source.is_some();
+    let saved: Memo<Option<i64>> = use_memo(move || {
+        lib.subscribe();
+        source.as_deref().and_then(|s| lib.get().synced_playlist(s).ok().flatten())
+    });
     let url = open.url.clone();
     let mut header = use_signal(|| open.header.clone());
     let mut tracks = use_signal(|| open.tracks.clone().map(Ok::<_, String>));
@@ -1296,11 +1379,12 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
 
     // Album tracks list video thumbnails; the queue shows the album's square art instead.
     let album_track = move |mut entry: Entry| {
-        if let Some(cover) = header.peek().cover.clone() {
+        if let Some(cover) = header.peek().cover.clone().filter(|_| !is_playlist) {
             entry.thumbnail = Some(cover);
         }
         entry
     };
+    let open_url = open.url.clone();
     let states = track_states(&ctx.queue.jobs().read(), &ctx.owned.read());
     rsx! {
         AlbumPage {
@@ -1310,10 +1394,20 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
                 Some(Ok(entries)) => AlbumTracks::Loaded(with_states(entries.clone(), &states)),
             },
             header: header(),
+            saved: is_playlist.then(|| saved().is_some()),
             onback: move |_| ctx.nav.back(),
             ondownload: move |e| ctx.download(album_track(e)),
+            onopensaved: move |_| {
+                if let Some(id) = saved() {
+                    ctx.nav.replace(Overlay::Playlist(id));
+                }
+            },
             ondownloadall: move |_| {
                 let Some(Ok(entries)) = tracks.peek().clone() else { return };
+                if is_playlist {
+                    ctx.save_playlist(&open_url, header.peek().title.clone(), entries);
+                    return;
+                }
                 let states = track_states(&ctx.queue.jobs().peek(), &ctx.owned.peek());
                 let todo: Vec<Entry> = entries
                     .into_iter()

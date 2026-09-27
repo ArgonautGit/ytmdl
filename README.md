@@ -22,6 +22,10 @@ new APK.
   forgets deleted ones.
 - `app`: the Dioxus app (library, playlists, search, downloads, settings,
   player with A-B loops over part of a song or a run of the queue).
+  Playlists downloaded from a link stay synced with YouTube: new songs there
+  are downloaded, removed ones leave the playlist (the files stay), and the
+  order follows. They sync when the app starts or returns to the screen
+  (at most every 30 minutes) and from the playlist's menu.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops so they hold with the screen

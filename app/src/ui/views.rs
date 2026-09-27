@@ -68,6 +68,17 @@ pub struct PlaylistItem {
     pub tracks: u32,
     pub duration_secs: f64,
     pub art: Option<String>,
+    /// Follows a YouTube playlist.
+    pub synced: bool,
+}
+
+/// A synced playlist's state, under its title.
+#[derive(Clone, PartialEq, Debug)]
+pub enum SyncView {
+    Syncing,
+    Failed(String),
+    /// `ago`: when it last synced; `pending`: songs still to download.
+    Synced { ago: String, pending: u32 },
 }
 
 /// A row in a menu sheet.
@@ -594,13 +605,20 @@ fn NoResults() -> Element {
 
 // ---- album ----
 
+/// An album or playlist from YouTube. `saved` is set for playlists: whether
+/// it is in the library as a synced playlist.
 #[component]
 pub fn AlbumPage(
     header: AlbumHeader,
     tracks: AlbumTracks,
+    #[props(default)] saved: Option<bool>,
     onback: EventHandler<()>,
     ondownload: EventHandler<Entry>,
+    /// Downloads every song (and saves a playlist as a synced playlist).
     ondownloadall: EventHandler<()>,
+    /// Opens the saved playlist.
+    #[props(default)]
+    onopensaved: EventHandler<()>,
     onretry: EventHandler<()>,
 ) -> Element {
     rsx! {
@@ -608,7 +626,7 @@ pub fn AlbumPage(
             BackButton { onback }
             Hero { cover: header.cover.as_deref().map(|u| art_url(u, 544)), title: header.title.clone(), meta: header.meta(),
                 match &tracks {
-                    AlbumTracks::Loaded(rows) => rsx! { AlbumSummary { rows: rows.clone(), ondownloadall } },
+                    AlbumTracks::Loaded(rows) => rsx! { AlbumSummary { rows: rows.clone(), saved, ondownloadall, onopensaved } },
                     _ => rsx! {},
                 }
             }
@@ -681,7 +699,12 @@ fn Hero(
 }
 
 #[component]
-fn AlbumSummary(rows: Vec<(Entry, TrackState)>, ondownloadall: EventHandler<()>) -> Element {
+fn AlbumSummary(
+    rows: Vec<(Entry, TrackState)>,
+    saved: Option<bool>,
+    ondownloadall: EventHandler<()>,
+    onopensaved: EventHandler<()>,
+) -> Element {
     let total: f64 = rows.iter().filter_map(|(e, _)| e.duration_secs).sum();
     let done = rows.iter().filter(|(_, s)| *s == TrackState::Done).count();
     let todo = rows.iter().filter(|(_, s)| s.wants_download()).count();
@@ -689,7 +712,28 @@ fn AlbumSummary(rows: Vec<(Entry, TrackState)>, ondownloadall: EventHandler<()>)
     let line = dotted([Some(plural(rows.len(), "song", "songs")), (total > 0.0).then(|| total_text(total))]);
     rsx! {
         div { class: "sub", "{line}" }
-        if todo > 0 {
+        if saved == Some(false) {
+            div { class: "sub", "Saves it to your playlists, kept in sync with YouTube" }
+        }
+        if saved == Some(false) && todo == 0 {
+            button { class: "primary", onclick: move |_| ondownloadall.call(()),
+                Svg { icon: Icon::Plus, size: 20 }
+                "Add to library"
+            }
+        } else if saved == Some(true) {
+            div { class: "hero-actions",
+                if todo > 0 {
+                    button { class: "primary", onclick: move |_| ondownloadall.call(()),
+                        Svg { icon: Icon::Download, size: 20 }
+                        "Download {todo} more"
+                    }
+                }
+                button { class: "secondary", onclick: move |_| onopensaved.call(()),
+                    Svg { icon: Icon::Playlist, size: 20 }
+                    "Open playlist"
+                }
+            }
+        } else if todo > 0 {
             button { class: "primary", onclick: move |_| ondownloadall.call(()),
                 Svg { icon: Icon::Download, size: 20 }
                 if done + busy == 0 { "Download all" } else { "Download {todo} more" }
@@ -798,12 +842,18 @@ pub fn LibraryPage(
 
 #[component]
 fn PlaylistRow(playlist: PlaylistItem, onopen: EventHandler<()>, onmore: EventHandler<()>) -> Element {
+    let kind = if playlist.synced { "Synced" } else { "Playlist" };
     rsx! {
         li { class: "row tappable song", onclick: move |_| onopen.call(()),
             Cover { url: playlist.art.clone(), icon: Icon::Playlist }
             div { class: "meta",
                 div { class: "title", "{playlist.name}" }
-                div { class: "sub", {dotted([Some("Playlist".into()), Some(plural(playlist.tracks as usize, "song", "songs"))])} }
+                div { class: "sub",
+                    if playlist.synced {
+                        Svg { icon: Icon::Sync, size: 13 }
+                    }
+                    {dotted([Some(kind.into()), Some(plural(playlist.tracks as usize, "song", "songs"))])}
+                }
             }
             MoreButton { onmore }
         }
@@ -996,6 +1046,9 @@ pub fn PlaylistPage(
     name: String,
     cover: Option<String>,
     songs: Vec<SongItem>,
+    /// Set for a synced playlist.
+    #[props(default)]
+    sync: Option<SyncView>,
     onback: EventHandler<()>,
     onplay: EventHandler<usize>,
     onshuffle: EventHandler<()>,
@@ -1006,17 +1059,39 @@ pub fn PlaylistPage(
 ) -> Element {
     let total: f64 = songs.iter().filter_map(|s| s.duration_secs).sum();
     let meta = dotted([
-        Some("Playlist".into()),
+        Some(if sync.is_some() { "Synced playlist" } else { "Playlist" }.into()),
         Some(plural(songs.len(), "song", "songs")),
         (total > 0.0).then(|| total_text(total)),
     ]);
+    let waiting = matches!(sync, Some(SyncView::Syncing | SyncView::Synced { pending: 1.., .. }));
     rsx! {
         div { class: "album",
             BackButton { onback }
             Hero { cover, title: name, meta, icon: Icon::Playlist,
+                match sync {
+                    Some(SyncView::Syncing) => rsx! {
+                        div { class: "sync-line", div { class: "spinner tiny" } "Syncing with YouTube…" }
+                    },
+                    Some(SyncView::Failed(e)) => rsx! {
+                        div { class: "sync-line failed", Svg { icon: Icon::Alert, size: 16 } "Couldn't sync: {e}" }
+                    },
+                    Some(SyncView::Synced { ago, pending }) => rsx! {
+                        div { class: "sync-line",
+                            Svg { icon: Icon::Sync, size: 16 }
+                            {dotted([Some(format!("Synced with YouTube {ago}")), (pending > 0).then(|| format!("{pending} to download"))])}
+                        }
+                    },
+                    None => rsx! {},
+                }
                 PlayButtons { onplay: move |_| onplay.call(0), onshuffle, onmore: onplaylistmore, empty: songs.is_empty() }
             }
-            if songs.is_empty() {
+            if songs.is_empty() && waiting {
+                EmptyState {
+                    icon: Icon::Download,
+                    title: "Downloading your playlist",
+                    text: "Songs show up here as they finish.",
+                }
+            } else if songs.is_empty() {
                 EmptyState {
                     icon: Icon::Playlist,
                     title: "No songs yet",

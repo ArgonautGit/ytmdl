@@ -65,6 +65,8 @@ const SCREENS: &[Screen] = &[
     ("delete-song", "Delete a song", delete_song),
     ("library-playlists", "Library, playlists", library_playlists),
     ("playlist", "Playlist", playlist),
+    ("playlist-synced", "Synced playlist, still downloading", playlist_synced),
+    ("remote-playlist", "Playlist from a link, not saved yet", remote_playlist),
     ("library-albums", "Library, albums", library_albums),
     ("library-artists", "Library, artists", library_artists),
     ("library-empty", "Library, empty", library_empty),
@@ -192,6 +194,7 @@ fn playlist_items() -> Vec<PlaylistItem> {
             tracks: *tracks,
             duration_secs: *secs,
             art: songs[(i + 2) % songs.len()].thumbnail.clone(),
+            synced: i == 0,
         })
         .collect()
 }
@@ -406,6 +409,14 @@ fn library_playlists() -> Element {
 }
 
 fn playlist() -> Element {
+    playlist_page(None)
+}
+
+fn playlist_synced() -> Element {
+    playlist_page(Some(SyncView::Synced { ago: "5 min ago".into(), pending: 3 }))
+}
+
+fn playlist_page(sync: Option<SyncView>) -> Element {
     let songs = song_items().into_iter().skip(2).take(7).collect();
     let cover = sample().songs[3].thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544));
     shell(
@@ -417,6 +428,7 @@ fn playlist() -> Element {
                     name: "Morning run".to_string(),
                     cover,
                     songs,
+                    sync,
                     onback: |_| {},
                     onplay: |_| {},
                     onshuffle: |_| {},
@@ -543,7 +555,27 @@ fn search_videos() -> Element {
 }
 
 fn album_page(tracks: AlbumTracks) -> Element {
-    let header = AlbumHeader::from_entry(&sample().albums[0]);
+    album_page_with(tracks, AlbumHeader::from_entry(&sample().albums[0]), None)
+}
+
+fn remote_playlist() -> Element {
+    let rows = sample()
+        .songs
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.clone(), if i < 3 { TrackState::Done } else { TrackState::Idle }))
+        .collect();
+    let header = AlbumHeader {
+        title: "Morning run".into(),
+        artists: vec!["Kevin MacLeod".into()],
+        year: None,
+        kind: Some("playlist".into()),
+        cover: sample().songs[3].thumbnail.clone(),
+    };
+    album_page_with(AlbumTracks::Loaded(rows), header, Some(false))
+}
+
+fn album_page_with(tracks: AlbumTracks, header: AlbumHeader, saved: Option<bool>) -> Element {
     shell(
         Tab::Search,
         2,
@@ -552,6 +584,7 @@ fn album_page(tracks: AlbumTracks) -> Element {
                 AlbumPage {
                     header,
                     tracks,
+                    saved,
                     onback: |_| {},
                     ondownload: |_| {},
                     ondownloadall: |_| {},
