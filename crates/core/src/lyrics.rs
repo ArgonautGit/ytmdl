@@ -173,6 +173,47 @@ mod tests {
         Line { at_ms: Some(at_ms), text: text.into() }
     }
 
+    /// Needs `.deps/fixtures/tone.m4a` (`ytmdl-cli record-fixtures`); skipped without it.
+    #[test]
+    fn stores_lyrics_in_files() {
+        use crate::TrackMeta;
+        use crate::tag::{read_lyrics, read_tags, write_lyrics, write_tags, write_tags_and_lyrics};
+
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.deps/fixtures/tone.m4a");
+        if !fixture.exists() {
+            eprintln!("skipping: {} is missing", fixture.display());
+            return;
+        }
+        let path = std::env::temp_dir().join(format!("ytmdl-lyrics-{}.m4a", std::process::id()));
+        std::fs::copy(&fixture, &path).unwrap();
+        let meta = TrackMeta {
+            id: "abcdefghijk".into(),
+            url: "https://music.youtube.com/watch?v=abcdefghijk".into(),
+            title: "Song".into(),
+            artists: vec!["Band".into()],
+            album: None,
+            album_artists: Vec::new(),
+            track_number: None,
+            disc_number: None,
+            year: None,
+            duration_secs: None,
+            cover_urls: Vec::new(),
+        };
+        write_tags(&path, &meta, None).unwrap();
+        assert_eq!(read_lyrics(&path).unwrap(), None);
+        assert!(!read_tags(&path).unwrap().has_lyrics);
+
+        let lrc = "[00:01.00]First line\n[00:02.50]Second line";
+        write_tags_and_lyrics(&path, &meta, None, Some(lrc)).unwrap();
+        assert_eq!(read_lyrics(&path).unwrap().as_deref(), Some(lrc));
+        assert!(read_tags(&path).unwrap().has_lyrics);
+
+        write_lyrics(&path, "Plain words").unwrap();
+        assert_eq!(read_lyrics(&path).unwrap().as_deref(), Some("Plain words"));
+        assert_eq!(read_tags(&path).unwrap().title.as_deref(), Some("Song"));
+        std::fs::remove_file(&path).unwrap();
+    }
+
     #[test]
     fn parses_lrc() {
         let lrc = "[ar:Band]\n[ti:Song]\n[00:31.48] Like the legend\n[00:35.4]All ends\n\n[01:02.345][00:10]Twice\n[00:48.82]";
