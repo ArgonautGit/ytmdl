@@ -59,9 +59,23 @@ struct Ctx {
     /// The sort of each library tab.
     sorts: Signal<Sorts>,
     updates: Signal<Updates>,
+    /// Songs play at an even loudness (ReplayGain).
+    normalize: Signal<bool>,
 }
 
+/// The Settings switch for even loudness ("0" is off).
+const NORMALIZE: &str = "normalize";
+
 impl Ctx {
+    fn set_normalize(&self, on: bool) {
+        if let Err(e) = self.library.get().set_setting(NORMALIZE, if on { "1" } else { "0" }) {
+            self.notify(format!("Couldn't save the setting: {e}"));
+            return;
+        }
+        let mut normalize = self.normalize;
+        normalize.set(on);
+    }
+
     fn services(&self) -> Option<Services> {
         match &*self.boot.read() {
             Boot::Ready(s) => Some(s.clone()),
@@ -394,6 +408,7 @@ fn Shell(setup: Setup) -> Element {
     let shared = use_signal(|| None);
     let sorts = use_signal(|| Sorts::load(&setup.library));
     let updates = use_signal(|| Updates::load(&setup.library));
+    let normalize = use_signal(|| setup.library.setting(NORMALIZE).ok().flatten().as_deref() != Some("0"));
     let ctx = use_context_provider(|| Ctx {
         boot,
         queue,
@@ -408,18 +423,28 @@ fn Shell(setup: Setup) -> Element {
         shared,
         sorts,
         updates,
+        normalize,
     });
 
     let dirs = setup.dirs.clone();
     use_hook(move || spawn(crate::start(boot, dirs, queue)));
     use_hook(move || watch_storage_access(storage));
     serve_art(library);
-    // Index new and deleted files at start, and again once the shared folder is readable.
+    // Index new and deleted files at start, and again once the shared folder is
+    // readable; then measure the loudness of songs that have none yet.
     let dirs = setup.dirs.clone();
     use_effect(move || {
         let _ = storage();
-        spawn(library.scan(dirs.music_dirs()));
+        let normalize = normalize();
+        let dirs = dirs.music_dirs();
+        spawn(async move {
+            library.scan(dirs).await;
+            if normalize {
+                library.measure_loudness().await;
+            }
+        });
     });
+    use_effect(move || player.set_normalize(normalize()));
 
     // Songs deleted or rescanned drop out of the queue's view.
     use_effect(move || {
@@ -1923,6 +1948,8 @@ fn SettingsScreen() -> Element {
             ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
             onallow: move |_| platform::request_storage_access(),
             onlicenses: move |_| ctx.nav.push(Overlay::Licenses),
+            normalize: (ctx.normalize)(),
+            ontogglenormalize: move |_| ctx.set_normalize(!*ctx.normalize.peek()),
         }
     }
 }

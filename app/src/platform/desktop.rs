@@ -10,7 +10,7 @@ use super::{DOWNLOAD_WORKERS, Dirs};
 pub fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info,symphonia_core::formats::probe=error".into()),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -86,6 +86,7 @@ pub mod player {
     pub fn set_sleep(_at_ms: i64, _end_of_song: bool) {}
     pub fn set_song_loop(_song: Option<(&str, i64, i64)>) {}
     pub fn set_queue_loop(_range: Option<(&str, &str)>) {}
+    pub fn set_normalize(_on: bool) {}
 }
 
 /// Nothing shares to a desktop build.

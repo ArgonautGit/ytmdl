@@ -91,11 +91,19 @@ object YtmdlPlayer {
         }
     }
 
-    /** `[{id, path, title, artist, album, art}]`, art being a cover file path or "". */
+    /**
+     * `[{id, path, title, artist, album, art, gain, peak}]`, art being a cover
+     * file path or "", gain (dB) and peak the song's ReplayGain or null.
+     */
     private fun mediaItems(json: String): List<MediaItem> {
         val list = JSONArray(json)
         return (0 until list.length()).map { i ->
             val o = list.getJSONObject(i)
+            val extras = Bundle()
+            if (!o.isNull("gain")) {
+                extras.putDouble(PlaybackService.GAIN, o.getDouble("gain"))
+                extras.putDouble(PlaybackService.PEAK, o.optDouble("peak", 1.0))
+            }
             val meta = MediaMetadata.Builder()
                 .setTitle(o.getString("title"))
                 .setArtist(o.optString("artist").ifEmpty { null })
@@ -103,6 +111,7 @@ object YtmdlPlayer {
                 .setArtworkUri(o.optString("art").ifEmpty { null }?.let { Uri.fromFile(File(it)) })
                 .setIsPlayable(true)
                 .setIsBrowsable(false)
+                .setExtras(extras)
                 .build()
             MediaItem.Builder()
                 .setMediaId(o.getString("id"))
@@ -210,6 +219,14 @@ object YtmdlPlayer {
         val args = Bundle()
         if (endOfSong) args.putBoolean("endOfSong", true) else if (at > 0) args.putLong("at", at)
         c.sendCustomCommand(SessionCommand(PlaybackService.SLEEP, Bundle.EMPTY), args)
+    }
+
+    /** Evens out loudness with the songs' ReplayGain, or plays them as they are. */
+    @JvmStatic
+    fun setNormalize(on: Boolean) = command { c ->
+        val args = Bundle()
+        args.putBoolean("on", on)
+        c.sendCustomCommand(SessionCommand(PlaybackService.NORMALIZE, Bundle.EMPTY), args)
     }
 
     private fun publish() {

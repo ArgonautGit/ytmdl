@@ -1772,6 +1772,9 @@ pub fn SettingsPage(
     ontoggleauto: EventHandler<()>,
     onallow: EventHandler<()>,
     onlicenses: EventHandler<()>,
+    /// Songs play at an even loudness.
+    normalize: bool,
+    ontogglenormalize: EventHandler<()>,
 ) -> Element {
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
@@ -1793,6 +1796,26 @@ pub fn SettingsPage(
                             div { class: "sub", "Downloads stay in the app's folder, where music apps can't see them." }
                         }
                         button { class: "primary small", onclick: move |_| onallow.call(()), "Allow" }
+                    }
+                }
+            }
+        }
+        section { class: "group",
+            h2 { "Playback" }
+            div { class: "card",
+                div { class: "item",
+                    Svg { icon: Icon::Volume }
+                    div { class: "meta",
+                        div { class: "title", "Even out loudness" }
+                        div { class: "sub", "Plays loud songs quieter, so every song sounds about as loud (ReplayGain)" }
+                    }
+                    button {
+                        class: if normalize { "switch on" } else { "switch" },
+                        role: "switch",
+                        "aria-checked": "{normalize}",
+                        "aria-label": "Even out loudness",
+                        onclick: move |_| ontogglenormalize.call(()),
+                        span { class: "knob" }
                     }
                 }
             }

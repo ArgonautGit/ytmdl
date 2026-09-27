@@ -793,6 +793,8 @@ fn settings() -> Element {
                 ontoggleauto: |_| {},
                 onallow: |_| {},
                 onlicenses: |_| {},
+                normalize: true,
+                ontogglenormalize: |_| {},
             }
         },
     )

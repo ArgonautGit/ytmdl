@@ -164,6 +164,7 @@ fn read_file(path: &Path, video_id: String) -> Option<NewTrack> {
         year: tag.and_then(|t| t.date()).map(|d| i32::from(d.year)),
         duration_secs: (duration > 0.0).then_some(duration),
         art: None,
+        gain: tag.and_then(ytmdl_core::loudness::from_tag),
         file_size: 0,
         file_mtime: 0,
     })

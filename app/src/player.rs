@@ -256,6 +256,8 @@ impl Player {
                     "artist": t.artists.join(", "),
                     "album": t.album.clone().unwrap_or_default(),
                     "art": art.map(|p| p.display().to_string()).unwrap_or_default(),
+                    "gain": t.gain.map(|g| g.gain_db),
+                    "peak": t.gain.map(|g| g.peak),
                 })
             })
             .collect();
@@ -434,6 +436,11 @@ impl Player {
     }
 
     /// Off, then all, then one.
+    /// Plays songs at an even loudness, from their ReplayGain.
+    pub fn set_normalize(&self, on: bool) {
+        backend::set_normalize(on);
+    }
+
     pub fn cycle_repeat(&self) {
         let mode = match self.repeat() {
             Repeat::Off => 2,

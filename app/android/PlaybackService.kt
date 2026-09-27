@@ -1,6 +1,7 @@
 package dev.nick.ytmdl
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -24,6 +25,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import kotlin.math.pow
 
 /**
  * Plays the queue with the media notification, lock screen and headset
@@ -46,12 +48,24 @@ class PlaybackService : MediaSessionService() {
         const val QUEUE_LOOP = "dev.nick.ytmdl.QUEUE_LOOP"
         /** Args: "at" (wall-clock ms to pause at) or "endOfSong"; neither clears. */
         const val SLEEP = "dev.nick.ytmdl.SLEEP"
+        /** Args: "on", whether songs play at an even loudness. */
+        const val NORMALIZE = "dev.nick.ytmdl.NORMALIZE"
+        /** A song's ReplayGain (dB) and peak, in its metadata extras. */
+        const val GAIN = "gain"
+        const val PEAK = "peak"
 
         private const val TAG = "ytmdl"
         /** The sleep timer fades the music out over its last seconds. */
         private const val FADE_MS = 15_000L
         /** Shorter listens (skips) aren't logged. */
         private const val MIN_LISTEN_MS = 1_000L
+        /**
+         * Added to the ReplayGain, which aims at -18 LUFS: -14 LUFS is what
+         * streaming services play at. The gain only ever turns songs down
+         * (the volume can't go past 1), so quieter songs play as they are.
+         */
+        private const val PREAMP_DB = 4.0
+        private const val PREFS = "player"
     }
 
     private data class SongLoop(val id: String, val a: Long, val b: Long)
@@ -71,6 +85,10 @@ class PlaybackService : MediaSessionService() {
     private var sleepAt = 0L
     /** The sleep timer pauses at the end of the song instead. */
     private var sleepAtEnd = false
+    /** The sleep timer's fade: the share of the volume left. */
+    private var fade = 1f
+    /** Songs play at an even loudness (the app's setting, kept for restarts). */
+    private var normalize = true
 
     /** The song being listened to, for the log: its media id, when it started
      * (wall clock) and how long it has played so far. */
@@ -93,7 +111,9 @@ class PlaybackService : MediaSessionService() {
             .build()
         player.addListener(loopListener)
         player.addListener(listenListener)
+        player.addListener(volumeListener)
         this.player = player
+        normalize = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMALIZE, true)
 
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider.Builder(this).build().apply { setSmallIcon(R.drawable.ytmdl_notification) }
@@ -142,6 +162,7 @@ class PlaybackService : MediaSessionService() {
                         .add(SessionCommand(SONG_LOOP, Bundle.EMPTY))
                         .add(SessionCommand(QUEUE_LOOP, Bundle.EMPTY))
                         .add(SessionCommand(SLEEP, Bundle.EMPTY))
+                        .add(SessionCommand(NORMALIZE, Bundle.EMPTY))
                         .build()
                 )
             }
@@ -165,6 +186,12 @@ class PlaybackService : MediaSessionService() {
                 }
                 SLEEP -> {
                     setSleep(args.getLong("at"), args.getBoolean("endOfSong"))
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                NORMALIZE -> {
+                    normalize = args.getBoolean("on", true)
+                    getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(NORMALIZE, normalize).apply()
+                    applyVolume()
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
@@ -275,11 +302,39 @@ class PlaybackService : MediaSessionService() {
         publish()
     }
 
+    // ---- volume ----
+
+    /**
+     * The song's ReplayGain as a volume: songs play at an even loudness. The
+     * change lands when the song starts (a transition is reported as the new
+     * song becomes audible), so its first few milliseconds may play at the
+     * previous song's level.
+     */
+    private val volumeListener = object : Player.Listener {
+        override fun onMediaItemTransition(item: MediaItem?, reason: Int) = applyVolume()
+    }
+
+    private fun applyVolume() {
+        val p = player ?: return
+        p.volume = fade * songVolume(p.currentMediaItem)
+    }
+
+    private fun songVolume(item: MediaItem?): Float {
+        val extras = item?.mediaMetadata?.extras
+        if (!normalize || extras == null || !extras.containsKey(GAIN)) return 1f
+        var volume = 10.0.pow((extras.getDouble(GAIN) + PREAMP_DB) / 20)
+        // Never past the level where the song's loudest sample clips.
+        val peak = extras.getDouble(PEAK, 1.0)
+        if (peak > 0) volume = minOf(volume, 1 / peak)
+        return volume.coerceIn(0.0, 1.0).toFloat()
+    }
+
     // ---- sleep timer ----
 
     private fun setSleep(at: Long, endOfSong: Boolean) {
         main.removeCallbacks(sleepTick)
-        player?.volume = 1f
+        fade = 1f
+        applyVolume()
         sleepAt = if (endOfSong) 0L else at
         sleepAtEnd = endOfSong
         player?.pauseAtEndOfMediaItems = endOfSong
@@ -302,7 +357,8 @@ class PlaybackService : MediaSessionService() {
                     clearSleep()
                 }
                 left <= FADE_MS -> {
-                    p.volume = left.toFloat() / FADE_MS
+                    fade = left.toFloat() / FADE_MS
+                    applyVolume()
                     main.postDelayed(this, 200)
                 }
                 else -> main.postDelayed(this, minOf(left - FADE_MS, 60_000L))

@@ -195,6 +195,7 @@ mod tests {
             duration_secs: None,
             art: None,
             added_at: 0,
+            gain: None,
         }
     }
 

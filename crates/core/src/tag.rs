@@ -102,6 +102,8 @@ pub struct TagReport {
     pub disk: Option<u32>,
     pub year: Option<u16>,
     pub comment: Option<String>,
+    /// ReplayGain track gain (dB) and peak.
+    pub replaygain: Option<crate::loudness::Gain>,
     /// (mime type, size in bytes) of each embedded picture.
     pub pictures: Vec<(String, usize)>,
 }
@@ -129,6 +131,7 @@ pub fn read_tags(path: &Path) -> Result<TagReport> {
         report.disk = tag.disk();
         report.year = tag.date().map(|d| d.year);
         report.comment = tag.comment().map(|s| s.into_owned());
+        report.replaygain = crate::loudness::from_tag(tag);
         report.pictures = tag
             .pictures()
             .iter()

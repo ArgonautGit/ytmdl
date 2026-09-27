@@ -20,6 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
+use ytmdl_core::loudness::Gain;
 use ytmdl_core::{Downloaded, Entry};
 
 pub use art::{ART_LARGE, ART_SMALL};
@@ -128,10 +129,18 @@ CREATE TABLE sections (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX sections_video ON sections (video_id, a_ms);
+"#, r#"
+-- ReplayGain, for volume normalization (see ytmdl_core::loudness): from the
+-- file's tags, or measured by `Library::measure_loudness` for files without.
+ALTER TABLE tracks ADD COLUMN gain REAL;                     -- dB
+ALTER TABLE tracks ADD COLUMN peak REAL;
+ALTER TABLE tracks ADD COLUMN measured INTEGER NOT NULL DEFAULT 0; -- gain known, or not measurable
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
-    "id, video_id, url, path, title, artists, album, album_artist, track_number, disc_number, year, duration, art, added_at";
+    "id, video_id, url, path, title, artists, album, album_artist, track_number, disc_number, year, duration, art, added_at, gain, peak";
+/// How many columns [`TRACK_COLUMNS`] has; queries add theirs after them.
+pub(crate) const TRACK_COLUMN_COUNT: usize = 16;
 
 /// A downloaded song.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,6 +160,8 @@ pub struct Track {
     /// Cover art cache key; see [`Library::art_name`].
     pub art: Option<String>,
     pub added_at: i64,
+    /// ReplayGain, once known.
+    pub gain: Option<Gain>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -203,6 +214,7 @@ struct NewTrack {
     year: Option<i32>,
     duration_secs: Option<f64>,
     art: Option<String>,
+    gain: Option<Gain>,
     file_size: u64,
     file_mtime: i64,
 }
@@ -255,6 +267,7 @@ impl Library {
         let meta = &done.meta;
         let (file_size, file_mtime) = file_stamp(&done.path)?;
         let art = scan::read_cover(&done.path).and_then(|data| self.0.art.store(&data));
+        let gain = ytmdl_core::loudness::read(&done.path).ok().flatten();
         let album_artist = meta
             .album_artists
             .first()
@@ -274,6 +287,7 @@ impl Library {
             year: meta.year,
             duration_secs: meta.duration_secs,
             art,
+            gain,
             file_size,
             file_mtime,
         })
@@ -286,14 +300,16 @@ impl Library {
         db.execute("DELETE FROM tracks WHERE path = ?1 AND video_id != ?2", params![path, t.video_id])?;
         let sql = format!(
             "INSERT INTO tracks (video_id, url, path, title, artists, album, album_artist, track_number,
-                                 disc_number, year, duration, art, file_size, file_mtime, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                                 disc_number, year, duration, art, file_size, file_mtime, added_at,
+                                 gain, peak, measured)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?16 IS NOT NULL)
              ON CONFLICT (video_id) DO UPDATE SET
                  url = excluded.url, path = excluded.path, title = excluded.title,
                  artists = excluded.artists, album = excluded.album, album_artist = excluded.album_artist,
                  track_number = excluded.track_number, disc_number = excluded.disc_number,
                  year = excluded.year, duration = excluded.duration, art = excluded.art,
-                 file_size = excluded.file_size, file_mtime = excluded.file_mtime
+                 file_size = excluded.file_size, file_mtime = excluded.file_mtime,
+                 gain = excluded.gain, peak = excluded.peak, measured = excluded.measured
              RETURNING {TRACK_COLUMNS}"
         );
         let track = db.query_row(
@@ -314,6 +330,8 @@ impl Library {
                 t.file_size as i64,
                 t.file_mtime,
                 now(),
+                t.gain.map(|g| g.gain_db),
+                t.gain.map(|g| g.peak),
             ],
             track_from_row,
         )?;
@@ -444,6 +462,36 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    // ---- loudness ----
+
+    /// Tracks whose ReplayGain is unknown and not yet measured, newest first.
+    pub fn unmeasured(&self) -> Result<Vec<Track>> {
+        self.query_tracks(
+            &format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE NOT measured ORDER BY added_at DESC, id DESC"),
+            [],
+        )
+    }
+
+    /// Records a track's measured gain (`None`: its file can't be measured,
+    /// so it isn't tried again). A file that now holds the gain in its tags
+    /// gets its new size and time recorded, so a scan doesn't read it again.
+    pub fn set_gain(&self, id: i64, gain: Option<Gain>, retagged: bool) -> Result<()> {
+        let db = self.db();
+        db.execute(
+            "UPDATE tracks SET gain = ?2, peak = ?3, measured = 1 WHERE id = ?1",
+            params![id, gain.map(|g| g.gain_db), gain.map(|g| g.peak)],
+        )?;
+        if retagged {
+            let path: String = db.query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))?;
+            let (size, mtime) = file_stamp(Path::new(&path))?;
+            db.execute(
+                "UPDATE tracks SET file_size = ?2, file_mtime = ?3 WHERE id = ?1",
+                params![id, size as i64, mtime],
+            )?;
+        }
+        Ok(())
+    }
+
     // ---- cover art ----
 
     /// File name of a cached cover at `size` ([`ART_SMALL`] or [`ART_LARGE`]).
@@ -570,6 +618,7 @@ pub(crate) fn track_from_row(r: &Row) -> rusqlite::Result<Track> {
         duration_secs: r.get(11)?,
         art: r.get(12)?,
         added_at: r.get(13)?,
+        gain: r.get::<_, Option<f64>>(14)?.map(|gain_db| Gain { gain_db, peak: r.get::<_, Option<f64>>(15).ok().flatten().unwrap_or(1.0) }),
     })
 }
 
