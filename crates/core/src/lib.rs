@@ -4,6 +4,7 @@
 //! crate adds a typed API, download progress/cancellation, and tagging.
 
 pub mod error;
+pub mod lyrics;
 pub mod model;
 pub mod remux;
 pub mod runtime;
@@ -51,6 +52,8 @@ pub struct DownloadOptions {
     pub extra_args: Vec<String>,
     /// Track number to tag when yt-dlp has none (see [`Entry::track_number`]).
     pub track_number: Option<u32>,
+    /// Look the lyrics up on LRCLIB and store them in the file (see [`lyrics`]).
+    pub lyrics: bool,
 }
 
 impl DownloadOptions {
@@ -63,6 +66,7 @@ impl DownloadOptions {
             embed_cover: true,
             extra_args: Vec::new(),
             track_number: None,
+            lyrics: true,
         }
     }
 }
@@ -166,12 +170,30 @@ impl Downloader {
         let mut tagged = false;
         if opts.write_tags && tag::can_tag(ext) {
             let cover = if opts.embed_cover { self.fetch_cover(&meta).await } else { None };
-            tag::write_tags(&path, &meta, cover)?;
+            let lyrics = if opts.lyrics { self.find_lyrics(&meta).await } else { None };
+            tag::write_tags_and_lyrics(&path, &meta, cover, lyrics.as_deref())?;
             tagged = true;
         } else if opts.write_tags {
             tracing::warn!(target: "ytmdl", "not tagging {} (unsupported container)", path.display());
         }
         Ok(Downloaded { path, meta, tagged })
+    }
+
+    /// The lyrics to store with a download; a failed lookup only costs the lyrics.
+    async fn find_lyrics(&self, meta: &TrackMeta) -> Option<String> {
+        let song = lyrics::Song {
+            title: &meta.title,
+            artists: &meta.artists,
+            album: meta.album.as_deref(),
+            duration_secs: meta.duration_secs,
+        };
+        match self.lyrics(song).await {
+            Ok(found) => found.and_then(|l| l.text().map(str::to_owned)),
+            Err(e) => {
+                tracing::warn!(target: "ytmdl", "lyrics for {}: {e}", meta.title);
+                None
+            }
+        }
     }
 
     async fn fetch_cover(&self, meta: &TrackMeta) -> Option<tag::Cover> {
@@ -189,7 +211,7 @@ impl Downloader {
 }
 
 /// `application/x-www-form-urlencoded` encoding for a query string value.
-fn encode_query(s: &str) -> String {
+pub(crate) fn encode_query(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
