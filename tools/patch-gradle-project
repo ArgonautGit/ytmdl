@@ -2,19 +2,22 @@
 """Adds our Android code to the Gradle project `dx build` generates (run by
 tools/build-apk).
 
-  tools/patch-gradle-project <gradle project dir> <repo root>
+  tools/patch-gradle-project <gradle project dir> <repo root> <build number>
 
 - app/android/*.kt: the Media3 playback service and its JNI bridge
   (YtmdlPlayer), the downloads foreground service, the receiver of shared
-  links, and a MainActivity replacing the generated one.
+  links, the installer of app updates, and a MainActivity replacing the
+  generated one.
 - app/android/res: the launcher and notification icons (overriding dx's).
 - Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
   generated project compiles with (1.10+ pulls in kotlin-stdlib 2.2).
+- The build number (tools/build-number) as the versionCode, which Android
+  requires to not go down when an update is installed.
 - The manifest: the playback service, in its own ":player" process, the
-  downloads service, and the activity handling every configuration change,
-  single-task and taking shared text. The Rust side can't survive the
-  activity being re-created, or a second one, in one process (see
-  MainActivity.kt).
+  downloads service, the receiver of app update results, and the activity
+  handling every configuration change, single-task and taking shared text.
+  The Rust side can't survive the activity being re-created, or a second one,
+  in one process (see MainActivity.kt).
 
 Safe to run again on an already patched project.
 """
@@ -51,9 +54,14 @@ SERVICES = """\
             android:exported="false" android:foregroundServiceType="dataSync" />
 """
 
+# Hears how an app update's install went (Update.kt).
+UPDATE_RECEIVER = """\
+        <receiver android:name="dev.nick.ytmdl.UpdateReceiver" android:exported="false" />
+"""
+
 
 def main() -> None:
-    project, root = map(Path, sys.argv[1:])
+    project, root, build = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
     main_dir = project / "app/src/main"
     sources = root / "app/android"
 
@@ -61,7 +69,7 @@ def main() -> None:
     shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
     ours = kotlin / "dev/nick/ytmdl"
     ours.mkdir(parents=True, exist_ok=True)
-    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt"):
+    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt", "Update.kt"):
         shutil.copy(sources / name, ours / name)
     shutil.copytree(sources / "res", main_dir / "res", dirs_exist_ok=True)
 
@@ -73,7 +81,12 @@ def main() -> None:
         )
         text, n = re.subn(r"^dependencies \{\n", lambda m: m.group(0) + deps, text, count=1, flags=re.M)
         assert n == 1, "no dependencies block in build.gradle.kts"
-        gradle.write_text(text)
+    text, n = re.subn(r"versionCode = \d+", f"versionCode = {build}", text)
+    assert n == 1, "no versionCode in build.gradle.kts"
+    # dx sets the crate version; the build number tells builds apart in App info.
+    text, n = re.subn(r'versionName = "([^" ]*)[^"]*"', rf'versionName = "\1 ({build})"', text)
+    assert n == 1, "no versionName in build.gradle.kts"
+    gradle.write_text(text)
 
     manifest = main_dir / "AndroidManifest.xml"
     text = manifest.read_text()
@@ -90,6 +103,9 @@ def main() -> None:
         assert text.count("</application>") == 1
         text = text.replace("    </application>", SERVICES + "    </application>")
         assert "PlaybackService" in text, "could not place the services"
+    if "UpdateReceiver" not in text:
+        text = text.replace("    </application>", UPDATE_RECEIVER + "    </application>")
+        assert "UpdateReceiver" in text, "could not place the update receiver"
     manifest.write_text(text)
 
 
