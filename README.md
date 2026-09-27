@@ -120,16 +120,23 @@ the first start of the new build says "Updated to build <n>".
 
 Android installs an update only when it is signed with the same key as the
 installed app, and the APK is debug-signed, so publishing needs the debug
-keystore your builds use as a repository secret. Once, in the dev shell with
-the GitHub CLI (run `tools/build-apk` first if you have never built, which
-creates the keystore):
+keystore your builds use as a repository secret. Once, with the GitHub CLI
+(run `tools/build-apk` first if you have never built, which creates the
+keystore):
 
 ```sh
-base64 -w0 "$ANDROID_USER_HOME/debug.keystore" | gh secret set ANDROID_DEBUG_KEYSTORE
+f="${XDG_DATA_HOME:-$HOME/.local/share}/android-nix/debug.keystore"   # $ANDROID_USER_HOME in the dev shell
+test -s "$f" && base64 < "$f" | tr -d '\n' | gh secret set ANDROID_DEBUG_KEYSTORE
+gh secret list   # ANDROID_DEBUG_KEYSTORE, updated just now
+keytool -list -v -keystore "$f" -storepass android | grep SHA256   # in the dev shell
 ```
 
-(or paste that base64 under the repository's Settings → Secrets and variables
-→ Actions). The workflow logs the key's SHA-256 fingerprint.
+`test -s` keeps a missing keystore from being stored as an empty secret, which
+the workflow can't tell from no secret at all. Or paste that base64 as a
+repository secret under Settings → Secrets and variables → Actions; GitHub
+never shows a secret's value again, so its edit page looks empty even when it
+isn't. The workflow logs the key's SHA-256 fingerprint, which must match the
+one `keytool` shows for your keystore, the key of the app on the phone.
 
 Published builds and your own then update one another; `nix run .#install`
 also installs a build older than the phone's (`adb install -d`). A phone with
