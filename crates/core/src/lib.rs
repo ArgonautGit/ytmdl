@@ -4,6 +4,7 @@
 //! crate adds a typed API, download progress/cancellation, and tagging.
 
 pub mod error;
+pub mod loudness;
 pub mod lyrics;
 pub mod model;
 pub mod remux;
@@ -52,6 +53,8 @@ pub struct DownloadOptions {
     pub extra_args: Vec<String>,
     /// Track number to tag when yt-dlp has none (see [`Entry::track_number`]).
     pub track_number: Option<u32>,
+    /// Measure the loudness and tag the ReplayGain (see [`loudness`]).
+    pub measure_loudness: bool,
     /// Look the lyrics up on LRCLIB and store them in the file (see [`lyrics`]).
     pub lyrics: bool,
 }
@@ -66,6 +69,7 @@ impl DownloadOptions {
             embed_cover: true,
             extra_args: Vec::new(),
             track_number: None,
+            measure_loudness: true,
             lyrics: true,
         }
     }
@@ -176,6 +180,13 @@ impl Downloader {
         } else if opts.write_tags {
             tracing::warn!(target: "ytmdl", "not tagging {} (unsupported container)", path.display());
         }
+        if tagged && opts.measure_loudness && loudness::can_measure(ext) {
+            let file = path.clone();
+            let measured = off_thread(move || loudness::measure(&file).and_then(|gain| loudness::write(&file, gain))).await;
+            if let Err(e) = measured.and_then(|r| r) {
+                tracing::warn!(target: "ytmdl", "no ReplayGain for {}: {e}", path.display());
+            }
+        }
         Ok(Downloaded { path, meta, tagged })
     }
 
@@ -208,6 +219,16 @@ impl Downloader {
         }
         None
     }
+}
+
+/// Runs `f` on its own thread, for file work too slow for the caller's
+/// executor (the app awaits downloads on its UI thread).
+async fn off_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new().name("ytmdl-file".into()).spawn(move || {
+        let _ = tx.send(f());
+    })?;
+    rx.await.map_err(|_| Error::Stopped)
 }
 
 /// `application/x-www-form-urlencoded` encoding for a query string value.

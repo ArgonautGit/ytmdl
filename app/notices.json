@@ -187,7 +187,7 @@
      "by": "Jonas Schievink, oyvindln",
      "url": "https://github.com/oyvindln/adler2",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -196,7 +196,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-embedded-community/aligned",
      "texts": [
-      62
+      65
      ]
     },
     {
@@ -206,7 +206,7 @@
      "by": "sarah",
      "url": "https://github.com/sarah-ek/aligned-vec/",
      "texts": [
-      122
+      126
      ]
     },
     {
@@ -216,7 +216,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/anyhow",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -226,7 +226,7 @@
      "by": "Luca Barbato",
      "url": "https://github.com/lu-zero/arg_enum_proc_macro",
      "texts": [
-      108
+      112
      ]
     },
     {
@@ -236,7 +236,7 @@
      "by": "bluss",
      "url": "https://github.com/bluss/arrayvec",
      "texts": [
-      98
+      102
      ]
     },
     {
@@ -246,7 +246,7 @@
      "by": "Jorge Aparicio, Emil Fresk",
      "url": "https://github.com/japaric/as-slice",
      "texts": [
-      71
+      74
      ]
     },
     {
@@ -256,7 +256,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/async-trait",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -266,7 +266,7 @@
      "by": "Josh Holmer",
      "url": "https://github.com/rust-av/av-scenechange",
      "texts": [
-      115
+      119
      ]
     },
     {
@@ -295,7 +295,7 @@
      "by": "Marshall Pierce",
      "url": "https://github.com/marshallpierce/rust-base64",
      "texts": [
-      164
+      169
      ]
     },
     {
@@ -305,7 +305,7 @@
      "by": "Philipp Oppermann",
      "url": "https://github.com/phil-opp/rust-bit-field",
      "texts": [
-      172
+      177
      ]
     },
     {
@@ -315,7 +315,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/bitflags/bitflags",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -325,7 +325,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/bitflags/bitflags",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -335,7 +335,7 @@
      "by": "Brian Langenberger",
      "url": "https://github.com/tuffy/bitstream-io",
      "texts": [
-      60
+      63
      ]
     },
     {
@@ -345,7 +345,7 @@
      "by": "RustCrypto Developers",
      "url": "https://github.com/RustCrypto/utils",
      "texts": [
-      73
+      76
      ]
     },
     {
@@ -355,7 +355,7 @@
      "by": "Nick Fitzgerald",
      "url": "https://github.com/fitzgen/bumpalo",
      "texts": [
-      80
+      83
      ]
     },
     {
@@ -365,7 +365,7 @@
      "by": "Lokathor",
      "url": "https://github.com/Lokathor/bytemuck",
      "texts": [
-      112
+      116
      ]
     },
     {
@@ -375,7 +375,7 @@
      "by": "Andrew Gallant",
      "url": "https://github.com/BurntSushi/byteorder",
      "texts": [
-      165
+      170
      ]
     },
     {
@@ -384,7 +384,7 @@
      "license": "Unlicense OR MIT",
      "url": "https://github.com/image-rs/byteorder-lite",
      "texts": [
-      165
+      170
      ]
     },
     {
@@ -394,7 +394,7 @@
      "by": "Carl Lerche, Sean McArthur",
      "url": "https://github.com/tokio-rs/bytes",
      "texts": [
-      69
+      72
      ]
     },
     {
@@ -404,7 +404,7 @@
      "by": "Eric Kidd",
      "url": "https://github.com/emk/cesu8-rs",
      "texts": [
-      125
+      129
      ]
     },
     {
@@ -414,7 +414,7 @@
      "by": "Matthew D. Steele",
      "url": "https://github.com/mdsteele/rust-cfb",
      "texts": [
-      106
+      110
      ]
     },
     {
@@ -424,7 +424,7 @@
      "by": "Alex Crichton",
      "url": "https://github.com/rust-lang/cfg-if",
      "texts": [
-      32
+      33
      ]
     },
     {
@@ -434,7 +434,7 @@
      "by": "nwin",
      "url": "https://github.com/image-rs/color_quant.git",
      "texts": [
-      173
+      178
      ]
     },
     {
@@ -444,7 +444,7 @@
      "by": "Markus Westerlind",
      "url": "https://github.com/Marwes/combine",
      "texts": [
-      166
+      171
      ]
     },
     {
@@ -454,7 +454,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/dioxus",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -464,7 +464,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/dioxus",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -474,7 +474,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/dioxus",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -484,7 +484,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/dioxus",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -494,7 +494,7 @@
      "by": "rodrimati1992",
      "url": "https://github.com/rodrimati1992/const_format_crates/",
      "texts": [
-      186
+      191
      ]
     },
     {
@@ -504,7 +504,7 @@
      "by": "rodrimati1992",
      "url": "https://github.com/rodrimati1992/const_format_crates/",
      "texts": [
-      186
+      191
      ]
     },
     {
@@ -514,7 +514,7 @@
      "by": "David Purdum",
      "url": "https://github.com/rutrum/convert-case",
      "texts": [
-      127
+      131
      ]
     },
     {
@@ -524,7 +524,7 @@
      "by": "rutrum",
      "url": "https://github.com/rutrum/convert-case",
      "texts": [
-      124
+      128
      ]
     },
     {
@@ -534,7 +534,7 @@
      "by": "Sergio Benitez, Alex Crichton",
      "url": "https://github.com/SergioBenitez/cookie-rs",
      "texts": [
-      65
+      68
      ]
     },
     {
@@ -544,7 +544,7 @@
      "by": "RustCrypto Developers",
      "url": "https://github.com/RustCrypto/utils",
      "texts": [
-      85
+      88
      ]
     },
     {
@@ -554,7 +554,7 @@
      "by": "Sam Rijs, Alex Crichton",
      "url": "https://github.com/srijs/rust-crc32fast",
      "texts": [
-      110
+      114
      ]
     },
     {
@@ -563,7 +563,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/crossbeam-rs/crossbeam",
      "texts": [
-      175
+      180
      ]
     },
     {
@@ -572,7 +572,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/crossbeam-rs/crossbeam",
      "texts": [
-      175
+      180
      ]
     },
     {
@@ -581,7 +581,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/crossbeam-rs/crossbeam",
      "texts": [
-      175
+      180
      ]
     },
     {
@@ -590,7 +590,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/crossbeam-rs/crossbeam",
      "texts": [
-      175
+      180
      ]
     },
     {
@@ -600,7 +600,7 @@
      "by": "RustCrypto Developers",
      "url": "https://github.com/RustCrypto/traits",
      "texts": [
-      86
+      89
      ]
     },
     {
@@ -610,7 +610,7 @@
      "by": "Simon Sapin",
      "url": "https://github.com/servo/rust-cssparser",
      "texts": [
-      182
+      187
      ]
     },
     {
@@ -620,7 +620,7 @@
      "by": "Simon Sapin",
      "url": "https://github.com/servo/rust-cssparser",
      "texts": [
-      182
+      187
      ]
     },
     {
@@ -630,7 +630,7 @@
      "by": "Ted Driggs",
      "url": "https://github.com/TedDriggs/darling",
      "texts": [
-      107
+      111
      ]
     },
     {
@@ -640,7 +640,7 @@
      "by": "Ted Driggs",
      "url": "https://github.com/TedDriggs/darling",
      "texts": [
-      107
+      111
      ]
     },
     {
@@ -650,7 +650,27 @@
      "by": "Ted Driggs",
      "url": "https://github.com/TedDriggs/darling",
      "texts": [
-      107
+      111
+     ]
+    },
+    {
+     "name": "dasp_frame",
+     "version": "0.11.0",
+     "license": "MIT OR Apache-2.0",
+     "by": "mitchmindtree",
+     "url": "https://github.com/rustaudio/dasp.git",
+     "texts": [
+      132
+     ]
+    },
+    {
+     "name": "dasp_sample",
+     "version": "0.11.0",
+     "license": "MIT OR Apache-2.0",
+     "by": "mitchmindtree",
+     "url": "https://github.com/rustaudio/sample.git",
+     "texts": [
+      132
      ]
     },
     {
@@ -659,7 +679,7 @@
      "license": "MIT",
      "url": "https://github.com/ia0/data-encoding",
      "texts": [
-      169
+      174
      ]
     },
     {
@@ -669,7 +689,7 @@
      "by": "Jacob Pratt",
      "url": "https://github.com/jhpratt/deranged",
      "texts": [
-      91
+      95
      ]
     },
     {
@@ -679,7 +699,7 @@
      "by": "Jelte Fennema",
      "url": "https://github.com/JelteF/derive_more",
      "texts": [
-      171
+      176
      ]
     },
     {
@@ -689,7 +709,7 @@
      "by": "RustCrypto Developers",
      "url": "https://github.com/RustCrypto/traits",
      "texts": [
-      59
+      62
      ]
     },
     {
@@ -699,7 +719,7 @@
      "by": "Jonathan Kelley, Dioxus Labs, ealmloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      134
+      139
      ]
     },
     {
@@ -709,7 +729,7 @@
      "by": "Jonathan Kelley, Dioxus Labs",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      128
+      133
      ]
     },
     {
@@ -719,7 +739,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -729,7 +749,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -739,7 +759,7 @@
      "by": "Dioxus Labs",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      131
+      136
      ]
     },
     {
@@ -749,7 +769,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -759,7 +779,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -769,7 +789,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -779,7 +799,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -789,7 +809,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -799,7 +819,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -809,7 +829,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -819,7 +839,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -829,7 +849,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -839,7 +859,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -848,7 +868,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      132
+      137
      ]
     },
     {
@@ -858,7 +878,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -868,7 +888,7 @@
      "by": "DogeDark, Jonathan Kelley",
      "url": "https://github.com/dioxuslabs/dioxus",
      "texts": [
-      133
+      138
      ]
     },
     {
@@ -878,7 +898,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -888,7 +908,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -898,7 +918,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -908,7 +928,7 @@
      "by": "Jonathan Kelley, Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      129
+      134
      ]
     },
     {
@@ -918,7 +938,7 @@
      "by": "Jane Lusby",
      "url": "https://github.com/yaahc/displaydoc",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -928,7 +948,7 @@
      "url": "https://github.com/rust-windowing/winit",
      "texts": [
       14,
-      135
+      140
      ]
     },
     {
@@ -938,7 +958,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/dtoa",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -948,7 +968,7 @@
      "by": "Xidorn Quan",
      "url": "https://github.com/upsuper/dtoa-short",
      "texts": [
-      182
+      187
      ]
     },
     {
@@ -962,12 +982,22 @@
      ]
     },
     {
+     "name": "ebur128",
+     "version": "0.1.10",
+     "license": "MIT",
+     "by": "Sebastian Dröge",
+     "url": "https://github.com/sdroege/ebur128",
+     "texts": [
+      29
+     ]
+    },
+    {
      "name": "either",
      "version": "1.18.0",
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rayon-rs/either",
      "texts": [
-      41
+      43
      ]
     },
     {
@@ -977,7 +1007,7 @@
      "by": "Alissa Rao",
      "url": "https://github.com/Lymia/enumset",
      "texts": [
-      68
+      71
      ]
     },
     {
@@ -987,7 +1017,7 @@
      "by": "Alissa Rao",
      "url": "https://github.com/Lymia/enumset",
      "texts": [
-      68
+      71
      ]
     },
     {
@@ -997,7 +1027,7 @@
      "by": "sarah",
      "url": "https://github.com/sarah-ek/equator/",
      "texts": [
-      123
+      127
      ]
     },
     {
@@ -1007,7 +1037,7 @@
      "by": "sarah",
      "url": "https://github.com/sarah-ek/equator/",
      "texts": [
-      123
+      127
      ]
     },
     {
@@ -1016,7 +1046,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/indexmap-rs/equivalent",
      "texts": [
-      56
+      59
      ]
     },
     {
@@ -1026,7 +1056,7 @@
      "by": "Chris Wong, Dan Gohman",
      "url": "https://github.com/lambda-fairy/rust-errno",
      "texts": [
-      33
+      34
      ]
     },
     {
@@ -1036,7 +1066,7 @@
      "by": "The Servo Project Developers",
      "url": "https://github.com/servo/euclid",
      "texts": [
-      29
+      30
      ]
     },
     {
@@ -1056,7 +1086,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-fallible-iterator",
      "texts": [
-      47
+      50
      ]
     },
     {
@@ -1066,7 +1096,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/fallible-streaming-iterator",
      "texts": [
-      54
+      57
      ]
     },
     {
@@ -1076,7 +1106,7 @@
      "by": "Sebastian K",
      "url": "https://github.com/pdf-rs/fax",
      "texts": [
-      104
+      108
      ]
     },
     {
@@ -1086,7 +1116,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/fdeflate",
      "texts": [
-      156
+      161
      ]
     },
     {
@@ -1096,7 +1126,7 @@
      "by": "Alex Crichton, Josh Triplett",
      "url": "https://github.com/rust-lang/flate2-rs",
      "texts": [
-      40
+      42
      ]
     },
     {
@@ -1106,7 +1136,7 @@
      "by": "Alex Crichton",
      "url": "https://github.com/servo/rust-fnv",
      "texts": [
-      61
+      64
      ]
     },
     {
@@ -1116,7 +1146,7 @@
      "by": "Orson Peters",
      "url": "https://github.com/orlp/foldhash",
      "texts": [
-      189
+      194
      ]
     },
     {
@@ -1126,7 +1156,7 @@
      "by": "The rust-url developers",
      "url": "https://github.com/servo/rust-url",
      "texts": [
-      30
+      31
      ]
     },
     {
@@ -1136,7 +1166,7 @@
      "by": "Keegan McAllister",
      "url": "https://github.com/servo/futf",
      "texts": [
-      43
+      45
      ]
     },
     {
@@ -1145,7 +1175,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/futures-rs",
      "texts": [
-      50
+      53
      ]
     },
     {
@@ -1154,7 +1184,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/futures-rs",
      "texts": [
-      50
+      53
      ]
     },
     {
@@ -1163,7 +1193,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/futures-rs",
      "texts": [
-      50
+      53
      ]
     },
     {
@@ -1172,7 +1202,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/futures-rs",
      "texts": [
-      50
+      53
      ]
     },
     {
@@ -1182,7 +1212,7 @@
      "by": "cbreeden",
      "url": "https://github.com/cbreeden/fxhash",
      "texts": [
-      136
+      141
      ]
     },
     {
@@ -1192,7 +1222,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -1202,7 +1232,7 @@
      "by": "Bartłomiej Kamiński, Aaron Trent",
      "url": "https://github.com/fizyk20/generic-array.git",
      "texts": [
-      179
+      184
      ]
     },
     {
@@ -1212,7 +1242,7 @@
      "by": "The Rand Project Developers",
      "url": "https://github.com/rust-random/getrandom",
      "texts": [
-      74
+      77
      ]
     },
     {
@@ -1222,7 +1252,7 @@
      "by": "The Rand Project Developers",
      "url": "https://github.com/rust-random/getrandom",
      "texts": [
-      75
+      78
      ]
     },
     {
@@ -1232,7 +1262,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/image-gif",
      "texts": [
-      167
+      172
      ]
     },
     {
@@ -1242,7 +1272,7 @@
      "by": "Kathryn Long",
      "url": "https://github.com/VoidStarKat/half-rs",
      "texts": [
-      157
+      162
      ]
     },
     {
@@ -1251,7 +1281,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/hashbrown",
      "texts": [
-      51
+      54
      ]
     },
     {
@@ -1260,7 +1290,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/djc/hashlink",
      "texts": [
-      180
+      185
      ]
     },
     {
@@ -1269,7 +1299,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/withoutboats/heck",
      "texts": [
-      44
+      46
      ]
     },
     {
@@ -1279,7 +1309,7 @@
      "by": "The html5ever Project Developers",
      "url": "https://github.com/servo/html5ever",
      "texts": [
-      36
+      38
      ]
     },
     {
@@ -1289,7 +1319,7 @@
      "by": "Alex Crichton, Carl Lerche, Sean McArthur",
      "url": "https://github.com/hyperium/http",
      "texts": [
-      66
+      69
      ]
     },
     {
@@ -1299,7 +1329,7 @@
      "by": "Sean McArthur",
      "url": "https://github.com/seanmonstar/httparse",
      "texts": [
-      49
+      52
      ]
     },
     {
@@ -1309,7 +1339,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1319,7 +1349,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1329,7 +1359,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1339,7 +1369,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1349,7 +1379,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1359,7 +1389,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1369,7 +1399,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1379,7 +1409,7 @@
      "by": "Ted Driggs",
      "url": "https://github.com/TedDriggs/ident_case",
      "texts": [
-      157
+      162
      ]
     },
     {
@@ -1389,7 +1419,7 @@
      "by": "The rust-url developers",
      "url": "https://github.com/servo/rust-url/",
      "texts": [
-      31
+      32
      ]
     },
     {
@@ -1399,7 +1429,7 @@
      "by": "The rust-url developers",
      "url": "https://github.com/hsivonen/idna_adapter",
      "texts": [
-      96
+      100
      ]
     },
     {
@@ -1409,7 +1439,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/image",
      "texts": [
-      156
+      161
      ]
     },
     {
@@ -1418,7 +1448,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/image-rs/image-webp",
      "texts": [
-      156
+      161
      ]
     },
     {
@@ -1437,7 +1467,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/indexmap-rs/indexmap",
      "texts": [
-      55
+      58
      ]
     },
     {
@@ -1447,7 +1477,7 @@
      "by": "Bojan",
      "url": "https://github.com/bojand/infer",
      "texts": [
-      111
+      115
      ]
     },
     {
@@ -1457,7 +1487,7 @@
      "by": "bluss",
      "url": "https://github.com/rust-itertools/itertools",
      "texts": [
-      41
+      43
      ]
     },
     {
@@ -1467,7 +1497,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/itoa",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -1477,7 +1507,7 @@
      "by": "Josh Chase",
      "url": "https://github.com/jni-rs/jni-rs",
      "texts": [
-      174
+      179
      ]
     },
     {
@@ -1487,7 +1517,7 @@
      "by": "jni team",
      "url": "https://github.com/jni-rs/jni-rs",
      "texts": [
-      139
+      144
      ]
     },
     {
@@ -1496,7 +1526,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/jni-rs/jni-rs",
      "texts": [
-      137
+      142
      ]
     },
     {
@@ -1506,7 +1536,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/jni-rs/jni-sys",
      "texts": [
-      46
+      49
      ]
     },
     {
@@ -1516,7 +1546,7 @@
      "by": "Steven Fackler, Robert Bragg",
      "url": "https://github.com/jni-rs/jni-sys",
      "texts": [
-      46
+      49
      ]
     },
     {
@@ -1526,7 +1556,7 @@
      "by": "Robert Bragg",
      "url": "https://github.com/jni-rs/jni-sys",
      "texts": [
-      138
+      143
      ]
     },
     {
@@ -1536,7 +1566,7 @@
      "by": "Pyfisch",
      "url": "https://github.com/pyfisch/keyboard-types",
      "texts": [
-      63
+      66
      ]
     },
     {
@@ -1546,7 +1576,7 @@
      "by": "rodrimati1992",
      "url": "https://github.com/rodrimati1992/konst/",
      "texts": [
-      187
+      192
      ]
     },
     {
@@ -1556,7 +1586,7 @@
      "by": "rodrimati1992",
      "url": "https://github.com/rodrimati1992/konst/",
      "texts": [
-      187
+      192
      ]
     },
     {
@@ -1566,7 +1596,7 @@
      "by": "Brave Authors, Ralph Giles, Simon Sapin",
      "url": "https://github.com/brave/kuchikiki",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -1595,7 +1625,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rust-lang/libc",
      "texts": [
-      95
+      99
      ]
     },
     {
@@ -1615,7 +1645,7 @@
      "by": "Alex Crichton, Amanieu d'Antras, Jorge Aparicio, Trevor Gross",
      "url": "https://github.com/rust-lang/compiler-builtins",
      "texts": [
-      140
+      145
      ]
     },
     {
@@ -1625,7 +1655,7 @@
      "by": "The rusqlite developers",
      "url": "https://github.com/rusqlite/rusqlite",
      "texts": [
-      37
+      39
      ]
     },
     {
@@ -1635,7 +1665,7 @@
      "by": "Dan Gohman",
      "url": "https://github.com/sunfishcode/linux-raw-sys",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -1645,7 +1675,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -1655,7 +1685,7 @@
      "by": "Amanieu d'Antras",
      "url": "https://github.com/Amanieu/parking_lot",
      "texts": [
-      53
+      56
      ]
     },
     {
@@ -1665,7 +1695,7 @@
      "by": "Serial",
      "url": "https://github.com/Serial-ATA/lofty-rs",
      "texts": [
-      141
+      146
      ]
     },
     {
@@ -1675,7 +1705,7 @@
      "by": "Serial",
      "url": "https://github.com/Serial-ATA/lofty-rs",
      "texts": [
-      141
+      146
      ]
     },
     {
@@ -1685,7 +1715,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-lang/log",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -1695,7 +1725,7 @@
      "by": "Nick Fitzgerald",
      "url": "https://github.com/fitzgen/longest-increasing-subsequence",
      "texts": [
-      32
+      33
      ]
     },
     {
@@ -1705,7 +1735,7 @@
      "by": "Kornel",
      "url": "https://gitlab.com/kornelski/loop9.git",
      "texts": [
-      181
+      186
      ]
     },
     {
@@ -1715,7 +1745,7 @@
      "by": "Jonathan Reem",
      "url": "https://github.com/reem/rust-mac.git",
      "texts": [
-      142
+      147
      ]
     },
     {
@@ -1725,7 +1755,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/macro-string",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -1735,7 +1765,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/tree/main/packages/manganis/manganis",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -1745,7 +1775,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/tree/main/packages/manganis/manganis-core",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -1755,7 +1785,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/DioxusLabs/dioxus/tree/main/packages/manganis/manganis-macro",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -1765,7 +1795,7 @@
      "by": "The html5ever Project Developers",
      "url": "https://github.com/servo/html5ever",
      "texts": [
-      36
+      38
      ]
     },
     {
@@ -1774,7 +1804,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/servo/html5ever",
      "texts": [
-      143
+      148
      ]
     },
     {
@@ -1784,7 +1814,7 @@
      "by": "Eliza Weisman",
      "url": "https://github.com/hawkw/matchers",
      "texts": [
-      79
+      82
      ]
     },
     {
@@ -1793,7 +1823,7 @@
      "license": "MIT",
      "url": "https://github.com/SimonSapin/rust-std-candidates",
      "texts": [
-      38
+      40
      ]
     },
     {
@@ -1802,7 +1832,7 @@
      "license": "MIT",
      "url": "https://github.com/shssoichiro/maybe-rayon",
      "texts": [
-      119
+      123
      ]
     },
     {
@@ -1812,7 +1842,7 @@
      "by": "Andrew Gallant, bluss",
      "url": "https://github.com/BurntSushi/memchr",
      "texts": [
-      165
+      170
      ]
     },
     {
@@ -1822,7 +1852,7 @@
      "by": "Luca Bruno, Simonas Kazlauskas",
      "url": "https://github.com/lucab/memfd-rs",
      "texts": [
-      102
+      106
      ]
     },
     {
@@ -1832,7 +1862,7 @@
      "by": "Dan Burkert, Yevhenii Reizner, The Contributors",
      "url": "https://github.com/RazrFalcon/memmap2-rs",
      "texts": [
-      83
+      86
      ]
     },
     {
@@ -1842,7 +1872,7 @@
      "by": "Frommi, oyvindln, Rich Geldreich richgel99@gmail.com",
      "url": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
      "texts": [
-      155
+      160
      ]
     },
     {
@@ -1852,7 +1882,7 @@
      "by": "Frommi, oyvindln, Rich Geldreich richgel99@gmail.com",
      "url": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
      "texts": [
-      155
+      160
      ]
     },
     {
@@ -1872,7 +1902,7 @@
      "by": "The Rust Mobile contributors",
      "url": "https://github.com/rust-mobile/ndk",
      "texts": [
-      145
+      150
      ]
     },
     {
@@ -1882,7 +1912,7 @@
      "by": "The Rust Windowing contributors",
      "url": "https://github.com/rust-windowing/android-ndk-rs",
      "texts": [
-      144
+      149
      ]
     },
     {
@@ -1892,7 +1922,7 @@
      "by": "The Rust Windowing contributors",
      "url": "https://github.com/rust-mobile/ndk",
      "texts": [
-      144
+      149
      ]
     },
     {
@@ -1902,7 +1932,7 @@
      "by": "Matt Brubeck, Jonathan Reem",
      "url": "https://github.com/mbrubeck/rust-debug-unreachable",
      "texts": [
-      42
+      44
      ]
     },
     {
@@ -1911,7 +1941,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/wcampbell0x2a/no-std-io2",
      "texts": [
-      84
+      87
      ]
     },
     {
@@ -1921,7 +1951,7 @@
      "by": "bluss",
      "url": "https://github.com/bluss/arrayvec",
      "texts": [
-      97
+      101
      ]
     },
     {
@@ -1931,7 +1961,7 @@
      "by": "contact@geoffroycouprie.com",
      "url": "https://github.com/rust-bakery/nom",
      "texts": [
-      39
+      41
      ]
     },
     {
@@ -1941,7 +1971,7 @@
      "by": "Luca Barbato",
      "url": "https://github.com/lu-zero/noop_proc_macro",
      "texts": [
-      114
+      118
      ]
     },
     {
@@ -1951,7 +1981,7 @@
      "by": "ogham@bsago.me, Ryan Scheel (Havvy), Josh Triplett, The Nushell Project Developers",
      "url": "https://github.com/nushell/nu-ansi-term",
      "texts": [
-      178
+      183
      ]
     },
     {
@@ -1961,7 +1991,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-bigint",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -1971,7 +2001,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-complex",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -1981,7 +2011,7 @@
      "by": "Jacob Pratt",
      "url": "https://github.com/jhpratt/num-conv",
      "texts": [
-      93
+      97
      ]
     },
     {
@@ -1991,7 +2021,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-derive",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -2001,7 +2031,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-integer",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -2011,7 +2041,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-rational",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -2021,7 +2051,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-num/num-traits",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -2031,7 +2061,7 @@
      "by": "Daniel Wagner-Hall, Daniel Henry-Mantilla, Vincent Esche",
      "url": "https://github.com/illicitonion/num_enum",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2041,7 +2071,7 @@
      "by": "Daniel Wagner-Hall, Daniel Henry-Mantilla, Vincent Esche",
      "url": "https://github.com/illicitonion/num_enum",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2051,7 +2081,7 @@
      "by": "Serial",
      "url": "https://github.com/Serial-ATA/lofty-rs",
      "texts": [
-      141
+      146
      ]
     },
     {
@@ -2061,7 +2091,7 @@
      "by": "Aleksey Kladov",
      "url": "https://github.com/matklad/once_cell",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2071,7 +2101,7 @@
      "by": "Amanieu d'Antras",
      "url": "https://github.com/Amanieu/parking_lot",
      "texts": [
-      53
+      56
      ]
     },
     {
@@ -2081,7 +2111,7 @@
      "by": "Amanieu d'Antras",
      "url": "https://github.com/Amanieu/parking_lot",
      "texts": [
-      53
+      56
      ]
     },
     {
@@ -2091,7 +2121,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/paste",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2101,7 +2131,7 @@
      "by": "Aditya Kumar, David Tolnay",
      "url": "https://github.com/as1100k/pastey",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2111,7 +2141,7 @@
      "by": "The rust-url developers",
      "url": "https://github.com/servo/rust-url/",
      "texts": [
-      31
+      32
      ]
     },
     {
@@ -2121,7 +2151,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2131,7 +2161,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/rust-phf/rust-phf",
      "texts": [
-      163
+      168
      ]
     },
     {
@@ -2141,7 +2171,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2151,7 +2181,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2161,7 +2191,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2171,7 +2201,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2181,7 +2211,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/rust-phf/rust-phf",
      "texts": [
-      163
+      168
      ]
     },
     {
@@ -2191,7 +2221,7 @@
      "by": "Steven Fackler",
      "url": "https://github.com/sfackler/rust-phf",
      "texts": [
-      146
+      151
      ]
     },
     {
@@ -2200,7 +2230,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/taiki-e/pin-project",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2209,7 +2239,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/taiki-e/pin-project",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2218,7 +2248,7 @@
      "license": "Apache-2.0 OR MIT",
      "url": "https://github.com/taiki-e/pin-project-lite",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2228,7 +2258,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/image-png",
      "texts": [
-      48
+      51
      ]
     },
     {
@@ -2238,7 +2268,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -2248,7 +2278,7 @@
      "by": "Jacob Pratt",
      "url": "https://github.com/jhpratt/powerfmt",
      "texts": [
-      89
+      93
      ]
     },
     {
@@ -2258,7 +2288,7 @@
      "by": "The CryptoCorrosion Contributors",
      "url": "https://github.com/cryptocorrosion/cryptocorrosion",
      "texts": [
-      81
+      84
      ]
     },
     {
@@ -2268,7 +2298,17 @@
      "by": "Emilio Cobos Álvarez",
      "url": "https://github.com/emilio/precomputed-hash",
      "texts": [
-      105
+      109
+     ]
+    },
+    {
+     "name": "primal-check",
+     "version": "0.3.4",
+     "license": "MIT OR Apache-2.0",
+     "by": "Huon Wilson",
+     "url": "https://github.com/huonw/primal",
+     "texts": [
+      35
      ]
     },
     {
@@ -2278,7 +2318,7 @@
      "by": "Bastian Köcher",
      "url": "https://github.com/bkchr/proc-macro-crate",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2288,7 +2328,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/proc-macro-hack",
      "texts": [
-      70
+      73
      ]
     },
     {
@@ -2298,7 +2338,7 @@
      "by": "David Tolnay, Alex Crichton",
      "url": "https://github.com/dtolnay/proc-macro2",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2308,7 +2348,7 @@
      "by": "Sergio Benitez",
      "url": "https://github.com/SergioBenitez/proc-macro2-diagnostics",
      "texts": [
-      177
+      182
      ]
     },
     {
@@ -2318,7 +2358,7 @@
      "by": "Philip Degarmo",
      "url": "https://github.com/aclysma/profiling",
      "texts": [
-      147
+      152
      ]
     },
     {
@@ -2328,7 +2368,7 @@
      "by": "Philip Degarmo",
      "url": "https://github.com/aclysma/profiling",
      "texts": [
-      147
+      152
      ]
     },
     {
@@ -2338,7 +2378,7 @@
      "by": "sarah quiñones",
      "url": "https://github.com/sarah-quinones/pulp/",
      "texts": [
-      120
+      124
      ]
     },
     {
@@ -2348,7 +2388,7 @@
      "by": "sarah quiñones",
      "url": "https://github.com/sarah-quinones/pulp/",
      "texts": [
-      148
+      153
      ]
     },
     {
@@ -2368,7 +2408,7 @@
      "by": "PyO3 Project and Contributors",
      "url": "https://github.com/pyo3/pyo3",
      "texts": [
-      90
+      94
      ]
     },
     {
@@ -2378,7 +2418,7 @@
      "by": "PyO3 Project and Contributors",
      "url": "https://github.com/pyo3/pyo3",
      "texts": [
-      90
+      94
      ]
     },
     {
@@ -2388,7 +2428,7 @@
      "by": "PyO3 Project and Contributors",
      "url": "https://github.com/pyo3/pyo3",
      "texts": [
-      90
+      94
      ]
     },
     {
@@ -2398,7 +2438,7 @@
      "by": "PyO3 Project and Contributors",
      "url": "https://github.com/pyo3/pyo3",
      "texts": [
-      90
+      94
      ]
     },
     {
@@ -2408,7 +2448,7 @@
      "by": "Ivan Smirnov",
      "url": "https://github.com/aldanor/qoi-rust",
      "texts": [
-      87
+      90
      ]
     },
     {
@@ -2418,7 +2458,7 @@
      "by": "Paul Colomiets, Colin Kiegel",
      "url": "http://github.com/tailhook/quick-error",
      "texts": [
-      45
+      48
      ]
     },
     {
@@ -2428,7 +2468,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/quote",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2438,7 +2478,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2448,7 +2488,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2458,7 +2498,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers, The CryptoCorrosion Contributors",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2468,7 +2508,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers, The CryptoCorrosion Contributors",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2478,7 +2518,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2488,7 +2528,7 @@
      "by": "The Rand Project Developers, The Rust Project Developers",
      "url": "https://github.com/rust-random/rand",
      "texts": [
-      100
+      104
      ]
     },
     {
@@ -2518,7 +2558,7 @@
      "by": "Osspial",
      "url": "https://github.com/rust-windowing/raw-window-handle",
      "texts": [
-      116
+      120
      ]
     },
     {
@@ -2528,7 +2568,7 @@
      "by": "Osspial",
      "url": "https://github.com/rust-windowing/raw-window-handle",
      "texts": [
-      116
+      120
      ]
     },
     {
@@ -2556,7 +2596,7 @@
      "by": "sarah",
      "url": "https://github.com/sarah-ek/reborrow/",
      "texts": [
-      122
+      126
      ]
     },
     {
@@ -2566,7 +2606,17 @@
      "by": "The Rust Project Developers, Andrew Gallant",
      "url": "https://github.com/rust-lang/regex",
      "texts": [
-      34
+      36
+     ]
+    },
+    {
+     "name": "regex-lite",
+     "version": "0.1.9",
+     "license": "MIT OR Apache-2.0",
+     "by": "The Rust Project Developers, Andrew Gallant",
+     "url": "https://github.com/rust-lang/regex",
+     "texts": [
+      36
      ]
     },
     {
@@ -2576,7 +2626,7 @@
      "by": "The Rust Project Developers, Andrew Gallant",
      "url": "https://github.com/rust-lang/regex",
      "texts": [
-      34
+      36
      ]
     },
     {
@@ -2586,7 +2636,7 @@
      "by": "Kornel Lesiński, James Forster",
      "url": "https://github.com/kornelski/rust-rgb",
      "texts": [
-      113
+      117
      ]
     },
     {
@@ -2596,7 +2646,7 @@
      "by": "The rusqlite developers",
      "url": "https://github.com/rusqlite/rusqlite",
      "texts": [
-      37
+      39
      ]
     },
     {
@@ -2606,7 +2656,7 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-lang-nursery/rustc-hash",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2616,7 +2666,17 @@
      "by": "The Rust Project Developers",
      "url": "https://github.com/rust-lang/rustc-hash",
      "texts": [
-      158
+      163
+     ]
+    },
+    {
+     "name": "rustfft",
+     "version": "6.4.1",
+     "license": "MIT OR Apache-2.0",
+     "by": "Allen Welkie, Elliott Mahler",
+     "url": "https://github.com/ejmahler/RustFFT",
+     "texts": [
+      47
      ]
     },
     {
@@ -2626,7 +2686,7 @@
      "by": "Dan Gohman, Jakub Konka",
      "url": "https://github.com/bytecodealliance/rustix",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2635,7 +2695,7 @@
      "license": "Apache-2.0 OR ISC OR MIT",
      "url": "https://github.com/rustls/rustls",
      "texts": [
-      52
+      55
      ]
     },
     {
@@ -2644,7 +2704,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/rustls/pki-types",
      "texts": [
-      88
+      92
      ]
     },
     {
@@ -2663,7 +2723,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/rustversion",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2673,7 +2733,7 @@
      "by": "bluss",
      "url": "https://github.com/bluss/scopeguard",
      "texts": [
-      57
+      60
      ]
     },
     {
@@ -2683,7 +2743,7 @@
      "by": "The Servo Project Developers",
      "url": "https://github.com/servo/servo",
      "texts": [
-      183
+      188
      ]
     },
     {
@@ -2693,7 +2753,7 @@
      "by": "Erick Tryzelaar, David Tolnay",
      "url": "https://github.com/serde-rs/serde",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2703,7 +2763,7 @@
      "by": "Erick Tryzelaar, David Tolnay",
      "url": "https://github.com/serde-rs/serde",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2713,7 +2773,7 @@
      "by": "Erick Tryzelaar, David Tolnay",
      "url": "https://github.com/serde-rs/serde",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2723,7 +2783,7 @@
      "by": "Erick Tryzelaar, David Tolnay",
      "url": "https://github.com/serde-rs/json",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2733,7 +2793,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/serde-repr",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2743,7 +2803,7 @@
      "by": "The Servo Project Developers",
      "url": "https://github.com/servo/servo",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2773,7 +2833,7 @@
      "by": "Eliza Weisman",
      "url": "https://github.com/hawkw/sharded-slab",
      "texts": [
-      78
+      81
      ]
     },
     {
@@ -2783,7 +2843,7 @@
      "by": "Michal 'vorner' Vaner, Thomas Himmelstoss",
      "url": "https://github.com/vorner/signal-hook",
      "texts": [
-      67
+      70
      ]
     },
     {
@@ -2793,7 +2853,7 @@
      "by": "Michal 'vorner' Vaner, Masaki Hara",
      "url": "https://github.com/vorner/signal-hook",
      "texts": [
-      67
+      70
      ]
     },
     {
@@ -2803,7 +2863,7 @@
      "by": "Marvin Countryman",
      "url": "https://github.com/mcountryman/simd-adler32",
      "texts": [
-      153
+      158
      ]
     },
     {
@@ -2813,7 +2873,7 @@
      "by": "Sean C. Roach",
      "url": "https://github.com/seancroach/simd_cesu8",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2823,7 +2883,7 @@
      "by": "Luca Barbato",
      "url": "https://github.com/lu-zero/simd_helpers",
      "texts": [
-      149
+      154
      ]
     },
     {
@@ -2833,7 +2893,7 @@
      "by": "Hans Kratz",
      "url": "https://github.com/rusticstuff/simdutf8",
      "texts": [
-      157
+      162
      ]
     },
     {
@@ -2843,7 +2903,7 @@
      "by": "Frank Denis",
      "url": "https://github.com/jedisct1/rust-siphash",
      "texts": [
-      150
+      155
      ]
     },
     {
@@ -2853,7 +2913,7 @@
      "by": "Frank Denis",
      "url": "https://github.com/jedisct1/rust-siphash",
      "texts": [
-      160
+      165
      ]
     },
     {
@@ -2863,7 +2923,7 @@
      "by": "Carl Lerche",
      "url": "https://github.com/tokio-rs/slab",
      "texts": [
-      77
+      80
      ]
     },
     {
@@ -2873,7 +2933,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/demonthos/sledgehammer_bindgen/",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -2883,7 +2943,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/demonthos/sledgehammer_bindgen/",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -2893,7 +2953,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/demonthos/sledgehammer_utils/",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -2903,7 +2963,7 @@
      "by": "Orson Peters",
      "url": "https://github.com/orlp/slotmap",
      "texts": [
-      188
+      193
      ]
     },
     {
@@ -2913,7 +2973,7 @@
      "by": "The Servo Project Developers",
      "url": "https://github.com/servo/rust-smallvec",
      "texts": [
-      72
+      75
      ]
     },
     {
@@ -2923,7 +2983,17 @@
      "by": "Robert Grosse",
      "url": "https://github.com/storyyeller/stable_deref_trait",
      "texts": [
-      64
+      67
+     ]
+    },
+    {
+     "name": "strength_reduce",
+     "version": "0.2.4",
+     "license": "MIT OR Apache-2.0",
+     "by": "Elliott Mahler",
+     "url": "http://github.com/ejmahler/strength_reduce",
+     "texts": [
+      47
      ]
     },
     {
@@ -2933,7 +3003,7 @@
      "by": "The Servo Project Developers",
      "url": "https://github.com/servo/string-cache",
      "texts": [
-      29
+      30
      ]
     },
     {
@@ -2943,7 +3013,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/tree/main/packages/subsecond",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -2953,7 +3023,7 @@
      "by": "Jonathan Kelley",
      "url": "https://github.com/DioxusLabs/dioxus/tree/main/packages/subsecond",
      "texts": [
-      130
+      135
      ]
     },
     {
@@ -2967,13 +3037,73 @@
      ]
     },
     {
+     "name": "symphonia",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
+     "name": "symphonia-codec-aac",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov, Kostya Shishkov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
+     "name": "symphonia-common",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
+     "name": "symphonia-core",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
+     "name": "symphonia-format-isomp4",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
+     "name": "symphonia-metadata",
+     "version": "0.6.1",
+     "license": "MPL-2.0",
+     "by": "Philip Deljanov",
+     "url": "https://github.com/pdeljanov/Symphonia",
+     "texts": [
+      187
+     ]
+    },
+    {
      "name": "syn",
      "version": "1.0.109",
      "license": "MIT OR Apache-2.0",
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/syn",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2983,7 +3113,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/syn",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -2993,7 +3123,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/syn",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3003,7 +3133,7 @@
      "by": "Nika Layzell",
      "url": "https://github.com/mystor/synstructure",
      "texts": [
-      99
+      103
      ]
     },
     {
@@ -3023,7 +3153,7 @@
      "by": "Tauri Programme within The Commons Conservancy",
      "url": "https://github.com/tauri-apps/tao",
      "texts": [
-      121
+      125
      ]
     },
     {
@@ -3033,7 +3163,7 @@
      "by": "Keegan McAllister, Simon Sapin, Chris Morgan",
      "url": "https://github.com/servo/tendril",
      "texts": [
-      43
+      45
      ]
     },
     {
@@ -3043,7 +3173,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/thiserror",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3053,7 +3183,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/thiserror",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3063,7 +3193,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/thiserror",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3073,7 +3203,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/thiserror",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3083,7 +3213,7 @@
      "by": "Amanieu d'Antras",
      "url": "https://github.com/Amanieu/thread_local-rs",
      "texts": [
-      53
+      56
      ]
     },
     {
@@ -3093,7 +3223,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/image-tiff",
      "texts": [
-      109
+      113
      ]
     },
     {
@@ -3103,7 +3233,7 @@
      "by": "Jacob Pratt, Time contributors",
      "url": "https://github.com/time-rs/time",
      "texts": [
-      94
+      98
      ]
     },
     {
@@ -3113,7 +3243,7 @@
      "by": "Jacob Pratt, Time contributors",
      "url": "https://github.com/time-rs/time",
      "texts": [
-      94
+      98
      ]
     },
     {
@@ -3123,7 +3253,7 @@
      "by": "Jacob Pratt, Time contributors",
      "url": "https://github.com/time-rs/time",
      "texts": [
-      94
+      98
      ]
     },
     {
@@ -3133,7 +3263,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3143,7 +3273,7 @@
      "by": "Tokio Contributors",
      "url": "https://github.com/tokio-rs/tokio",
      "texts": [
-      152
+      157
      ]
     },
     {
@@ -3153,7 +3283,7 @@
      "by": "Tokio Contributors",
      "url": "https://github.com/tokio-rs/tokio",
      "texts": [
-      117
+      121
      ]
     },
     {
@@ -3162,7 +3292,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/toml-rs/toml",
      "texts": [
-      92
+      96
      ]
     },
     {
@@ -3171,7 +3301,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/toml-rs/toml",
      "texts": [
-      92
+      96
      ]
     },
     {
@@ -3180,7 +3310,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/toml-rs/toml",
      "texts": [
-      92
+      96
      ]
     },
     {
@@ -3190,7 +3320,7 @@
      "by": "Eliza Weisman, Tokio Contributors",
      "url": "https://github.com/tokio-rs/tracing",
      "texts": [
-      82
+      85
      ]
     },
     {
@@ -3200,7 +3330,7 @@
      "by": "Tokio Contributors, Eliza Weisman, David Barsky",
      "url": "https://github.com/tokio-rs/tracing",
      "texts": [
-      82
+      85
      ]
     },
     {
@@ -3210,7 +3340,7 @@
      "by": "Tokio Contributors",
      "url": "https://github.com/tokio-rs/tracing",
      "texts": [
-      82
+      85
      ]
     },
     {
@@ -3220,7 +3350,7 @@
      "by": "Tokio Contributors",
      "url": "https://github.com/tokio-rs/tracing",
      "texts": [
-      82
+      85
      ]
     },
     {
@@ -3230,7 +3360,17 @@
      "by": "Eliza Weisman, David Barsky, Tokio Contributors",
      "url": "https://github.com/tokio-rs/tracing",
      "texts": [
-      82
+      85
+     ]
+    },
+    {
+     "name": "transpose",
+     "version": "0.2.3",
+     "license": "MIT OR Apache-2.0",
+     "by": "Elliott Mahler",
+     "url": "https://github.com/ejmahler/transpose",
+     "texts": [
+      91
      ]
     },
     {
@@ -3240,7 +3380,7 @@
      "by": "Alexey Galakhov, Daniel Abramov",
      "url": "https://github.com/snapview/tungstenite-rs",
      "texts": [
-      58
+      61
      ]
     },
     {
@@ -3249,7 +3389,7 @@
      "license": "MIT OR Apache-2.0",
      "url": "https://github.com/paholg/typenum",
      "texts": [
-      162
+      167
      ]
     },
     {
@@ -3259,8 +3399,8 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/unicode-ident",
      "texts": [
-      158,
-      184
+      163,
+      189
      ]
     },
     {
@@ -3270,7 +3410,7 @@
      "by": "kwantam, Manish Goregaokar",
      "url": "https://github.com/unicode-rs/unicode-segmentation",
      "texts": [
-      44
+      46
      ]
     },
     {
@@ -3280,7 +3420,7 @@
      "by": "erick.tryzelaar, kwantam, Manish Goregaokar",
      "url": "https://github.com/unicode-rs/unicode-xid",
      "texts": [
-      44
+      46
      ]
     },
     {
@@ -3300,7 +3440,7 @@
      "by": "The rust-url developers",
      "url": "https://github.com/servo/rust-url",
      "texts": [
-      31
+      32
      ]
     },
     {
@@ -3310,7 +3450,7 @@
      "by": "Simon Sapin",
      "url": "https://github.com/SimonSapin/rust-utf8",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3320,7 +3460,7 @@
      "by": "Henri Sivonen",
      "url": "https://github.com/hsivonen/utf8_iter",
      "texts": [
-      103
+      107
      ]
     },
     {
@@ -3330,7 +3470,7 @@
      "by": "Ashley Mannix, Dylan DPC, Hunar Roop Kahlon",
      "url": "https://github.com/uuid-rs/uuid",
      "texts": [
-      35
+      37
      ]
     },
     {
@@ -3350,7 +3490,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/warnings",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -3360,7 +3500,7 @@
      "by": "Evan Almloff",
      "url": "https://github.com/dioxuslabs/warnings",
      "texts": [
-      126
+      130
      ]
     },
     {
@@ -3370,7 +3510,7 @@
      "by": "Amod Malviya @amodm",
      "url": "https://github.com/amodm/webbrowser-rs",
      "texts": [
-      170
+      175
      ]
     },
     {
@@ -3380,7 +3520,7 @@
      "by": "The image-rs Developers",
      "url": "https://github.com/image-rs/weezl",
      "texts": [
-      176
+      181
      ]
     },
     {
@@ -3389,7 +3529,7 @@
      "license": "MIT",
      "url": "https://github.com/winnow-rs/winnow",
      "texts": [
-      159
+      164
      ]
     },
     {
@@ -3398,7 +3538,7 @@
      "license": "MIT",
      "url": "https://github.com/winnow-rs/winnow",
      "texts": [
-      159
+      164
      ]
     },
     {
@@ -3408,7 +3548,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3418,7 +3558,7 @@
      "by": "Tauri Programme within The Commons Conservancy",
      "url": "https://github.com/tauri-apps/wry",
      "texts": [
-      118
+      122
      ]
     },
     {
@@ -3428,7 +3568,7 @@
      "by": "Kagami Hiiragi",
      "url": "https://github.com/image-rs/y4m.git",
      "texts": [
-      168
+      173
      ]
     },
     {
@@ -3438,7 +3578,7 @@
      "by": "Manish Goregaokar",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3448,7 +3588,7 @@
      "by": "Manish Goregaokar",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3457,7 +3597,7 @@
      "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
      "url": "https://github.com/google/zerocopy",
      "texts": [
-      101
+      105
      ]
     },
     {
@@ -3466,7 +3606,7 @@
      "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
      "url": "https://github.com/google/zerocopy",
      "texts": [
-      101
+      105
      ]
     },
     {
@@ -3476,7 +3616,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3486,7 +3626,7 @@
      "by": "Manish Goregaokar",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3496,7 +3636,7 @@
      "by": "The RustCrypto Project Developers",
      "url": "https://github.com/RustCrypto/utils",
      "texts": [
-      76
+      79
      ]
     },
     {
@@ -3506,7 +3646,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3516,7 +3656,7 @@
      "by": "The ICU4X Project Developers",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3526,7 +3666,7 @@
      "by": "Manish Goregaokar",
      "url": "https://github.com/unicode-org/icu4x",
      "texts": [
-      185
+      190
      ]
     },
     {
@@ -3536,7 +3676,7 @@
      "by": "Mathijs van de Nes, Marli Frost, Ryan Levick, Chris Hennick",
      "url": "https://github.com/zip-rs/zip2.git",
      "texts": [
-      161
+      166
      ]
     },
     {
@@ -3546,7 +3686,7 @@
      "by": "David Tolnay",
      "url": "https://github.com/dtolnay/zmij",
      "texts": [
-      158
+      163
      ]
     },
     {
@@ -3564,7 +3704,7 @@
      "license": "MIT OR Apache-2.0 OR Zlib",
      "url": "https://github.com/etemesi254/zune-image",
      "texts": [
-      154
+      159
      ]
     },
     {
@@ -3573,7 +3713,7 @@
      "license": "MIT OR Apache-2.0 OR Zlib",
      "url": "https://github.com/etemesi254/zune-image/tree/main/zune-inflate",
      "texts": [
-      151
+      156
      ]
     },
     {
@@ -3583,7 +3723,7 @@
      "by": "caleb",
      "url": "https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg",
      "texts": [
-      154
+      159
      ]
     }
    ]
@@ -3708,6 +3848,10 @@
   },
   {
    "license": "MIT",
+   "text": "Copyright (c) 2011 Jan Kokemüller\nCopyright (c) 2020 Sebastian Dröge <sebastian@centricular.com>\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE.\n"
+  },
+  {
+   "license": "MIT",
    "text": "Copyright (c) 2012-2013 Mozilla Foundation\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
   },
   {
@@ -3725,6 +3869,10 @@
   {
    "license": "MIT",
    "text": "Copyright (c) 2014 Chris Wong\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
+  },
+  {
+   "license": "MIT",
+   "text": "Copyright (c) 2014 Huon Wilson\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
   },
   {
    "license": "MIT",
@@ -3769,6 +3917,10 @@
   {
    "license": "MIT",
    "text": "Copyright (c) 2015 The Rust Project Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
+  },
+  {
+   "license": "MIT",
+   "text": "Copyright (c) 2015 The RustFFT Developers\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
   },
   {
    "license": "MIT",
@@ -3944,6 +4096,10 @@
   },
   {
    "license": "MIT",
+   "text": "Copyright (c) 2022 The transpose Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
+  },
+  {
+   "license": "MIT",
    "text": "Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n"
   },
   {
@@ -4101,6 +4257,10 @@
   {
    "license": "MIT",
    "text": "MIT License\n\nCopyright (c) David Purdum\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and\nassociated documentation files (the \"Software\"), to deal in the Software without restriction, including\nwithout limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the\nfollowing conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial\nportions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\nLIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO\nEVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE\nUSE OR OTHER DEALINGS IN THE SOFTWARE.\n"
+  },
+  {
+   "license": "MIT",
+   "text": "MIT License\n\nCopyright (c) mitchmindtree\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and\nassociated documentation files (the \"Software\"), to deal in the Software without restriction, including\nwithout limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the\nfollowing conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial\nportions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\nLIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO\nEVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE\nUSE OR OTHER DEALINGS IN THE SOFTWARE.\n"
   },
   {
    "license": "MIT",

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::{Library, Result, TRACK_COLUMNS, Track, now, track_from_row};
+use crate::{Library, Result, TRACK_COLUMN_COUNT, TRACK_COLUMNS, Track, now, track_from_row};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Playlist {
@@ -116,7 +116,7 @@ impl Library {
             "SELECT {columns}, pt.id FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
              WHERE pt.playlist_id = ?1 ORDER BY pt.position, pt.id"
         ))?;
-        let rows = stmt.query_map([id], |r| Ok(PlaylistEntry { track: track_from_row(r)?, entry_id: r.get(14)? }))?;
+        let rows = stmt.query_map([id], |r| Ok(PlaylistEntry { track: track_from_row(r)?, entry_id: r.get(TRACK_COLUMN_COUNT)? }))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 

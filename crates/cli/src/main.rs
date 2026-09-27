@@ -7,7 +7,8 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use ytmdl_core::{
-    CancelToken, Channel, DownloadOptions, Downloader, Resolved, Runtime, RuntimeConfig, SearchSource, selftest, tag,
+    CancelToken, Channel, DownloadOptions, Downloader, Resolved, Runtime, RuntimeConfig, SearchSource, loudness,
+    selftest, tag,
 };
 
 #[derive(Parser)]
@@ -50,6 +51,9 @@ enum Cmd {
         output: PathBuf,
         #[arg(long)]
         no_tags: bool,
+        /// Don't measure the loudness for ReplayGain.
+        #[arg(long)]
+        no_replaygain: bool,
         /// Don't look up lyrics on LRCLIB.
         #[arg(long)]
         no_lyrics: bool,
@@ -68,6 +72,13 @@ enum Cmd {
     },
     /// Read back a file's tags and audio properties.
     Inspect { file: PathBuf },
+    /// Measure a file's loudness (EBU R128) as ReplayGain.
+    Loudness {
+        file: PathBuf,
+        /// Also store it in the file's ReplayGain tags.
+        #[arg(long)]
+        write: bool,
+    },
     /// Rewrite a fragmented (DASH) M4A as a regular one, in place.
     Remux { file: PathBuf },
     /// Download the latest yt-dlp (takes effect on next start).
@@ -104,7 +115,7 @@ enum UpdateChannel {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info,symphonia_core::formats::probe=error".into()),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -112,6 +123,20 @@ async fn main() -> Result<()> {
 
     match &cli.cmd {
         Cmd::Inspect { file } => return print(&cli, &tag::read_tags(file)?, |r| format!("{r:#?}")),
+        Cmd::Loudness { file, write } => {
+            let gain = loudness::measure(file)?;
+            if *write {
+                loudness::write(file, gain)?;
+            }
+            return print(&cli, &gain, |g| {
+                format!(
+                    "{:.1} LUFS: gain {:+.2} dB, peak {:.6}",
+                    loudness::REFERENCE_LUFS - g.gain_db,
+                    g.gain_db,
+                    g.peak
+                )
+            });
+        }
         Cmd::Remux { file } => {
             let changed = ytmdl_core::remux::defragment_mp4(file)?;
             println!("{}", if changed { "rewritten" } else { "not fragmented; unchanged" });
@@ -157,9 +182,10 @@ async fn main() -> Result<()> {
                 s
             }
         })?,
-        Cmd::Get { url, output, no_tags, no_lyrics } => {
+        Cmd::Get { url, output, no_tags, no_replaygain, no_lyrics } => {
             let mut opts = DownloadOptions::new(output);
             opts.write_tags = !no_tags;
+            opts.measure_loudness = !no_replaygain;
             opts.lyrics = !no_lyrics;
             let done = dl
                 .download(url, &opts, report_progress, CancelToken::new())
@@ -203,7 +229,7 @@ async fn main() -> Result<()> {
             }
         }
         Cmd::RecordFixtures { dir } => record_fixtures(&rt, dir).await?,
-        Cmd::Inspect { .. } | Cmd::Remux { .. } => unreachable!(),
+        Cmd::Inspect { .. } | Cmd::Remux { .. } | Cmd::Loudness { .. } => unreachable!(),
     }
     Ok(())
 }

@@ -11,9 +11,10 @@ new APK.
   challenges. Search, resolve, download with progress and cancellation, M4A
   defragmenting (no ffmpeg), tagging with cover art (lofty), lyrics from
   [LRCLIB](https://lrclib.net) (time-synced where it has them, stored in the
-  file as LRC), and the yt-dlp updater.
+  file as LRC), ReplayGain from the song's measured loudness (EBU R128 over
+  audio decoded by symphonia), and the yt-dlp updater.
 - `crates/cli`: desktop harness (`version`, `search`, `resolve`, `get`,
-  `lyrics`, `inspect`, `remux`, `update`, `selftest`).
+  `lyrics`, `inspect`, `loudness`, `remux`, `update`, `selftest`).
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
@@ -32,12 +33,16 @@ new APK.
   (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
   for updates once a day (a switch in Settings turns that off); a new build
   loads on the next start. Settings also has the open-source licenses: ytmdl's
-  own and those of everything bundled with it.
+  own and those of everything bundled with it. Songs play at an even
+  loudness (a Settings switch turns that off): loud ones are turned down by
+  their ReplayGain, and songs downloaded before ytmdl measured it are
+  measured in the background.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they
   hold with the screen off, and logs what it plays to `files/listens.log` for
-  the stats, since the app may not be running. Downloads get a data-sync
+  the stats, since the app may not be running. It also sets each song's
+  volume from its ReplayGain. Downloads get a data-sync
   foreground service so Android doesn't freeze them in the background. The
   activity takes links shared from other apps ("Share", then ytmdl): a song
   downloads, an album or playlist opens. `res/` has the launcher and

@@ -24,7 +24,7 @@ const RUNTIME_ASSET: &str = "assets/ytmdl/runtime.zip";
 pub fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info,symphonia_core::formats::probe=error".into()),
         )
         .with_ansi(false)
         .without_time()
@@ -261,8 +261,8 @@ pub mod player {
         Ok(JValueOwned::Object(env.new_string(s)?.into()))
     }
 
-    /// `items`: JSON array of `{id, path, title, artist, album, art}`, ids
-    /// unique in the queue.
+    /// `items`: JSON array of `{id, path, title, artist, album, art, gain,
+    /// peak}`, ids unique in the queue.
     pub fn set_queue(items: &str, index: usize, position_ms: i64, play: bool) {
         call("setQueue", "(Ljava/lang/String;IJZ)V", |env| {
             Ok(vec![
@@ -309,6 +309,11 @@ pub mod player {
         call("setQueueLoop", "(Ljava/lang/String;Ljava/lang/String;)V", |env| {
             Ok(vec![string(env, first)?, string(env, last)?])
         });
+    }
+
+    /// Evens out loudness with the songs' ReplayGain (the `gain` of queue items).
+    pub fn set_normalize(on: bool) {
+        call("setNormalize", "(Z)V", |_| Ok(vec![JValueOwned::Bool(on.into())]));
     }
 
     pub fn play() {

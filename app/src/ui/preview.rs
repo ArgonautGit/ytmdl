@@ -841,6 +841,8 @@ fn settings() -> Element {
                 ontoggleauto: |_| {},
                 onallow: |_| {},
                 onlicenses: |_| {},
+                normalize: true,
+                ontogglenormalize: |_| {},
                 lyrics_lookup: true,
                 ontogglelyrics: |_| {},
             }

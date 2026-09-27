@@ -180,6 +180,8 @@ pub struct TagReport {
     pub disk: Option<u32>,
     pub year: Option<u16>,
     pub comment: Option<String>,
+    /// ReplayGain track gain (dB) and peak.
+    pub replaygain: Option<crate::loudness::Gain>,
     /// Whether the file holds lyrics.
     pub has_lyrics: bool,
     /// (mime type, size in bytes) of each embedded picture.
@@ -210,6 +212,7 @@ pub fn read_tags(path: &Path) -> Result<TagReport> {
         report.disk = tag.disk();
         report.year = tag.date().map(|d| d.year);
         report.comment = tag.comment().map(|s| s.into_owned());
+        report.replaygain = crate::loudness::from_tag(tag);
         report.has_lyrics = tag.get_string(ItemKey::Lyrics).is_some_and(|l| !l.trim().is_empty());
         report.pictures = tag
             .pictures()

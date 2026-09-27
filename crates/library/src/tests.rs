@@ -432,3 +432,54 @@ fn saves_sections() {
     assert_eq!(names(&lib), ["Guitar solo"]);
     assert_eq!(lib.sections("bbbbbbbbbbb").unwrap().len(), 1);
 }
+
+/// Needs `.deps/fixtures/tone.m4a`, like `scan_indexes_tagged_files_and_forgets_deleted_ones`.
+#[test]
+fn keeps_and_measures_replaygain() {
+    use ytmdl_core::loudness::{self, Gain};
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.deps/fixtures/tone.m4a");
+    if !fixture.exists() {
+        eprintln!("skipping: {} is missing", fixture.display());
+        return;
+    }
+    let tmp = TempDir::new("gain");
+    let music = tmp.0.join("Music");
+    fs::create_dir_all(&music).unwrap();
+    let tagged = music.join("Tagged [track000001].m4a");
+    let untagged = music.join("Untagged [track000002].m4a");
+    for (file, id) in [(&tagged, "track000001"), (&untagged, "track000002")] {
+        fs::copy(&fixture, file).unwrap();
+        write_tags(file, &meta(id, "Song", None, &["Band"], None), None).unwrap();
+    }
+    loudness::write(&tagged, Gain { gain_db: -6.5, peak: 0.9 }).unwrap();
+
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    // A download reads the gain its file was tagged with.
+    let track = lib.add_download(&Downloaded { path: tagged.clone(), meta: meta("track000001", "Song", None, &["Band"], None), tagged: true }).unwrap();
+    assert_eq!(track.gain, Some(Gain { gain_db: -6.5, peak: 0.9 }));
+    // A scan finds the other, without a gain.
+    assert_eq!(lib.scan(std::slice::from_ref(&music)).unwrap().added, 1);
+    let unmeasured = lib.unmeasured().unwrap();
+    assert_eq!(unmeasured.len(), 1);
+    assert_eq!((unmeasured[0].path.as_path(), unmeasured[0].gain), (untagged.as_path(), None));
+
+    // Measured and tagged, it is done, and the scan doesn't count the new tag as a change.
+    let gain = loudness::measure(&untagged).unwrap();
+    loudness::write(&untagged, gain).unwrap();
+    lib.set_gain(unmeasured[0].id, Some(gain), true).unwrap();
+    assert!(lib.unmeasured().unwrap().is_empty());
+    assert!(!lib.scan(std::slice::from_ref(&music)).unwrap().changed());
+    assert_eq!(lib.track(unmeasured[0].id).unwrap().unwrap().gain, Some(gain));
+
+    // One that can't be measured isn't tried again.
+    let junk = add(&lib, &music, meta("track000003", "Junk", None, &["Band"], None));
+    assert_eq!(lib.unmeasured().unwrap().len(), 1);
+    lib.set_gain(junk.id, None, false).unwrap();
+    assert!(lib.unmeasured().unwrap().is_empty());
+
+    // An index rebuilt from the files has the gains.
+    let fresh = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    fresh.scan(&[music]).unwrap();
+    let gains: Vec<Option<Gain>> = fresh.tracks_by_id(&[1, 2]).unwrap().into_iter().map(|t| t.gain).collect();
+    assert!(gains.iter().all(Option::is_some), "{gains:?}");
+}

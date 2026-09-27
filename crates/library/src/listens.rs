@@ -15,7 +15,7 @@ use std::path::Path;
 
 use rusqlite::params;
 
-use crate::{Library, Result, TRACK_COLUMNS, Track, track_from_row};
+use crate::{Library, Result, TRACK_COLUMN_COUNT, TRACK_COLUMNS, Track, track_from_row};
 
 /// Listens of the period with whether each one counts as a play.
 const PLAYED: &str = "p AS (
@@ -173,7 +173,7 @@ impl Library {
              WHERE plays > 0 ORDER BY plays DESC, ms DESC, title COLLATE NOCASE LIMIT 10"
         ))?;
         let top_tracks = stmt
-            .query_map([since], |r| Ok(TopTrack { track: track_from_row(r)?, plays: r.get(14)?, ms: r.get(15)? }))?
+            .query_map([since], |r| Ok(TopTrack { track: track_from_row(r)?, plays: r.get(TRACK_COLUMN_COUNT)?, ms: r.get(TRACK_COLUMN_COUNT + 1)? }))?
             .collect::<rusqlite::Result<_>>()?;
 
         let mut stmt = db.prepare(&format!(

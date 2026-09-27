@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use dioxus::prelude::*;
+use ytmdl_core::loudness;
 use ytmdl_library::Library;
 
 #[derive(Clone, Copy)]
@@ -15,6 +16,7 @@ pub struct LibraryHandle {
     /// The player's listening log (see crates/library/src/listens.rs).
     listen_log: CopyValue<PathBuf>,
     importing: CopyValue<bool>,
+    measuring: CopyValue<bool>,
 }
 
 impl LibraryHandle {
@@ -26,6 +28,7 @@ impl LibraryHandle {
             listens: Signal::new(0),
             listen_log: CopyValue::new(listen_log),
             importing: CopyValue::new(false),
+            measuring: CopyValue::new(false),
         }
     }
 
@@ -56,6 +59,59 @@ impl LibraryHandle {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => tracing::warn!(target: "ytmdl", "library scan: {e}"),
             Err(e) => tracing::warn!(target: "ytmdl", "library scan: {e:#}"),
+        }
+    }
+
+    /// Measures the loudness of the tracks that have no ReplayGain yet (songs
+    /// downloaded before ytmdl measured it, or found by a scan) and tags their
+    /// files with it, one at a time off the UI thread. About a second a song
+    /// on a phone; what is done stays done if the app stops halfway.
+    pub async fn measure_loudness(self) {
+        let mut measuring = self.measuring;
+        if *measuring.peek() {
+            return;
+        }
+        measuring.set(true);
+        let library = self.get();
+        let result = crate::blocking(move || -> ytmdl_library::Result<usize> {
+            let mut measured = 0;
+            for track in library.unmeasured()? {
+                let path = &track.path;
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+                if !loudness::can_measure(&ext) {
+                    library.set_gain(track.id, None, false)?;
+                    continue;
+                }
+                match loudness::measure(path) {
+                    Ok(gain) => {
+                        let retagged = loudness::write(path, gain)
+                            .inspect_err(|e| tracing::warn!(target: "ytmdl", "tagging the gain: {e}"))
+                            .is_ok();
+                        library.set_gain(track.id, Some(gain), retagged)?;
+                        measured += 1;
+                    }
+                    // Not readable now (no storage access, say): try again next time.
+                    Err(ytmdl_core::Error::Io(e)) => {
+                        tracing::debug!(target: "ytmdl", "not measuring {}: {e}", path.display());
+                    }
+                    Err(e) => {
+                        tracing::warn!(target: "ytmdl", "{e}");
+                        library.set_gain(track.id, None, false)?;
+                    }
+                }
+            }
+            Ok(measured)
+        })
+        .await;
+        measuring.set(false);
+        match result {
+            Ok(Ok(0)) => {}
+            Ok(Ok(n)) => {
+                tracing::info!(target: "ytmdl", "measured the loudness of {n} songs");
+                self.changed();
+            }
+            Ok(Err(e)) => tracing::warn!(target: "ytmdl", "measuring loudness: {e}"),
+            Err(e) => tracing::warn!(target: "ytmdl", "measuring loudness: {e:#}"),
         }
     }
 
