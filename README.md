@@ -53,13 +53,22 @@ new APK.
   headset controls), which also runs the A-B loops and the sleep timer so they
   hold with the screen off, and logs what it plays to `files/listens.log` for
   the stats, since the app may not be running. It also sets each song's
-  volume from its ReplayGain. Downloads get a data-sync
+  volume from its ReplayGain. The service is also a media library, so Android
+  Auto (and other media browsers) can browse playlists, albums, artists and
+  songs, search them, and play them without the app running; it reads the
+  library's database and serves cover art through a content provider.
+  Downloads get a data-sync
   foreground service so Android doesn't freeze them in the background. The
   activity takes links shared from other apps ("Share", then ytmdl): a song
   downloads, an album or playlist opens. App updates are installed through a
   PackageInstaller session. `res/` has the launcher and
-  notification icons. `tools/patch-gradle-project` adds all of it to the
-  Gradle project dx generates.
+  notification icons and the Android Auto declaration.
+  `tools/patch-gradle-project` adds all of it to the Gradle project dx
+  generates.
+
+Android Auto lists apps from outside the Play Store only with its developer
+setting "Unknown sources" on (tap the version in Android Auto's settings ten
+times for the developer settings).
 
 Files land in `Music/<Artist>/<Album>/<Title> [<id>].m4a` on shared storage
 (after the all-files access prompt) and are added to MediaStore.

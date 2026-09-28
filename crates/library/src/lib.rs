@@ -45,6 +45,9 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Schema versions, applied in order and tracked in `PRAGMA user_version`.
+/// The player's process also reads `tracks`, `playlists`, `playlist_tracks`
+/// and the saved queue, for cars (app/android/Browse.kt), so columns there
+/// are only ever added.
 const MIGRATIONS: &[&str] = &[r#"
 CREATE TABLE tracks (
     id           INTEGER PRIMARY KEY,

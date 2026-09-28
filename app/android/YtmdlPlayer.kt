@@ -9,7 +9,6 @@ import android.os.Looper
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -33,6 +32,8 @@ object YtmdlPlayer {
     private val main = Handler(Looper.getMainLooper())
     private var connecting = false
     private var controller: MediaController? = null
+    /** For the cover art URIs (ArtProvider). */
+    private var app: Context? = null
     /** Commands sent before the controller connected. */
     private val waiting = ArrayList<(MediaController) -> Unit>()
     private var error: String? = null
@@ -44,6 +45,7 @@ object YtmdlPlayer {
     @JvmStatic
     fun connect(context: Context) {
         val app = context.applicationContext
+        this.app = app
         main.post {
             if (connecting) return@post
             connecting = true
@@ -99,25 +101,20 @@ object YtmdlPlayer {
         val list = JSONArray(json)
         return (0 until list.length()).map { i ->
             val o = list.getJSONObject(i)
-            val extras = Bundle()
-            if (!o.isNull("gain")) {
-                extras.putDouble(PlaybackService.GAIN, o.getDouble("gain"))
-                extras.putDouble(PlaybackService.PEAK, o.optDouble("peak", 1.0))
+            // Served by ArtProvider, so the car and the system can show it too.
+            val art = o.optString("art").ifEmpty { null }?.let { path ->
+                app?.let { ArtProvider.uri(it, File(path).name) } ?: Uri.fromFile(File(path))
             }
-            val meta = MediaMetadata.Builder()
-                .setTitle(o.getString("title"))
-                .setArtist(o.optString("artist").ifEmpty { null })
-                .setAlbumTitle(o.optString("album").ifEmpty { null })
-                .setArtworkUri(o.optString("art").ifEmpty { null }?.let { Uri.fromFile(File(it)) })
-                .setIsPlayable(true)
-                .setIsBrowsable(false)
-                .setExtras(extras)
-                .build()
-            MediaItem.Builder()
-                .setMediaId(o.getString("id"))
-                .setUri(Uri.fromFile(File(o.getString("path"))))
-                .setMediaMetadata(meta)
-                .build()
+            Browse.queueItem(
+                o.getString("id"),
+                o.getString("path"),
+                o.getString("title"),
+                o.optString("artist"),
+                o.optString("album"),
+                art,
+                if (o.isNull("gain")) null else o.getDouble("gain"),
+                o.optDouble("peak", 1.0),
+            )
         }
     }
 
