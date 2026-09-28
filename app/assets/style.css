@@ -460,6 +460,44 @@ button.icon-btn:active { background: var(--press); }
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
 }
 .row .more { margin: -8px -12px -8px -8px; color: var(--muted); }
+
+/* Swiping a song row (assets/swipe.js): the row's content, and an opaque
+   sheet under it, slide by --swipe over the action's colour and name. The
+   colour shows once letting go would act. */
+[data-swipe] > .row { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+/* A mouse swipe that starts on the cover would drag the image instead. */
+[data-swipe] > .row img { -webkit-user-drag: none; }
+[data-swipe="remove"] > .row { --swipe-color: var(--accent); }
+[data-swipe="next"] > .row { --swipe-color: #3ea6ff; }
+[data-swipe] > .row[data-swiping] { position: relative; overflow: hidden; background: var(--surface-2); }
+[data-swipe] > .row[data-swiping][data-armed] { background: var(--swipe-color); }
+.row[data-swiping]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    transform: translateX(var(--swipe, 0px));
+}
+.row[data-swiping] > * { position: relative; z-index: 1; transform: translateX(var(--swipe, 0px)); }
+.row[data-swiping]::before {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg);
+    font-size: 14px;
+    font-weight: 700;
+}
+[data-swipe="remove"] > .row[data-swiping]::before { content: "Remove"; }
+[data-swipe="next"] > .row[data-swiping]::before { content: "Play next"; }
+.row[data-swiping="right"]::before { left: 20px; }
+.row[data-swiping="left"]::before { right: 20px; }
+.row[data-settling] > *, .row[data-settling]::after { transition: transform 0.18s ease; }
+.row[data-folding] {
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    transition: height 0.18s ease, padding 0.18s ease;
+}
 .cover.new { color: var(--fg); }
 .secondary.round { width: 40px; padding: 0; }
 
