@@ -525,6 +525,22 @@ button.icon-btn:active { background: var(--press); }
 .spinner.tiny { width: 14px; height: 14px; border-width: 2px; }
 .hero .hero-actions .primary { margin-top: 0; }
 .album .section { margin-top: 18px; }
+/* Artist pages from YouTube Music. */
+.grid.shelf .tile.artist { width: 120px; text-align: center; }
+.album .section + .grid.shelf { padding-top: 12px; }
+.about {
+    display: -webkit-box;
+    margin: 8px 16px 24px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+}
+.remote-list .topbar > .sub { margin: -2px 0 0; }
+.remote-list .topbar .hero-actions { margin: 12px 0 4px; }
+.list-error { margin: 8px 16px 0; }
 
 /* ---- player ---- */
 

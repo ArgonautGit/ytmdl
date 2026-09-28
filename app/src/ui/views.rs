@@ -2,7 +2,7 @@
 //! `preview` can render every screen with sample data.
 
 use dioxus::prelude::*;
-use ytmdl_core::{Channel, Entry, SearchSource, art_url};
+use ytmdl_core::{Channel, Entry, SearchSource, SectionKind, art_url};
 
 use super::icons::{Icon, Svg};
 use super::sort::SortKey;
@@ -205,6 +205,7 @@ pub enum ResultsView {
     Songs(Vec<(Entry, TrackState)>),
     Videos(Vec<(Entry, TrackState)>),
     Albums(Vec<Entry>),
+    Artists(Vec<Entry>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -521,6 +522,21 @@ pub fn AlbumRow(entry: Entry, onopen: EventHandler<()>) -> Element {
     }
 }
 
+/// An artist on YouTube Music.
+#[component]
+pub fn ArtistEntryRow(entry: Entry, onopen: EventHandler<()>) -> Element {
+    rsx! {
+        li { class: "row tappable", onclick: move |_| onopen.call(()),
+            Cover { url: entry.thumbnail.clone(), class: "cover round", icon: Icon::Person }
+            div { class: "meta",
+                div { class: "title", "{entry.title}" }
+                div { class: "sub", "Artist" }
+            }
+            span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+        }
+    }
+}
+
 #[component]
 fn SkeletonRows(count: usize) -> Element {
     rsx! {
@@ -551,10 +567,17 @@ pub fn SearchPage(
     onclear: EventHandler<()>,
     onsource: EventHandler<SearchSource>,
     ondownload: EventHandler<Entry>,
+    /// Opens an album.
     onopen: EventHandler<Entry>,
+    onopenartist: EventHandler<Entry>,
     onallow: EventHandler<()>,
 ) -> Element {
-    let sources = [("Songs", SearchSource::MusicSongs), ("Albums", SearchSource::MusicAlbums), ("Videos", SearchSource::YouTube)];
+    let sources = [
+        ("Songs", SearchSource::MusicSongs),
+        ("Albums", SearchSource::MusicAlbums),
+        ("Artists", SearchSource::MusicArtists),
+        ("Videos", SearchSource::YouTube),
+    ];
     let has_query = !query.is_empty();
     rsx! {
         header { class: "topbar",
@@ -568,7 +591,7 @@ pub fn SearchPage(
                 input {
                     r#type: "search",
                     "enterkeyhint": "search",
-                    placeholder: "Search songs, albums, or paste a link",
+                    placeholder: "Search songs, artists, or paste a link",
                     value: "{query}",
                     oninput: move |e| oninput.call(e.value()),
                 }
@@ -607,7 +630,7 @@ pub fn SearchPage(
                 EmptyState {
                     icon: Icon::Search,
                     title: "Find music to download",
-                    text: "Search YouTube Music, or paste a link to a song, album or playlist.",
+                    text: "Search YouTube Music, or paste a link to a song, album, playlist or artist.",
                 }
             },
             ResultsView::Loading => rsx! { SkeletonRows { count: 8 } },
@@ -620,7 +643,7 @@ pub fn SearchPage(
                 }
             },
             ResultsView::Songs(rows) | ResultsView::Videos(rows) if rows.is_empty() => rsx! { NoResults {} },
-            ResultsView::Albums(rows) if rows.is_empty() => rsx! { NoResults {} },
+            ResultsView::Albums(rows) | ResultsView::Artists(rows) if rows.is_empty() => rsx! { NoResults {} },
             ResultsView::Songs(rows) => rsx! {
                 ul { class: "list",
                     for (entry , state) in rows {
@@ -639,6 +662,13 @@ pub fn SearchPage(
                 ul { class: "list",
                     for entry in rows {
                         AlbumRow { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopen.call(entry.clone()) }
+                    }
+                }
+            },
+            ResultsView::Artists(rows) => rsx! {
+                ul { class: "list",
+                    for entry in rows {
+                        ArtistEntryRow { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopenartist.call(entry.clone()) }
                     }
                 }
             },
@@ -685,7 +715,11 @@ pub fn AlbumPage(
                 AlbumTracks::Error(e) => rsx! {
                     EmptyState {
                         icon: Icon::Alert,
-                        title: "Could not load the album",
+                        title: match header.kind.as_deref() {
+                            Some("playlist") => "Could not load the playlist",
+                            Some("radio") => "Could not load the radio",
+                            _ => "Could not load the album",
+                        },
                         text: e,
                         action: rsx! { button { class: "secondary", onclick: move |_| onretry.call(()), "Try again" } },
                     }
@@ -1286,6 +1320,8 @@ pub fn ArtistPage(
     onalbum: EventHandler<usize>,
     /// A song's menu.
     onmore: EventHandler<usize>,
+    /// The artist's menu.
+    onartistmore: EventHandler<()>,
 ) -> Element {
     let meta = dotted([
         Some(plural(songs.len(), "song", "songs")),
@@ -1295,7 +1331,7 @@ pub fn ArtistPage(
         div { class: "album",
             BackButton { onback }
             Hero { cover: art, title: name, meta, round: true, icon: Icon::Person,
-                PlayButtons { onplay: move |_| onplay.call(0), onshuffle }
+                PlayButtons { onplay: move |_| onplay.call(0), onshuffle, onmore: onartistmore }
             }
             if !albums.is_empty() {
                 h2 { class: "section", "Albums" }
@@ -1303,6 +1339,241 @@ pub fn ArtistPage(
             }
             h2 { class: "section", "Songs" }
             SongList { songs, onplay, onmore }
+        }
+    }
+}
+
+/// One list of an artist's YouTube Music page. Songs and videos come with
+/// their download state; albums, playlists and artists are always Idle.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ArtistShelf {
+    pub title: String,
+    pub kind: SectionKind,
+    pub entries: Vec<(Entry, TrackState)>,
+    /// The page shows part of the list: offer "Show all".
+    pub more: bool,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ArtistShelves {
+    Loading,
+    Error(String),
+    Loaded(Vec<ArtistShelf>),
+}
+
+/// Songs and videos an artist page lists before "Show all".
+pub const SHELF_ROWS: usize = 5;
+
+/// An artist's page on YouTube Music: their lists, each as YouTube Music
+/// shows it. `cover` is the artist's picture.
+#[component]
+pub fn RemoteArtistPage(
+    name: String,
+    cover: Option<String>,
+    /// "7.97M monthly audience"
+    audience: Option<String>,
+    about: Option<String>,
+    shelves: ArtistShelves,
+    /// The artist has a radio (their mix).
+    radio: bool,
+    onback: EventHandler<()>,
+    onradio: EventHandler<()>,
+    ondownload: EventHandler<Entry>,
+    /// Opens an album, playlist or artist.
+    onopen: EventHandler<Entry>,
+    /// "Show all" of the shelf at this index.
+    onshowall: EventHandler<usize>,
+    onretry: EventHandler<()>,
+) -> Element {
+    let meta = dotted([Some("Artist".into()), audience]);
+    rsx! {
+        div { class: "album",
+            BackButton { onback }
+            Hero { cover: cover.as_deref().map(|u| art_url(u, 544)), title: name, meta, round: true, icon: Icon::Person,
+                if radio {
+                    div { class: "hero-actions",
+                        button { class: "secondary", onclick: move |_| onradio.call(()),
+                            Svg { icon: Icon::Radio, size: 20 }
+                            "Radio"
+                        }
+                    }
+                }
+            }
+            match shelves {
+                ArtistShelves::Loading => rsx! { SkeletonRows { count: 6 } },
+                ArtistShelves::Error(e) => rsx! {
+                    EmptyState {
+                        icon: Icon::Alert,
+                        title: "Could not load the artist",
+                        text: e,
+                        action: rsx! { button { class: "secondary", onclick: move |_| onretry.call(()), "Try again" } },
+                    }
+                },
+                ArtistShelves::Loaded(shelves) if shelves.is_empty() && about.is_none() => rsx! {
+                    EmptyState { icon: Icon::Person, title: "Nothing here", text: "YouTube Music lists nothing for this artist." }
+                },
+                ArtistShelves::Loaded(shelves) => rsx! {
+                    for (i , shelf) in shelves.into_iter().enumerate() {
+                        ArtistShelfView { key: "{i}", shelf, ondownload, onopen, onshowall: move |_| onshowall.call(i) }
+                    }
+                    if let Some(about) = about {
+                        h2 { class: "section", "About" }
+                        p { class: "about", "{about}" }
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn ArtistShelfView(
+    shelf: ArtistShelf,
+    ondownload: EventHandler<Entry>,
+    onopen: EventHandler<Entry>,
+    onshowall: EventHandler<()>,
+) -> Element {
+    let rows = matches!(shelf.kind, SectionKind::Songs | SectionKind::Videos);
+    // Albums always offer it: the whole list is where they all download.
+    let show_all = shelf.more || shelf.kind == SectionKind::Albums || (rows && shelf.entries.len() > SHELF_ROWS);
+    let mut entries = shelf.entries;
+    if rows {
+        entries.truncate(SHELF_ROWS);
+    }
+    rsx! {
+        h2 { class: "section",
+            "{shelf.title}"
+            if show_all {
+                button { class: "text-btn section-action", onclick: move |_| onshowall.call(()), "Show all" }
+            }
+        }
+        match shelf.kind {
+            SectionKind::Songs => rsx! {
+                ul { class: "list",
+                    for (entry , state) in entries {
+                        SongRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                    }
+                }
+            },
+            SectionKind::Videos => rsx! {
+                ul { class: "list",
+                    for (entry , state) in entries {
+                        VideoRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                    }
+                }
+            },
+            SectionKind::Albums | SectionKind::Playlists | SectionKind::Artists => rsx! {
+                ul { class: "grid shelf",
+                    for (entry , _) in entries {
+                        EntryTile { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopen.call(entry.clone()) }
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// An album, playlist or artist from YouTube Music, as a shelf tile.
+#[component]
+fn EntryTile(entry: Entry, onopen: EventHandler<()>) -> Element {
+    let artist = entry.kind.as_deref() == Some("artist");
+    let sub = match entry.kind.as_deref() {
+        Some("artist") => String::new(),
+        Some("playlist") => entry.artists.join(", "),
+        kind => dotted([kind_label(kind), entry.year.map(|y| y.to_string())]),
+    };
+    rsx! {
+        li { class: if artist { "tile artist" } else { "tile" }, onclick: move |_| onopen.call(()),
+            Cover {
+                url: entry.thumbnail.as_deref().map(|u| art_url(u, 400)),
+                class: if artist { "cover square round" } else { "cover square" },
+                icon: match entry.kind.as_deref() {
+                    Some("artist") => Icon::Person,
+                    Some("playlist") => Icon::Playlist,
+                    _ => Icon::Disc,
+                },
+            }
+            div { class: "title", "{entry.title}" }
+            if !sub.is_empty() {
+                div { class: "sub", "{sub}" }
+            }
+        }
+    }
+}
+
+/// All of one list of an artist page ("Show all"). `loading` while the rest
+/// of it loads; `todo` is how many albums or songs "Download all" would get.
+#[component]
+pub fn RemoteListPage(
+    title: String,
+    /// The artist.
+    sub: String,
+    kind: SectionKind,
+    entries: Vec<(Entry, TrackState)>,
+    loading: bool,
+    error: Option<String>,
+    onback: EventHandler<()>,
+    ondownload: EventHandler<Entry>,
+    /// Opens an album, playlist or artist.
+    onopen: EventHandler<Entry>,
+    /// Downloads every album (or song) listed.
+    ondownloadall: EventHandler<()>,
+) -> Element {
+    let downloadable = match kind {
+        SectionKind::Songs | SectionKind::Videos => entries.iter().filter(|(_, s)| s.wants_download()).count(),
+        SectionKind::Albums => entries.len(),
+        SectionKind::Playlists | SectionKind::Artists => 0,
+    };
+    let what = match kind {
+        SectionKind::Albums => plural(entries.len(), "release", "releases"),
+        SectionKind::Songs => plural(entries.len(), "song", "songs"),
+        SectionKind::Videos => plural(entries.len(), "video", "videos"),
+        SectionKind::Playlists => plural(entries.len(), "playlist", "playlists"),
+        SectionKind::Artists => plural(entries.len(), "artist", "artists"),
+    };
+    rsx! {
+        div { class: "remote-list",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "{title}" }
+                }
+                div { class: "sub", {dotted([Some(sub), (!loading).then_some(what)])} }
+                if downloadable > 0 && !loading {
+                    div { class: "hero-actions",
+                        button { class: "primary", onclick: move |_| ondownloadall.call(()),
+                            Svg { icon: Icon::Download, size: 20 }
+                            if kind == SectionKind::Albums { "Download all" } else { "Download {downloadable}" }
+                        }
+                    }
+                }
+            }
+            if let Some(e) = error {
+                div { class: "sync-line failed list-error", Svg { icon: Icon::Alert, size: 16 } "Couldn't load all of it: {e}" }
+            }
+            ul { class: "list",
+                for (entry , state) in entries {
+                    match kind {
+                        SectionKind::Songs => rsx! {
+                            SongRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                        },
+                        SectionKind::Videos => rsx! {
+                            VideoRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                        },
+                        SectionKind::Artists => rsx! {
+                            ArtistEntryRow { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopen.call(entry.clone()) }
+                        },
+                        SectionKind::Albums | SectionKind::Playlists => rsx! {
+                            AlbumRow { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopen.call(entry.clone()) }
+                        },
+                    }
+                }
+            }
+            if loading {
+                SkeletonRows { count: 4 }
+            }
         }
     }
 }

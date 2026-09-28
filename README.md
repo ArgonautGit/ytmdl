@@ -8,13 +8,17 @@ new APK.
 
 - `crates/core`: embeds CPython 3.14 (python.org's Android build) through PyO3
   and runs the yt-dlp zipimport build with QuickJS-NG for YouTube's JS
-  challenges. Search, resolve, download with progress and cancellation, M4A
+  challenges. Search, resolve, download with progress and cancellation,
+  YouTube Music's radio (the songs it would play after one song, or an
+  artist's mix) and artist pages, which yt-dlp has no extractor for (yt-dlp
+  still makes the requests; the bridge reads the answers), M4A
   defragmenting (no ffmpeg), tagging with cover art (lofty), lyrics from
   [LRCLIB](https://lrclib.net) (time-synced where it has them, stored in the
   file as LRC), ReplayGain from the song's measured loudness (EBU R128 over
   audio decoded by symphonia), and the yt-dlp updater.
-- `crates/cli`: desktop harness (`version`, `search`, `resolve`, `get`,
-  `lyrics`, `inspect`, `loudness`, `remux`, `update`, `selftest`).
+- `crates/cli`: desktop harness (`version`, `search`, `resolve`, `radio`,
+  `artist`, `get`, `lyrics`, `inspect`, `loudness`, `remux`, `update`,
+  `selftest`).
 - `crates/smoke`: arm64 Android binary that checks the native stack without the
   app.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
@@ -23,7 +27,8 @@ new APK.
   resized for the UI. The files stay the record: a scan of the music folders
   re-indexes them from their tags and forgets deleted ones.
 - `app`: the Dioxus app (library with search and sorting, playlists, search,
-  downloads, settings, listening stats, player with A-B loops over part of a
+  artist pages from YouTube Music, song radio, downloads, settings, listening
+  stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
   queue and lyrics that follow the song). Songs without lyrics are looked up
   when their lyrics are opened, and what is found is saved into the file; a
@@ -37,7 +42,12 @@ new APK.
   loudness (a Settings switch turns that off): loud ones are turned down by
   their ReplayGain, and songs downloaded before ytmdl measured it are
   measured in the background. The app updates itself from builds published
-  on GitHub (see [Published builds](#published-builds)).
+  on GitHub (see [Published builds](#published-builds)). A song's menu starts
+  its radio: the songs YouTube Music would play after it, to download. An
+  artist's page (from Search → Artists, an artist link, or an artist's menu in
+  the library) shows their songs, albums, singles, videos, playlists and
+  similar artists as YouTube Music lists them, their radio, and "Show all",
+  where a list of albums downloads in one go.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they
