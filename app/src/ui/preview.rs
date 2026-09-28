@@ -55,6 +55,12 @@ fn workspace() -> PathBuf {
 type Screen = (&'static str, &'static str, fn() -> Element);
 
 const SCREENS: &[Screen] = &[
+    ("home", "Home", home),
+    ("home-new", "Home, nothing played yet", home_new),
+    ("home-empty", "Home, empty library", home_empty),
+    ("duplicates", "Songs in the library twice", duplicates),
+    ("duplicate-dialog", "Downloading another upload of a song", duplicate_dialog),
+    ("titles", "Cleaning up titles", titles),
     ("library-songs", "Library, songs", library_songs),
     ("library-playing", "Library with the mini player", library_playing),
     ("now-playing", "Now playing", now_playing),
@@ -297,6 +303,137 @@ fn sort_menu() -> Element {
     with_modal(
         library_page_with(LibraryView::Songs, song_items(), None, SortKey::Plays),
         rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+fn home_view(played: bool) -> HomeView {
+    let songs = song_items();
+    let tiles: Vec<SongItem> = songs
+        .iter()
+        .take(6)
+        .map(|s| SongItem { art: s.art.as_deref().map(|u| ytmdl_core::art_url(u, 544)), playing: false, ..s.clone() })
+        .collect();
+    let if_played = |list: Vec<SongItem>| if played { list } else { Vec::new() };
+    HomeView {
+        greeting: "Good evening".into(),
+        empty: false,
+        recent: if_played(tiles.clone()),
+        top: if_played(songs.iter().skip(1).take(8).cloned().collect()),
+        radios: if_played(tiles.iter().rev().cloned().collect()),
+        added: album_items(),
+        forgotten: if_played(songs.iter().skip(9).take(3).map(|s| SongItem { playing: false, ..s.clone() }).collect()),
+        duplicates: if played { 2 } else { 0 },
+    }
+}
+
+fn home_page(home: Option<HomeView>) -> Element {
+    shell(
+        Tab::Home,
+        0,
+        rsx! {
+            HomePage {
+                home,
+                onsearch: |_| {},
+                onshuffle: |_| {},
+                onstats: |_| {},
+                onplay: |_| {},
+                onmore: |_| {},
+                onradio: |_| {},
+                onalbum: |_| {},
+                onduplicates: |_| {},
+            }
+        },
+    )
+}
+
+fn home() -> Element {
+    home_page(Some(home_view(true)))
+}
+
+fn home_new() -> Element {
+    home_page(Some(home_view(false)))
+}
+
+fn home_empty() -> Element {
+    home_page(Some(HomeView { greeting: "Good morning".into(), empty: true, ..HomeView::default() }))
+}
+
+fn duplicates() -> Element {
+    let items = song_items();
+    let song = |i: usize, title: &str, sub: &str| DuplicateSong {
+        key: i.to_string(),
+        title: title.into(),
+        sub: sub.into(),
+        art: items[i].art.clone(),
+        playing: i == 1,
+    };
+    let groups = vec![
+        DuplicateGroup {
+            title: "Sneaky Snitch".into(),
+            artist: "Kevin MacLeod".into(),
+            songs: vec![
+                song(1, "Sneaky Snitch", "2:19 • 14 plays • Comedy Scoring"),
+                song(9, "Kevin MacLeod - Sneaky Snitch (Official Video)", "2:31 • 1 play • Single • KevinMacLeodVEVO"),
+            ],
+        },
+        DuplicateGroup {
+            title: "Carefree".into(),
+            artist: "Kevin MacLeod".into(),
+            songs: vec![
+                song(3, "Carefree", "3:31 • 6 plays • Carefree"),
+                song(10, "Carefree (Lyrics)", "3:34 • 0 plays • Single"),
+                song(11, "Carefree - 2020 Remaster", "3:30 • 2 plays • Best of"),
+            ],
+        },
+    ];
+    shell(
+        Tab::Home,
+        0,
+        rsx! {
+            div { class: "overlay",
+                DuplicatesPage { groups: Some(groups), onback: |_| {}, onplay: |_| {}, ondelete: |_| {}, onkeep: |_| {} }
+            }
+        },
+    )
+}
+
+fn duplicate_dialog() -> Element {
+    let title = &sample().songs[4 % sample().songs.len()].title;
+    rsx! {
+        {search_songs()}
+        Dialog {
+            title: "Already in your library",
+            text: format!("You have “{title}” by Kevin MacLeod, from another upload. Download this one too?"),
+            confirm: "Download",
+            onconfirm: |_| {},
+            oncancel: |_| {},
+        }
+    }
+}
+
+fn titles() -> Element {
+    let items = song_items();
+    let item = |i: usize, title: &str, artists: &str, was: &str, on: bool| RetitleItem {
+        key: i.to_string(),
+        title: title.into(),
+        artists: artists.into(),
+        was: was.into(),
+        art: items[i].art.clone(),
+        on,
+    };
+    let list = vec![
+        item(0, "Monkeys Spinning Monkeys", "Kevin MacLeod", "Kevin MacLeod - Monkeys Spinning Monkeys (Official Video) • KevinMacLeodVEVO", true),
+        item(2, "Fluffing a Duck", "Kevin MacLeod", "Fluffing a Duck [Official Lyric Video] • Kevin MacLeod", true),
+        item(5, "Wallpaper", "Kevin MacLeod", "Wallpaper | Official Audio • Kevin MacLeod", false),
+    ];
+    shell(
+        Tab::Settings,
+        0,
+        rsx! {
+            div { class: "overlay",
+                TitlesPage { items: Some(list), working: false, onback: |_| {}, ontoggle: |_| {}, onapply: |_| {} }
+            }
+        },
     )
 }
 
@@ -800,6 +937,7 @@ fn states_for(entries: &[Entry]) -> Vec<(Entry, TrackState)> {
         TrackState::Downloading(0.42),
         TrackState::Queued,
         TrackState::Failed,
+        TrackState::Similar,
     ];
     entries
         .iter()
@@ -971,6 +1109,10 @@ fn settings() -> Element {
                 ontogglenormalize: |_| {},
                 lyrics_lookup: true,
                 ontogglelyrics: |_| {},
+                untidy: Some(3),
+                duplicates: Some(2),
+                ontitles: |_| {},
+                onduplicates: |_| {},
             }
         },
     )

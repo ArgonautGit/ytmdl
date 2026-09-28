@@ -15,7 +15,10 @@ new APK.
   defragmenting (no ffmpeg), tagging with cover art (lofty), lyrics from
   [LRCLIB](https://lrclib.net) (time-synced where it has them, stored in the
   file as LRC), ReplayGain from the song's measured loudness (EBU R128 over
-  audio decoded by symphonia), and the yt-dlp updater.
+  audio decoded by symphonia), and the yt-dlp updater. Titles of songs from
+  videos are tidied for the tags and the file name: labels like "(Official
+  Video)" go, and "Artist - Song" from the artist's channel is "Song" by
+  Artist.
 - `crates/cli`: desktop harness (`version`, `search`, `resolve`, `radio`,
   `artist`, `get`, `lyrics`, `inspect`, `loudness`, `remux`, `update`,
   `selftest`).
@@ -24,9 +27,10 @@ new APK.
 - `crates/library`: the library, an SQLite index (rusqlite) of downloaded
   tracks, playlists, the download queue (so it survives restarts), the saved
   play queue, listening history and saved A-B sections, plus cover art
-  resized for the UI. The files stay the record: a scan of the music folders
+  resized for the UI, what the Home tab shows, and songs in it more than once
+  (another upload of the same song, found by its tidied title and artist). The files stay the record: a scan of the music folders
   re-indexes them from their tags and forgets deleted ones.
-- `app`: the Dioxus app (library with search and sorting, playlists, search,
+- `app`: the Dioxus app (Home, library with search and sorting, playlists, search,
   artist pages from YouTube Music, song radio, downloads, settings, listening
   stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
@@ -47,7 +51,14 @@ new APK.
   artist's page (from Search → Artists, an artist link, or an artist's menu in
   the library) shows their songs, albums, singles, videos, playlists and
   similar artists as YouTube Music lists them, their radio, and "Show all",
-  where a list of albums downloads in one go.
+  where a list of albums downloads in one go. Home has what was played
+  lately, the most played songs of the last 30 days, radios made from them,
+  the albums added last and favourites not played in a while. A search result
+  the library has from another upload is marked, and downloading it asks
+  first; Settings → Duplicates lists the songs in the library more than once
+  to delete the extra ones (or keep them), and Settings → Clean up titles
+  tidies the titles of songs downloaded before ytmdl did it, renaming their
+  files to match.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they

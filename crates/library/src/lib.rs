@@ -1,14 +1,17 @@
 //! The music library: an SQLite index of downloaded tracks and of the download
 //! queue, plus playlists, listening history, saved A-B sections and a cache of
-//! resized cover art.
+//! resized cover art, and what the Home tab shows from them.
 //!
 //! The audio files stay the record. Each carries its source URL in the comment
 //! tag, so [`Library::scan`] can rebuild the index from the music folders, and it
 //! drops tracks whose files were deleted elsewhere.
 
 mod art;
+mod duplicates;
+mod home;
 mod listens;
 mod playlists;
+mod retitle;
 mod scan;
 mod sections;
 
@@ -25,8 +28,11 @@ use ytmdl_core::{Downloaded, Entry};
 
 pub use art::{ART_LARGE, ART_SMALL};
 use art::ArtCache;
+pub use duplicates::Duplicates;
+pub use home::Home;
 pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
 pub use playlists::{Playlist, PlaylistEntry};
+pub use retitle::Retitle;
 pub use scan::ScanReport;
 pub use sections::Section;
 
@@ -138,6 +144,13 @@ CREATE INDEX sections_video ON sections (video_id, a_ms);
 ALTER TABLE tracks ADD COLUMN gain REAL;                     -- dB
 ALTER TABLE tracks ADD COLUMN peak REAL;
 ALTER TABLE tracks ADD COLUMN measured INTEGER NOT NULL DEFAULT 0; -- gain known, or not measurable
+"#, r#"
+-- Songs that look like one song (see duplicates.rs) that were kept anyway:
+-- the video ids of the group when it was kept.
+CREATE TABLE kept_duplicates (
+    key       TEXT PRIMARY KEY,
+    video_ids TEXT NOT NULL                     -- JSON array
+);
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
@@ -372,7 +385,7 @@ impl Library {
             "SELECT album, album_artist, MAX(year), MAX(art), COUNT(*), TOTAL(duration)
              FROM tracks WHERE album IS NOT NULL AND album != ''
              GROUP BY album_artist, album
-             ORDER BY MAX(added_at) DESC",
+             ORDER BY MAX(added_at) DESC, MAX(id) DESC",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(Album {

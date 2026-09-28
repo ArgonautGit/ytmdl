@@ -78,6 +78,36 @@ pub fn add_artists(path: &Path, artists: &[String]) -> Result<bool> {
     Ok(true)
 }
 
+/// Sets a file's title and artists, leaving its other tags alone. An album
+/// artist that was the first artist becomes the new first artist.
+pub fn retitle(path: &Path, title: &str, names: &[String]) -> Result<()> {
+    let err = |e: &dyn Display| Error::Tag {
+        path: path.to_owned(),
+        message: e.to_string(),
+    };
+    let mut file = lofty::read_from_path(path).map_err(|e| err(&e))?;
+    if file.primary_tag().is_none() {
+        let tag_type = file.primary_tag_type();
+        file.insert_tag(Tag::new(tag_type));
+    }
+    let tag = file.primary_tag_mut().expect("primary tag was just inserted");
+    let first = artists(tag).into_iter().next();
+    tag.set_title(title.to_owned());
+    if names.is_empty() {
+        tag.remove_artist();
+    } else {
+        tag.set_artist(names.join(", "));
+    }
+    set_artists(tag, names);
+    if let (Some(first), Some(new)) = (first, names.first())
+        && tag.get_string(ItemKey::AlbumArtist) == Some(first.as_str())
+    {
+        tag.insert_text(ItemKey::AlbumArtist, new.clone());
+    }
+    file.save_to_path(path, WriteOptions::default()).map_err(|e| err(&e))?;
+    Ok(())
+}
+
 pub fn write_tags(path: &Path, meta: &TrackMeta, cover: Option<Cover>) -> Result<()> {
     write_tags_and_lyrics(path, meta, cover, None)
 }
@@ -272,6 +302,23 @@ mod tests {
         // Tagging again replaces the list rather than adding to it.
         write_tags(&path, &meta(&["Earth, Wind & Fire"]), None).unwrap();
         assert_eq!(read_tags(&path).unwrap().artists, ["Earth, Wind & Fire"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn retitles_files() {
+        let Some(path) = fixture("retitle") else { return };
+        let mut m = meta(&["TaylorSwiftVEVO"]);
+        m.album = Some("Singles".into());
+        m.album_artists = vec!["TaylorSwiftVEVO".into()];
+        m.year = Some(2022);
+        write_tags(&path, &m, None).unwrap();
+        retitle(&path, "Anti-Hero", &["Taylor Swift".into(), "Guest".into()]).unwrap();
+        let report = read_tags(&path).unwrap();
+        assert_eq!(report.title.as_deref(), Some("Anti-Hero"));
+        assert_eq!(report.artists, ["Taylor Swift", "Guest"]);
+        assert_eq!(report.album_artist.as_deref(), Some("Taylor Swift"));
+        assert_eq!((report.album.as_deref(), report.year), (Some("Singles"), Some(2022)));
         std::fs::remove_file(&path).unwrap();
     }
 

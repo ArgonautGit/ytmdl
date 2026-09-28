@@ -148,7 +148,7 @@ pub(super) fn RemoteArtistScreen(open: OpenArtist) -> Element {
                     .map(|s| ArtistShelf {
                         title: s.title.clone(),
                         kind: s.kind,
-                        entries: with_states(s.entries.clone(), &states),
+                        entries: with_states(s.entries.clone(), &states, &ctx.keys.read()),
                         more: s.more.is_some(),
                     })
                     .collect(),
@@ -182,7 +182,7 @@ pub(super) fn RemoteArtistScreen(open: OpenArtist) -> Element {
                     radio: Some(seed),
                 }));
             },
-            ondownload: move |e| ctx.download(e),
+            ondownload: move |e| ctx.download_asked(e),
             onopen: move |e: Entry| {
                 let artist = loaded().map(|p| p.name).unwrap_or_default();
                 ctx.open_listed(e, &artist);
@@ -253,11 +253,11 @@ pub(super) fn RemoteListScreen(open: OpenList) -> Element {
             title: open.title.clone(),
             sub: open.artist.clone(),
             kind,
-            entries: with_states(entries(), &states),
+            entries: with_states(entries(), &states, &ctx.keys.read()),
             loading: loading(),
             error: error(),
             onback: move |_| ctx.nav.back(),
-            ondownload: move |e| ctx.download(e),
+            ondownload: move |e| ctx.download_asked(e),
             onopen: move |e| ctx.open_listed(e, &artist),
             ondownloadall: move |_| {
                 let listed = entries.peek().clone();

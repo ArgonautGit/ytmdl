@@ -11,6 +11,7 @@ pub use ytmdl_library::Period;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tab {
+    Home,
     Library,
     Search,
     Downloads,
@@ -184,12 +185,14 @@ pub enum TrackState {
     Downloading(f64),
     Done,
     Failed,
+    /// Not downloaded, but the library has the song from another upload.
+    Similar,
 }
 
 impl TrackState {
     /// Whether "download" should start (or restart) it.
     pub fn wants_download(self) -> bool {
-        matches!(self, TrackState::Idle | TrackState::Failed)
+        matches!(self, TrackState::Idle | TrackState::Failed | TrackState::Similar)
     }
 }
 
@@ -313,6 +316,7 @@ pub fn BottomNav(tab: Tab, active: usize, onselect: EventHandler<Tab>) -> Elemen
     };
     rsx! {
         nav { class: "bottomnav",
+            {item(Tab::Home, Icon::Home, "Home", 0)}
             {item(Tab::Library, Icon::Library, "Library", 0)}
             {item(Tab::Search, Icon::Search, "Search", 0)}
             {item(Tab::Downloads, Icon::Download, "Downloads", active)}
@@ -446,6 +450,11 @@ fn TrackAction(state: TrackState, ondownload: EventHandler<()>) -> Element {
         TrackState::Failed => rsx! {
             button { class: "icon-btn failed", "aria-label": "Retry", onclick: move |_| ondownload.call(()),
                 Svg { icon: Icon::Retry }
+            }
+        },
+        TrackState::Similar => rsx! {
+            button { class: "icon-btn similar", "aria-label": "In your library from another upload", onclick: move |_| ondownload.call(()),
+                Svg { icon: Icon::CheckCircle }
             }
         },
     }
@@ -2152,6 +2161,361 @@ fn JobRow(job: Job, oncancel: EventHandler<u64>, onretry: EventHandler<u64>) -> 
     }
 }
 
+// ---- home ----
+
+/// What the Home tab shows. Its lists are left out while empty.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct HomeView {
+    /// "Good evening"
+    pub greeting: String,
+    /// The library has no songs.
+    pub empty: bool,
+    /// Songs played lately, as tiles (large art).
+    pub recent: Vec<SongItem>,
+    /// The most played songs of the last 30 days.
+    pub top: Vec<SongItem>,
+    /// Songs whose radios are offered, as tiles (large art).
+    pub radios: Vec<SongItem>,
+    /// The albums added last.
+    pub added: Vec<AlbumItem>,
+    /// Favourites not played in a while.
+    pub forgotten: Vec<SongItem>,
+    /// Songs in the library more than once.
+    pub duplicates: usize,
+}
+
+/// A list of songs on the Home tab.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HomeList {
+    Recent,
+    Top,
+    Forgotten,
+}
+
+/// Rows a Home list shows; "Play all" plays the rest too.
+pub const HOME_ROWS: usize = 5;
+
+/// The Home tab; `home` is `None` while it loads.
+#[component]
+pub fn HomePage(
+    home: Option<HomeView>,
+    /// Goes to the Search tab (from the empty library).
+    onsearch: EventHandler<()>,
+    onshuffle: EventHandler<()>,
+    onstats: EventHandler<()>,
+    /// A song tapped: plays its list from it.
+    onplay: EventHandler<(HomeList, usize)>,
+    /// A song's menu.
+    onmore: EventHandler<(HomeList, usize)>,
+    onradio: EventHandler<usize>,
+    onalbum: EventHandler<usize>,
+    onduplicates: EventHandler<()>,
+) -> Element {
+    let greeting = home.as_ref().map(|h| h.greeting.clone()).unwrap_or_else(|| "Home".into());
+    let empty = home.as_ref().is_some_and(|h| h.empty);
+    rsx! {
+        header { class: "topbar",
+            div { class: "title-row",
+                h1 { "{greeting}" }
+                if !empty {
+                    button { class: "icon-btn", "aria-label": "Listening stats", onclick: move |_| onstats.call(()),
+                        Svg { icon: Icon::Chart }
+                    }
+                }
+            }
+        }
+        match home {
+            None => rsx! {
+                div { class: "empty", div { class: "spinner" } }
+            },
+            Some(home) if home.empty => rsx! {
+                EmptyState {
+                    icon: Icon::Home,
+                    title: "Welcome to ytmdl",
+                    text: "Download music from YouTube Music to play it offline. What you play most shows up here.",
+                    action: rsx! {
+                        button { class: "primary", onclick: move |_| onsearch.call(()), Svg { icon: Icon::Search, size: 20 } "Find music" }
+                    },
+                }
+            },
+            Some(home) => rsx! {
+                div { class: "home-actions",
+                    button { class: "primary", onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle all" }
+                }
+                if home.duplicates > 0 {
+                    section { class: "group home-card",
+                        div { class: "card",
+                            div { class: "item tappable", role: "button", onclick: move |_| onduplicates.call(()),
+                                Svg { icon: Icon::Copy }
+                                div { class: "meta",
+                                    div { class: "title", {plural(home.duplicates, "duplicate song", "duplicate songs")} }
+                                    div { class: "sub", "In your library more than once. Keep the ones you want." }
+                                }
+                                span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                            }
+                        }
+                    }
+                }
+                if home.recent.is_empty() {
+                    p { class: "hint home-hint", "Songs you play show up here, with your favourites and radios made from them." }
+                } else {
+                    h2 { class: "section", "Played recently" }
+                    ul { class: "grid shelf",
+                        for (i , song) in home.recent.into_iter().enumerate() {
+                            SongTile { key: "{song.key}", song, onopen: move |_| onplay.call((HomeList::Recent, i)) }
+                        }
+                    }
+                }
+                if !home.top.is_empty() {
+                    HomeSongs { title: "Your top songs", note: "Last 30 days", list: HomeList::Top, songs: home.top, onplay, onmore }
+                }
+                if !home.radios.is_empty() {
+                    h2 { class: "section",
+                        "Radios for you"
+                        span { class: "section-note", "Songs like your favourites" }
+                    }
+                    ul { class: "grid shelf",
+                        for (i , song) in home.radios.into_iter().enumerate() {
+                            SongTile { key: "{song.key}", song, radio: true, onopen: move |_| onradio.call(i) }
+                        }
+                    }
+                }
+                if !home.added.is_empty() {
+                    h2 { class: "section", "Recently added" }
+                    AlbumGrid { albums: home.added, onopen: onalbum, shelf: true }
+                }
+                if !home.forgotten.is_empty() {
+                    HomeSongs { title: "Not played in a while", list: HomeList::Forgotten, songs: home.forgotten, onplay, onmore }
+                }
+            },
+        }
+    }
+}
+
+/// A Home list of songs: its first rows, and "Play all".
+#[component]
+fn HomeSongs(
+    title: String,
+    #[props(default)] note: Option<String>,
+    list: HomeList,
+    songs: Vec<SongItem>,
+    onplay: EventHandler<(HomeList, usize)>,
+    onmore: EventHandler<(HomeList, usize)>,
+) -> Element {
+    let more = songs.len() > HOME_ROWS;
+    let songs: Vec<SongItem> = songs.into_iter().take(HOME_ROWS).collect();
+    rsx! {
+        h2 { class: "section",
+            "{title}"
+            if let Some(note) = note {
+                span { class: "section-note", "{note}" }
+            }
+            button { class: "text-btn section-action", onclick: move |_| onplay.call((list, 0)), if more { "Play all" } else { "Play" } }
+        }
+        SongList { songs, onplay: move |i| onplay.call((list, i)), onmore: move |i| onmore.call((list, i)) }
+    }
+}
+
+/// A song as a shelf tile; `radio` makes it the song's radio.
+#[component]
+fn SongTile(song: SongItem, #[props(default)] radio: bool, onopen: EventHandler<()>) -> Element {
+    let sub = if radio { dotted([Some("Radio".into()), Some(song.artists.clone())]) } else { song.artists.clone() };
+    rsx! {
+        li { class: "tile", onclick: move |_| onopen.call(()),
+            div { class: "cover-wrap",
+                Cover { url: song.art.clone(), class: "cover square" }
+                if radio {
+                    span { class: "tile-badge", Svg { icon: Icon::Radio, size: 18 } }
+                } else if song.playing {
+                    div { class: "cover-eq", Equalizer {} }
+                }
+            }
+            div { class: "title", "{song.title}" }
+            div { class: "sub", "{sub}" }
+        }
+    }
+}
+
+// ---- duplicates ----
+
+/// Songs that look like one song.
+#[derive(Clone, PartialEq, Debug)]
+pub struct DuplicateGroup {
+    pub title: String,
+    pub artist: String,
+    pub songs: Vec<DuplicateSong>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct DuplicateSong {
+    pub key: String,
+    pub title: String,
+    /// "Album • 3:21 • 12 plays"
+    pub sub: String,
+    pub art: Option<String>,
+    pub playing: bool,
+}
+
+/// The songs in the library more than once; `groups` is `None` while they load.
+#[component]
+pub fn DuplicatesPage(
+    groups: Option<Vec<DuplicateGroup>>,
+    onback: EventHandler<()>,
+    /// (group, song) tapped: plays the group from it.
+    onplay: EventHandler<(usize, usize)>,
+    ondelete: EventHandler<(usize, usize)>,
+    /// Keeps a group's songs, which stops listing it.
+    onkeep: EventHandler<usize>,
+) -> Element {
+    rsx! {
+        div { class: "duplicates",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Duplicates" }
+                }
+            }
+            match groups {
+                None => rsx! {
+                    div { class: "empty", div { class: "spinner" } }
+                },
+                Some(groups) if groups.is_empty() => rsx! {
+                    EmptyState { icon: Icon::Check, title: "No duplicates", text: "Every song in your library is there once." }
+                },
+                Some(groups) => rsx! {
+                    p { class: "hint page-hint",
+                        "These look like the same song, downloaded from different uploads. Delete the ones you don't want, or keep them all."
+                    }
+                    for (g , group) in groups.into_iter().enumerate() {
+                        section { key: "{g}", class: "dup-group",
+                            h2 { class: "section",
+                                span { class: "section-title", "{group.title}" }
+                                span { class: "section-note", "{group.artist}" }
+                                button { class: "text-btn section-action", onclick: move |_| onkeep.call(g),
+                                    if group.songs.len() == 2 { "Keep both" } else { "Keep all" }
+                                }
+                            }
+                            ul { class: "list",
+                                for (i , song) in group.songs.into_iter().enumerate() {
+                                    li {
+                                        key: "{song.key}",
+                                        class: if song.playing { "row tappable song playing" } else { "row tappable song" },
+                                        onclick: move |_| onplay.call((g, i)),
+                                        div { class: "cover-wrap",
+                                            Cover { url: song.art.clone() }
+                                            if song.playing { div { class: "cover-eq", Equalizer {} } }
+                                        }
+                                        div { class: "meta",
+                                            div { class: "title", "{song.title}" }
+                                            div { class: "sub", "{song.sub}" }
+                                        }
+                                        button {
+                                            class: "icon-btn",
+                                            "aria-label": "Delete",
+                                            onclick: move |e| {
+                                                e.stop_propagation();
+                                                ondelete.call((g, i));
+                                            },
+                                            Svg { icon: Icon::Trash, size: 20 }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+// ---- titles ----
+
+/// A song whose title can be cleaned up.
+#[derive(Clone, PartialEq, Debug)]
+pub struct RetitleItem {
+    pub key: String,
+    /// The new title and artists.
+    pub title: String,
+    pub artists: String,
+    /// The title and artists now: "Artist - Song (Official Video) • ArtistVEVO"
+    pub was: String,
+    pub art: Option<String>,
+    /// Picked to be cleaned up.
+    pub on: bool,
+}
+
+/// The songs whose titles can be cleaned up; `items` is `None` while they
+/// load, and `working` while the picked ones are cleaned up.
+#[component]
+pub fn TitlesPage(
+    items: Option<Vec<RetitleItem>>,
+    working: bool,
+    onback: EventHandler<()>,
+    ontoggle: EventHandler<usize>,
+    onapply: EventHandler<()>,
+) -> Element {
+    let picked = items.as_ref().map_or(0, |items| items.iter().filter(|i| i.on).count());
+    rsx! {
+        div { class: "titles",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| onback.call(()),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Clean up titles" }
+                }
+            }
+            match items {
+                None => rsx! {
+                    div { class: "empty", div { class: "spinner" } }
+                },
+                Some(items) if items.is_empty() => rsx! {
+                    EmptyState { icon: Icon::Sparkles, title: "Every title is clean", text: "No song in your library has a title from a video." }
+                },
+                Some(items) => rsx! {
+                    p { class: "hint page-hint",
+                        "Songs downloaded from videos, without labels like “(Official Video)”, and with the artist taken out of the title. Their files are renamed to match."
+                    }
+                    div { class: "home-actions",
+                        button { class: "primary", disabled: working || picked == 0, onclick: move |_| onapply.call(()),
+                            if working {
+                                div { class: "spinner small" }
+                                "Cleaning up…"
+                            } else {
+                                Svg { icon: Icon::Sparkles, size: 20 }
+                                {format!("Clean up {}", plural(picked, "song", "songs"))}
+                            }
+                        }
+                    }
+                    ul { class: "list",
+                        for (i , item) in items.into_iter().enumerate() {
+                            li {
+                                key: "{item.key}",
+                                class: "row tappable retitle",
+                                role: "checkbox",
+                                "aria-checked": "{item.on}",
+                                onclick: move |_| ontoggle.call(i),
+                                Cover { url: item.art.clone() }
+                                div { class: "meta",
+                                    div { class: "title", "{item.title}" }
+                                    div { class: "sub", "{item.artists}" }
+                                    div { class: "was", "Was “{item.was}”" }
+                                }
+                                span { class: if item.on { "pick on" } else { "pick" },
+                                    Svg { icon: if item.on { Icon::CheckCircle } else { Icon::Circle }, size: 22 }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
 // ---- settings ----
 
 #[component]
@@ -2178,6 +2542,14 @@ pub fn SettingsPage(
     /// Songs without lyrics are looked up on LRCLIB.
     lyrics_lookup: bool,
     ontogglelyrics: EventHandler<()>,
+    /// Songs whose titles could be cleaned up; `None` while counted.
+    #[props(default)]
+    untidy: Option<usize>,
+    /// Songs in the library more than once; `None` while counted.
+    #[props(default)]
+    duplicates: Option<usize>,
+    ontitles: EventHandler<()>,
+    onduplicates: EventHandler<()>,
 ) -> Element {
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
@@ -2200,6 +2572,39 @@ pub fn SettingsPage(
                         }
                         button { class: "primary small", onclick: move |_| onallow.call(()), "Allow" }
                     }
+                }
+            }
+        }
+        section { class: "group",
+            h2 { "Library" }
+            div { class: "card",
+                div { class: "item tappable", role: "button", onclick: move |_| ontitles.call(()),
+                    Svg { icon: Icon::Sparkles }
+                    div { class: "meta",
+                        div { class: "title", "Clean up titles" }
+                        div { class: "sub",
+                            match untidy {
+                                None => "Looking at your songs…".to_string(),
+                                Some(0) => "Every title is clean".to_string(),
+                                Some(n) => format!("{} from videos, like “(Official Video)”", plural(n, "title is", "titles are")),
+                            }
+                        }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                }
+                div { class: "item tappable divided", role: "button", onclick: move |_| onduplicates.call(()),
+                    Svg { icon: Icon::Copy }
+                    div { class: "meta",
+                        div { class: "title", "Duplicates" }
+                        div { class: "sub",
+                            match duplicates {
+                                None => "Looking at your songs…".to_string(),
+                                Some(0) => "No song is in your library twice".to_string(),
+                                Some(n) => format!("{} in your library more than once", plural(n, "song is", "songs are")),
+                            }
+                        }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
                 }
             }
         }

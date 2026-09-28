@@ -90,6 +90,14 @@ pub struct TrackMeta {
     pub cover_urls: Vec<String>,
 }
 
+impl TrackMeta {
+    /// With the title and artists tidied (see [`crate::titles::tidy`]).
+    pub fn tidied(mut self) -> Self {
+        (self.title, self.artists) = crate::titles::tidy(&self.title, &self.artists);
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CollectionKind {
@@ -319,6 +327,11 @@ impl Info {
     }
 
     pub(crate) fn to_track(&self) -> TrackMeta {
+        self.untidied_track().tidied()
+    }
+
+    /// The track as the upload names it, before [`TrackMeta::tidied`].
+    pub(crate) fn untidied_track(&self) -> TrackMeta {
         let id = self.id.clone().unwrap_or_default();
         let year = self.release_year.or_else(|| {
             self.release_date
@@ -650,6 +663,19 @@ mod tests {
         let t = info.to_track();
         assert_eq!(t.artists, ["Band"]);
         assert_eq!(t.year, Some(2019));
+    }
+
+    #[test]
+    fn tidies_video_titles() {
+        let info: Info = serde_json::from_value(serde_json::json!({
+            "id": "abc", "title": "Taylor Swift - Anti-Hero (Official Music Video)", "channel": "TaylorSwiftVEVO"
+        }))
+        .unwrap();
+        let t = info.to_track();
+        assert_eq!(t.title, "Anti-Hero");
+        assert_eq!(t.artists, ["Taylor Swift"]);
+        let named = info.untidied_track();
+        assert_eq!((named.title.as_str(), named.artists.as_slice()), ("Taylor Swift - Anti-Hero (Official Music Video)", &["TaylorSwiftVEVO".to_owned()][..]));
     }
 
     #[test]

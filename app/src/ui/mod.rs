@@ -2,11 +2,14 @@
 //! which `preview` also renders to static HTML with sample data.
 
 mod artist;
+mod duplicates;
+mod home;
 mod icons;
 mod licenses;
 mod lyrics;
 #[cfg(test)]
 mod preview;
+mod retitle;
 mod sort;
 mod stats;
 mod sync;
@@ -17,6 +20,7 @@ mod views;
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
+use ytmdl_core::titles::song_key;
 use ytmdl_core::{Channel, CollectionKind, Entry, RADIO_SONGS, RadioSeed, Resolved, SearchSource};
 use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, PlayCounts, Playlist, PlaylistEntry, Section, Track};
 
@@ -25,10 +29,13 @@ use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat, Sleep};
 use artist::{OpenArtist, OpenList, RemoteArtistScreen, RemoteListScreen};
+use duplicates::DuplicatesScreen;
+use home::HomeScreen;
 use icons::Icon;
 use licenses::{LicenseScreen, LicensesScreen, Notice};
 use lyrics::LyricsCache;
 pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
+use retitle::TitlesScreen;
 use sort::Sorts;
 use stats::StatsScreen;
 use sync::SyncState;
@@ -52,6 +59,8 @@ struct Ctx {
     library: LibraryHandle,
     /// Video ids in the library.
     owned: Memo<HashSet<String>>,
+    /// The library's songs by `song_key`, to tell another upload of one.
+    keys: Memo<HashMap<String, Track>>,
     player: Player,
     nav: Nav,
     /// All-files access, i.e. whether downloads go to the shared Music folder.
@@ -120,6 +129,23 @@ impl Ctx {
             Some(_) => return false,
         }
         true
+    }
+
+    /// The song in the library that `entry` is another upload of.
+    fn similar_to(&self, entry: &Entry) -> Option<Track> {
+        let key = song_key(&entry.title, &entry.artists)?;
+        self.keys.peek().get(&key).filter(|t| t.video_id != entry.id).cloned()
+    }
+
+    /// A song tapped to download. When the library has it from another upload,
+    /// asks first, unless it was downloaded (or tried) before.
+    fn download_asked(&self, entry: Entry) {
+        let tried = self.owned.peek().contains(&entry.id) || self.queue.jobs().peek().iter().any(|j| j.entry.id == entry.id);
+        if !tried && let Some(existing) = self.similar_to(&entry) {
+            self.nav.push(Overlay::Sheet(Sheet::Duplicate { entry: Box::new(entry), existing: Box::new(existing) }));
+            return;
+        }
+        self.download(entry);
     }
 
     /// A song shared to the app downloads straight away.
@@ -203,19 +229,24 @@ impl Ctx {
             self.nav.back();
             return;
         }
-        self.nav.replace(Overlay::RemoteAlbum(OpenAlbum {
-            url: t.url.clone(),
-            header: AlbumHeader {
-                title: t.title.clone(),
-                artists: t.artists.clone(),
-                year: None,
-                kind: Some("radio".into()),
-                cover: art_src(t.art.as_deref(), ART_LARGE),
-            },
-            tracks: None,
-            radio: Some(RadioSeed::Song(t.video_id.clone())),
-        }));
+        self.nav.replace(radio_page(t));
     }
+}
+
+/// YouTube Music's radio of `t`: songs like it, to download.
+fn radio_page(t: &Track) -> Overlay {
+    Overlay::RemoteAlbum(OpenAlbum {
+        url: t.url.clone(),
+        header: AlbumHeader {
+            title: t.title.clone(),
+            artists: t.artists.clone(),
+            year: None,
+            kind: Some("radio".into()),
+            cover: art_src(t.art.as_deref(), ART_LARGE),
+        },
+        tracks: None,
+        radio: Some(RadioSeed::Song(t.video_id.clone())),
+    })
 }
 
 /// Pages opened over the tabs (albums, artists) and menus. Each is a browser
@@ -241,6 +272,10 @@ enum Overlay {
     /// The full-screen player, over the tabs.
     NowPlaying,
     Stats,
+    /// Songs in the library more than once.
+    Duplicates,
+    /// Songs whose titles can be cleaned up.
+    Titles,
     /// Open-source licenses, from Settings.
     Licenses,
     License(Notice),
@@ -271,6 +306,8 @@ enum Sheet {
     Section(Section),
     /// Names a new section (`id` None) of the song, or renames one.
     SectionName { id: Option<i64>, name: String, video_id: String, a: i64, b: i64 },
+    /// Asks before downloading `entry`, another upload of `existing`.
+    Duplicate { entry: Box<Entry>, existing: Box<Track> },
 }
 
 /// Where a song's menu was opened, which decides its items.
@@ -365,11 +402,22 @@ fn track_states(jobs: &[Job], owned: &HashSet<String>) -> HashMap<String, TrackS
     states
 }
 
-fn with_states(entries: Vec<Entry>, states: &HashMap<String, TrackState>) -> Vec<(Entry, TrackState)> {
+/// `entries` with their states; one the library has from another upload
+/// (in `keys`, see `Ctx::keys`) is `Similar`.
+fn with_states(
+    entries: Vec<Entry>,
+    states: &HashMap<String, TrackState>,
+    keys: &HashMap<String, Track>,
+) -> Vec<(Entry, TrackState)> {
     entries
         .into_iter()
         .map(|e| {
-            let s = states.get(&e.id).copied().unwrap_or_default();
+            let similar = || song_key(&e.title, &e.artists).and_then(|k| keys.get(&k)).is_some_and(|t| t.video_id != e.id);
+            let s = match states.get(&e.id) {
+                Some(s) => *s,
+                None if similar() => TrackState::Similar,
+                None => TrackState::Idle,
+            };
             (e, s)
         })
         .collect()
@@ -452,12 +500,16 @@ fn Shell(setup: Setup) -> Element {
         library.subscribe();
         library.get().video_ids().unwrap_or_default()
     });
+    let keys = use_memo(move || {
+        library.subscribe();
+        library.get().song_keys().unwrap_or_default()
+    });
     let player = use_hook(|| Player::new(library));
     let nav = use_hook(Nav::new);
     let storage = use_signal(platform::has_storage_access);
     let toast = use_signal(|| None);
     let syncs = use_signal(HashMap::new);
-    let mut tab = use_signal(|| Tab::Library);
+    let mut tab = use_signal(|| Tab::Home);
     let shared = use_signal(|| None);
     let sorts = use_signal(|| Sorts::load(&setup.library));
     let updates = use_signal(|| Updates::load(&setup.library));
@@ -470,6 +522,7 @@ fn Shell(setup: Setup) -> Element {
         queue,
         library,
         owned,
+        keys,
         player,
         nav,
         storage,
@@ -536,6 +589,7 @@ fn Shell(setup: Setup) -> Element {
     rsx! {
         div { class: format!("app{}{}", if has_mini { " has-mini" } else { "" }, if paused { " paused" } else { "" }),
             // Every tab stays mounted (and keeps its scroll position); only one shows.
+            Page { visible: tab() == Tab::Home, HomeScreen { onsearch: move |_| tab.set(Tab::Search) } }
             Page { visible: tab() == Tab::Library, LibraryScreen { onsearch: move |_| tab.set(Tab::Search) } }
             Page { visible: tab() == Tab::Search, SearchScreen {} }
             Page { visible: tab() == Tab::Downloads, DownloadsScreen {} }
@@ -704,6 +758,8 @@ fn Overlays() -> Element {
                             Overlay::Playlist(id) => rsx! { PlaylistScreen { id } },
                             Overlay::NowPlaying => rsx! { NowPlayingScreen {} },
                             Overlay::Stats => rsx! { StatsScreen {} },
+                            Overlay::Duplicates => rsx! { DuplicatesScreen {} },
+                            Overlay::Titles => rsx! { TitlesScreen {} },
                             Overlay::Licenses => rsx! { LicensesScreen {} },
                             Overlay::License(notice) => rsx! { LicenseScreen { notice } },
                             Overlay::Sheet(_) => rsx! {},
@@ -1259,6 +1315,27 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::Sections { video_id, title } => rsx! { SectionsMenu { video_id, title } },
         Sheet::Section(section) => rsx! { SectionMenu { section } },
         Sheet::SectionName { id, name, video_id, a, b } => rsx! { SectionNameDialog { id, name, video_id, a, b } },
+        Sheet::Duplicate { entry, existing } => rsx! { DuplicateDialog { entry: *entry, existing: *existing } },
+    }
+}
+
+/// Asks before downloading a song the library has from another upload.
+#[component]
+fn DuplicateDialog(entry: Entry, existing: Track) -> Element {
+    let ctx = use_context::<Ctx>();
+    let by = existing.artists.join(", ");
+    let song = if by.is_empty() { format!("“{}”", existing.title) } else { format!("“{}” by {by}", existing.title) };
+    rsx! {
+        Dialog {
+            title: "Already in your library",
+            text: format!("You have {song}, from another upload. Download this one too?"),
+            confirm: "Download",
+            oncancel: move |_| ctx.nav.back(),
+            onconfirm: move |_| {
+                ctx.nav.back();
+                ctx.download(entry.clone());
+            },
+        }
     }
 }
 
@@ -1942,8 +2019,8 @@ fn SearchScreen() -> Element {
         (_, Found::Error(e)) => ResultsView::Error(e),
         (_, Found::Entries(SearchSource::MusicAlbums, entries)) => ResultsView::Albums(entries),
         (_, Found::Entries(SearchSource::MusicArtists, entries)) => ResultsView::Artists(entries),
-        (_, Found::Entries(SearchSource::YouTube, entries)) => ResultsView::Videos(with_states(entries, &states)),
-        (_, Found::Entries(SearchSource::MusicSongs, entries)) => ResultsView::Songs(with_states(entries, &states)),
+        (_, Found::Entries(SearchSource::YouTube, entries)) => ResultsView::Videos(with_states(entries, &states, &ctx.keys.read())),
+        (_, Found::Entries(SearchSource::MusicSongs, entries)) => ResultsView::Songs(with_states(entries, &states, &ctx.keys.read())),
     };
     rsx! {
         SearchPage {
@@ -1966,7 +2043,7 @@ fn SearchScreen() -> Element {
                 source.set(s);
                 search.call(false);
             },
-            ondownload: move |e| ctx.download(e),
+            ondownload: move |e| ctx.download_asked(e),
             onopen: move |e: Entry| {
                 ctx.nav.push(Overlay::RemoteAlbum(OpenAlbum {
                     url: e.url.clone(),
@@ -2048,12 +2125,12 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
             tracks: match &*tracks.read() {
                 None => AlbumTracks::Loading,
                 Some(Err(e)) => AlbumTracks::Error(e.clone()),
-                Some(Ok(entries)) => AlbumTracks::Loaded(with_states(entries.clone(), &states)),
+                Some(Ok(entries)) => AlbumTracks::Loaded(with_states(entries.clone(), &states, &ctx.keys.read())),
             },
             header: header(),
             saved: is_playlist.then(|| saved().is_some()),
             onback: move |_| ctx.nav.back(),
-            ondownload: move |e| ctx.download(album_track(e)),
+            ondownload: move |e| ctx.download_asked(album_track(e)),
             onopensaved: move |_| {
                 if let Some(id) = saved() {
                     ctx.nav.replace(Overlay::Playlist(id));
@@ -2114,6 +2191,25 @@ fn DownloadsScreen() -> Element {
 #[component]
 fn SettingsScreen() -> Element {
     let ctx = use_context::<Ctx>();
+    let lib = ctx.library;
+    // Songs whose titles could be cleaned up, and songs there more than once.
+    let counts = use_resource(move || {
+        lib.subscribe();
+        let library = lib.get();
+        async move { crate::blocking(move || Ok::<_, ytmdl_library::Error>((library.untidy()?.len(), library.duplicates()?.len()))).await }
+    });
+    let counts = match &*counts.read() {
+        Some(Ok(Ok(counts))) => Some(*counts),
+        Some(Ok(Err(e))) => {
+            tracing::warn!(target: "ytmdl", "looking at the library: {e}");
+            None
+        }
+        Some(Err(e)) => {
+            tracing::warn!(target: "ytmdl", "looking at the library: {e:#}");
+            None
+        }
+        None => None,
+    };
     let updates = ctx.updates.read().clone();
     let Some(svc) = ctx.services() else { return rsx! {} };
     let rt = svc.dl.runtime().clone();
@@ -2146,6 +2242,10 @@ fn SettingsScreen() -> Element {
             ontogglenormalize: move |_| ctx.set_normalize(!*ctx.normalize.peek()),
             lyrics_lookup: (ctx.lyrics_lookup)(),
             ontogglelyrics: move |_| ctx.set_lyrics_lookup(!*ctx.lyrics_lookup.peek()),
+            untidy: counts.map(|c| c.0),
+            duplicates: counts.map(|c| c.1),
+            ontitles: move |_| ctx.nav.push(Overlay::Titles),
+            onduplicates: move |_| ctx.nav.push(Overlay::Duplicates),
         }
     }
 }
