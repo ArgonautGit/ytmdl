@@ -201,7 +201,7 @@ impl Downloader {
         if meta.track_number.is_none() {
             meta.track_number = opts.track_number;
         }
-        let path = retitle_file(path, &named, &meta);
+        let path = if opts.template == DEFAULT_TEMPLATE { retitle_file(path, &named, &meta) } else { path };
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
         // YouTube audio is DASH-fragmented; yt-dlp only fixes that when it has ffmpeg.
@@ -262,7 +262,8 @@ impl Downloader {
     }
 }
 
-/// Renames a download named from its untidied title (see [`titles`]).
+/// Renames a download named from its untidied title (see [`titles`]), when
+/// it is laid out as [`DEFAULT_TEMPLATE`] has it.
 fn retitle_file(path: PathBuf, named: &TrackMeta, meta: &TrackMeta) -> PathBuf {
     fn first(m: &TrackMeta) -> Option<&str> {
         m.artists.first().map(String::as_str)

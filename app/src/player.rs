@@ -236,19 +236,21 @@ impl Player {
             return;
         }
         let (index, position) = current.map_or((0, 0), |i| (i, saved.position_ms));
-        backend::set_queue(&self.items(&tracks), index, position, false);
+        backend::set_queue(&self.items(&tracks).0, index, position, false);
     }
 
-    /// Queue entries as YtmdlPlayer takes them, with new keys.
-    fn items(&self, tracks: &[Track]) -> String {
+    /// Queue entries as YtmdlPlayer takes them, with new keys; and the keys.
+    fn items(&self, tracks: &[Track]) -> (String, Vec<String>) {
         let library = self.library.get();
         let mut serial = self.serial;
+        let mut keys = Vec::with_capacity(tracks.len());
         let items: Vec<_> = tracks
             .iter()
             .map(|t| {
                 let art = t.art.as_deref().and_then(|k| library.art_file(&Library::art_name(k, ART_LARGE)));
                 let n = *serial.peek();
                 serial.set(n + 1);
+                keys.push(format!("{}.{n}", t.id));
                 serde_json::json!({
                     "id": format!("{}.{n}", t.id),
                     "path": t.path,
@@ -261,18 +263,25 @@ impl Player {
                 })
             })
             .collect();
-        serde_json::Value::Array(items).to_string()
+        (serde_json::Value::Array(items).to_string(), keys)
     }
 
     // ---- commands ----
 
     /// Plays `tracks` from `start`, replacing the queue.
     pub fn play(&self, tracks: Vec<Track>, start: usize) {
+        self.play_keyed(tracks, start);
+    }
+
+    /// [`Player::play`], returning the entries' keys.
+    pub fn play_keyed(&self, tracks: Vec<Track>, start: usize) -> Vec<String> {
         if tracks.is_empty() {
-            return;
+            return Vec::new();
         }
         let start = start.min(tracks.len() - 1);
-        backend::set_queue(&self.items(&tracks), start, 0, true);
+        let (items, keys) = self.items(&tracks);
+        backend::set_queue(&items, start, 0, true);
+        keys
     }
 
     /// Plays `tracks` in random order.
@@ -284,15 +293,23 @@ impl Player {
     /// Queues `tracks` right after the current song.
     pub fn play_next(&self, tracks: &[Track]) {
         if !tracks.is_empty() {
-            backend::insert(&self.items(tracks), true);
+            backend::insert(&self.items(tracks).0, true);
         }
     }
 
-    /// Queues `tracks` at the end.
-    pub fn add_to_queue(&self, tracks: &[Track]) {
-        if !tracks.is_empty() {
-            backend::insert(&self.items(tracks), false);
+    /// Queues `tracks` at the end. Returns the entries' keys.
+    pub fn add_to_queue(&self, tracks: &[Track]) -> Vec<String> {
+        if tracks.is_empty() {
+            return Vec::new();
         }
+        let (items, keys) = self.items(tracks);
+        backend::insert(&items, false);
+        keys
+    }
+
+    /// Track ids of the queue's songs, without subscribing.
+    pub fn queued_ids(&self) -> std::collections::HashSet<i64> {
+        self.snapshot.peek().ids.iter().filter_map(|k| track_id(k)).collect()
     }
 
     /// Moves the queue entry at `from` to where the one at `to` is (positions
@@ -454,6 +471,11 @@ impl Player {
 
     pub fn snapshot(&self) -> Snapshot {
         self.snapshot.read().clone()
+    }
+
+    /// [`Player::snapshot`] without subscribing.
+    pub fn snapshot_peek(&self) -> Snapshot {
+        self.snapshot.peek().clone()
     }
 
     pub fn queue(&self) -> Vec<Entry> {

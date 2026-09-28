@@ -1063,3 +1063,9 @@ button.icon-btn:active { background: var(--press); }
 .pick { display: grid; flex: none; place-items: center; width: 40px; color: var(--dim); }
 .pick.on { color: var(--accent); }
 .titles .home-actions { margin-top: 12px; }
+
+/* Playing without downloading. */
+.mini-progress-fill.indeterminate { width: 30%; animation: slide 1.3s ease-in-out infinite; }
+.mini.loading .cover-eq { border-radius: 4px; }
+.now-meta .keep { margin-top: 12px; }
+.hero .hero-actions { flex-wrap: wrap; justify-content: center; }

@@ -61,6 +61,9 @@ const SCREENS: &[Screen] = &[
     ("duplicates", "Songs in the library twice", duplicates),
     ("duplicate-dialog", "Downloading another upload of a song", duplicate_dialog),
     ("titles", "Cleaning up titles", titles),
+    ("stream-loading", "A song from search getting ready to play", stream_loading),
+    ("now-playing-cached", "Now playing a song that isn't in the library", now_playing_cached),
+    ("cache-menu", "The song cache's size", cache_menu),
     ("library-songs", "Library, songs", library_songs),
     ("library-playing", "Library with the mini player", library_playing),
     ("now-playing", "Now playing", now_playing),
@@ -187,6 +190,7 @@ fn search_page(source: SearchSource, query: &str, results: ResultsView, storage:
             onclear: |_| {},
             onsource: |_| {},
             ondownload: |_| {},
+            onplay: |_| {},
             onopen: |_| {},
             onopenartist: |_| {},
             onallow: |_| {},
@@ -435,6 +439,74 @@ fn titles() -> Element {
             }
         },
     )
+}
+
+fn stream_loading() -> Element {
+    let e = &sample().songs[3];
+    rsx! {
+        div { class: "app has-mini",
+            Page { visible: true, {search_page(SearchSource::MusicSongs, "kevin macleod", ResultsView::Songs(states_for(&sample().songs)), true)} }
+            StreamLoading { title: e.title.clone(), artists: e.artists.join(", "), art: e.thumbnail.clone(), oncancel: |_| {} }
+            BottomNav { tab: Tab::Search, active: 0, onselect: |_| {} }
+        }
+    }
+}
+
+fn now_playing_cached() -> Element {
+    let queue: Vec<SongItem> = song_items().into_iter().take(3).collect();
+    rsx! {
+        div { class: "app has-mini",
+            div { class: "overlay sheet",
+                NowPlayingPage {
+                    now: now_item(),
+                    position: 12.0,
+                    duration: 139.0,
+                    playing: true,
+                    buffering: false,
+                    repeat: RepeatMode::Off,
+                    song_loop: None,
+                    queue,
+                    queue_loop: QueueLoopView::Off,
+                    onclose: |_| {},
+                    ontoggle: |_| {},
+                    onnext: |_| {},
+                    onprevious: |_| {},
+                    onseeking: |_| {},
+                    onseek: |_| {},
+                    onrepeat: |_| {},
+                    onab: |_| {},
+                    onskip: |_| {},
+                    onmore: |_| {},
+                    onremove: |_| {},
+                    onqueueloop: |_| {},
+                    onsleep: |_| {},
+                    onsection: |_| {},
+                    onsavesection: |_| {},
+                    oneditsections: |_| {},
+                    onlyrics: |_| {},
+                    onlyricsline: |_| {},
+                    onlyricssearch: |_| {},
+                    cached: true,
+                    onkeep: |_| {},
+                }
+            }
+        }
+    }
+}
+
+fn cache_menu() -> Element {
+    let mut items: Vec<MenuItem> = ["100 MB", "250 MB", "500 MB", "1 GB", "2 GB"].iter().map(|l| MenuItem::choice(*l, *l == "100 MB")).collect();
+    items.push(MenuItem { sub: Some("Songs in the queue stay".into()), ..MenuItem::new(Icon::Trash, "Clear the cache") });
+    let head = MenuHead {
+        title: "Song cache".into(),
+        sub: "Songs played without downloading".into(),
+        art: None,
+        icon: Icon::Play,
+    };
+    rsx! {
+        {settings()}
+        MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} }
+    }
 }
 
 fn library_songs() -> Element {
@@ -845,6 +917,7 @@ fn remote_artist_page(shelves: ArtistShelves) -> Element {
                     onopen: |_| {},
                     onshowall: |_| {},
                     onretry: |_| {},
+                    onplay: |_| {},
                 }
             }
         },
@@ -904,6 +977,7 @@ fn remote_list() -> Element {
                     ondownload: |_| {},
                     onopen: |_| {},
                     ondownloadall: |_| {},
+                    onplay: |_| {},
                 }
             }
         },
@@ -999,6 +1073,7 @@ fn album_page_with(tracks: AlbumTracks, header: AlbumHeader, saved: Option<bool>
                     ondownload: |_| {},
                     ondownloadall: |_| {},
                     onretry: |_| {},
+                    onplay: |_| {},
                 }
             }
         },
@@ -1113,6 +1188,9 @@ fn settings() -> Element {
                 duplicates: Some(2),
                 ontitles: |_| {},
                 onduplicates: |_| {},
+                cache_used: Some(38_400_000),
+                cache_limit_mb: 100,
+                oncache: |_| {},
             }
         },
     )

@@ -28,7 +28,9 @@ new APK.
   tracks, playlists, the download queue (so it survives restarts), the saved
   play queue, listening history and saved A-B sections, plus cover art
   resized for the UI, what the Home tab shows, and songs in it more than once
-  (another upload of the same song, found by its tidied title and artist). The files stay the record: a scan of the music folders
+  (another upload of the same song, found by its tidied title and artist).
+  Songs played without downloading are indexed apart, with their files in
+  the app's cache, trimmed to a size limit, the least recently played first. The files stay the record: a scan of the music folders
   re-indexes them from their tags and forgets deleted ones.
 - `app`: the Dioxus app (Home, library with search and sorting, playlists, search,
   artist pages from YouTube Music, song radio, downloads, settings, listening
@@ -58,7 +60,13 @@ new APK.
   first; Settings → Duplicates lists the songs in the library more than once
   to delete the extra ones (or keep them), and Settings → Clean up titles
   tidies the titles of songs downloaded before ytmdl did it, renaming their
-  files to match.
+  files to match. Tapping a song in search results, an album, a playlist, a
+  radio or an artist's page plays it without downloading it (and "Play" on
+  an album, playlist or radio plays all of it): the song is fetched into the
+  app's cache and played, and the songs after it in the list are fetched two
+  ahead of the one playing. "Add to library" in Now Playing (or downloading
+  it) copies a cached song into the music folder. The cache holds 100 MB
+  unless Settings → Song cache says otherwise.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they

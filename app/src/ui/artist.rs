@@ -184,6 +184,12 @@ pub(super) fn RemoteArtistScreen(open: OpenArtist) -> Element {
                 }));
             },
             ondownload: move |e| ctx.download_asked(e),
+            onplay: move |(shelf, i): (usize, usize)| {
+                let Some(p) = loaded() else { return };
+                if let Some(s) = p.sections.get(shelf) {
+                    ctx.play_entries(s.entries.clone(), i);
+                }
+            },
             onopen: move |e: Entry| {
                 let artist = loaded().map(|p| p.name).unwrap_or_default();
                 ctx.open_listed(e, &artist);
@@ -259,6 +265,7 @@ pub(super) fn RemoteListScreen(open: OpenList) -> Element {
             error: error(),
             onback: move |_| ctx.nav.back(),
             ondownload: move |e| ctx.download_asked(e),
+            onplay: move |i: usize| ctx.play_entries(entries.peek().clone(), i),
             onopen: move |e| ctx.open_listed(e, &artist),
             ondownloadall: move |_| {
                 let listed = entries.peek().clone();

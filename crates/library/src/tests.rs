@@ -580,3 +580,50 @@ fn tidies_titles_in_place() {
     assert!(!lib.scan(std::slice::from_ref(&music)).unwrap().changed());
     assert_eq!(lib.artists().unwrap().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Taylor Swift"]);
 }
+
+#[test]
+fn caches_songs_played_without_downloading() {
+    let tmp = TempDir::new("cache");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let cache = tmp.0.join("cache");
+    fs::create_dir_all(&cache).unwrap();
+    let fetch = |id: &str, title: &str| {
+        let path = cache.join(format!("{id}.m4a"));
+        fs::write(&path, vec![0u8; 1000]).unwrap();
+        lib.add_cached(&Downloaded { path, meta: meta(id, title, Some("Record"), &["Band"], Some(1)), tagged: false }).unwrap()
+    };
+    let a = fetch("aaaaaaaaaaa", "A");
+    assert!(a.id < 0);
+    // Cached songs aren't in the library, but the player finds them.
+    assert!(lib.tracks().unwrap().is_empty() && lib.video_ids().unwrap().is_empty());
+    assert_eq!(lib.cached("aaaaaaaaaaa").unwrap().map(|t| t.id), Some(a.id));
+    assert_eq!(lib.tracks_by_id(&[a.id]).unwrap()[0].title, "A");
+
+    let b = fetch("bbbbbbbbbbb", "B");
+    let c = fetch("ccccccccccc", "C");
+    lib.db().execute("UPDATE cached SET played_at = played_at - 100 WHERE id = ?1", [-b.id]).unwrap();
+    assert_eq!(lib.cache_size().unwrap(), 3000);
+    // The least recently played goes first, unless it's queued.
+    assert_eq!(lib.trim_cache(2000, &HashSet::from([b.id])).unwrap(), 1);
+    assert!(lib.cached("aaaaaaaaaaa").unwrap().is_none() && !a.path.exists());
+    assert!(lib.cached("bbbbbbbbbbb").unwrap().is_some());
+    // A file left by a fetch that stopped halfway.
+    fs::write(cache.join("ddddddddddd.m4a.part"), b"x").unwrap();
+    assert_eq!(lib.sweep_cache(&cache).unwrap(), 1);
+    assert_eq!(lib.cache_size().unwrap(), 2000);
+
+    // Listens count by video, so a kept song keeps its history.
+    let log = tmp.0.join("listens.log");
+    fs::write(&log, format!("{}\t{}\t60000\n", now(), c.id)).unwrap();
+    lib.import_listens(&log).unwrap();
+    assert_eq!(lib.stats(Period::All).unwrap().plays, 1);
+
+    let music = tmp.0.join("Music");
+    let kept = lib.keep_cached(c.id, &music).unwrap();
+    assert!(kept.id > 0);
+    assert_eq!(kept.path, music.join("Band/Record/C [ccccccccccc].m4a"));
+    assert!(kept.path.exists() && c.path.exists());
+    assert_eq!(lib.video_ids().unwrap(), HashSet::from(["ccccccccccc".to_owned()]));
+    assert_eq!(lib.track_by_video("ccccccccccc").unwrap().map(|t| t.id), Some(kept.id));
+    assert_eq!(lib.stats(Period::All).unwrap().top_tracks[0].track.id, kept.id);
+}
