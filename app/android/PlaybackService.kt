@@ -16,15 +16,25 @@ import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.PlayerMessage
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.ListeningExecutorService
+import com.google.common.util.concurrent.MoreExecutors
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import kotlin.math.pow
 
 /**
@@ -39,8 +49,11 @@ import kotlin.math.pow
  *
  * Every song played is logged to `files/listens.log` for the app's listening
  * stats (see crates/library/src/listens.rs), since the app may not be running.
+ *
+ * Cars (Android Auto) and other media browsers browse the library here and
+ * play from it (see Browse), also without the app running.
  */
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
     companion object {
         /** Args: "id" (media id), "a" and "b" (ms); no "id" clears. */
         const val SONG_LOOP = "dev.nick.ytmdl.SONG_LOOP"
@@ -71,8 +84,11 @@ class PlaybackService : MediaSessionService() {
     private data class SongLoop(val id: String, val a: Long, val b: Long)
     private data class QueueLoop(val first: String, val last: String)
 
-    private var session: MediaSession? = null
+    private var session: MediaLibrarySession? = null
     private var player: ExoPlayer? = null
+    private lateinit var browse: Browse
+    /** Reads the library for browsers, off the main thread. */
+    private val io: ListeningExecutorService = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private var songLoop: SongLoop? = null
     private var queueLoop: QueueLoop? = null
     /** Positions are per queue index, so these are rebuilt when the queue changes. */
@@ -113,12 +129,13 @@ class PlaybackService : MediaSessionService() {
         player.addListener(listenListener)
         player.addListener(volumeListener)
         this.player = player
+        browse = Browse(this)
         normalize = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMALIZE, true)
 
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider.Builder(this).build().apply { setSmallIcon(R.drawable.ytmdl_notification) }
         )
-        val builder = MediaSession.Builder(this, player).setCallback(callback)
+        val builder = MediaLibrarySession.Builder(this, player, callback)
         // Tapping the notification brings the app back like the launcher does.
         packageManager.getLaunchIntentForPackage(packageName)?.let { open ->
             val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -127,7 +144,7 @@ class PlaybackService : MediaSessionService() {
         session = builder.build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
     /** Swiping the app away keeps music that is playing; a paused player goes. */
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -138,6 +155,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        io.shutdown()
         finishListen()
         main.removeCallbacks(sleepTick)
         loopMessages.forEach { it.cancel() }
@@ -150,7 +168,20 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private val callback = object : MediaSession.Callback {
+    private fun <T> library(work: () -> T): ListenableFuture<T> = io.submit(Callable { work() })
+
+    private fun <T : Any> notFound(what: String): LibraryResult<T> =
+        LibraryResult.ofError<T>(SessionError(SessionError.ERROR_BAD_VALUE, "$what is not in the library"))
+
+    /** Page [page] of [items], [size] to a page. */
+    private fun pageOf(items: List<MediaItem>, page: Int, size: Int): List<MediaItem> {
+        if (page < 0 || size <= 0) return items
+        val from = page.toLong() * size
+        if (from >= items.size) return emptyList()
+        return items.subList(from.toInt(), minOf(items.size.toLong(), from + size).toInt())
+    }
+
+    private val callback = object : MediaLibrarySession.Callback {
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -158,7 +189,7 @@ class PlaybackService : MediaSessionService() {
             val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             if (controller.packageName == packageName) {
                 result.setAvailableSessionCommands(
-                    MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(SessionCommand(SONG_LOOP, Bundle.EMPTY))
                         .add(SessionCommand(QUEUE_LOOP, Bundle.EMPTY))
                         .add(SessionCommand(SLEEP, Bundle.EMPTY))
@@ -197,6 +228,95 @@ class PlaybackService : MediaSessionService() {
             }
             armLoops()
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
+        // ---- browsing (Browse) ----
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(browse.root(), params))
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = library {
+            val children = browse.children(parentId)
+            if (children == null) notFound(parentId) else LibraryResult.ofItemList(pageOf(children, page, pageSize), params)
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> = library {
+            browse.item(mediaId)?.let { LibraryResult.ofItem(it, null) } ?: notFound(mediaId)
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = library {
+            val count = browse.search(query).size
+            main.post { session.notifySearchResultChanged(browser, query, count, params) }
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = library {
+            LibraryResult.ofItemList(pageOf(browse.searchResults(query), page, pageSize), params)
+        }
+
+        // ---- playing what a browser picked ----
+
+        /** The app sends songs ready to play; browsers send what was picked. */
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+        ): ListenableFuture<MutableList<MediaItem>> {
+            if (mediaItems.all { it.localConfiguration != null }) return Futures.immediateFuture(mediaItems)
+            val serial = Browse.nextSerial(mediaSession.player)
+            return library { browse.resolveEach(mediaItems, serial).toMutableList() }
+        }
+
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaItemsWithStartPosition> {
+            if (mediaItems.all { it.localConfiguration != null }) {
+                return Futures.immediateFuture(MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs))
+            }
+            val serial = Browse.nextSerial(mediaSession.player)
+            return library {
+                browse.resolve(mediaItems, startIndex, startPositionMs, serial)
+                    ?: throw UnsupportedOperationException("nothing to play in the library")
+            }
+        }
+
+        /** Play with nothing queued (in the car, say) picks up the app's last queue. */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaItemsWithStartPosition> {
+            val serial = Browse.nextSerial(mediaSession.player)
+            return library { browse.resumption(serial) ?: throw UnsupportedOperationException("no queue to resume") }
         }
     }
 
