@@ -1032,3 +1032,34 @@ button.icon-btn:active { background: var(--press); }
     scrollbar-width: none;
     font: 11px/1.45 ui-monospace, "Roboto Mono", "Droid Sans Mono", monospace;
 }
+
+/* Home. */
+.home-actions { display: flex; gap: 10px; margin: 4px 16px 6px; }
+.home-actions .primary:disabled { opacity: 0.5; }
+.group.home-card { margin: 14px 16px 4px; }
+.hint.home-hint, .hint.page-hint { margin: 14px 20px 4px; }
+.page .section + .grid.shelf { padding-top: 12px; }
+.tile .cover-wrap .cover-eq { border-radius: 6px; }
+.tile-badge {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+}
+.icon-btn.similar { color: var(--muted); }
+
+/* Duplicates and titles. */
+.duplicates, .titles { min-height: 100%; padding-bottom: 16px; }
+.dup-group .section { margin-top: 18px; }
+.section-title, .dup-group .section-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dup-group .section-action { flex: none; }
+.retitle .was { margin-top: 3px; overflow: hidden; color: var(--dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.pick { display: grid; flex: none; place-items: center; width: 40px; color: var(--dim); }
+.pick.on { color: var(--accent); }
+.titles .home-actions { margin-top: 12px; }

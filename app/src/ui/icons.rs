@@ -55,6 +55,15 @@ pub enum Icon {
     Lyrics,
     /// Songs like this one (YouTube Music's radio).
     Radio,
+    Home,
+    /// Songs in the library twice.
+    Copy,
+    /// Tidying titles.
+    Sparkles,
+    /// In the library from another upload; picked.
+    CheckCircle,
+    /// Not picked.
+    Circle,
 }
 
 #[component]
@@ -204,6 +213,23 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         Icon::Radio => rsx! {
             circle { cx: "12", cy: "12", r: "2" }
             path { d: "M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" }
+        },
+        Icon::Home => rsx! {
+            path { d: "M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9" }
+        },
+        Icon::Copy => rsx! {
+            rect { x: "9", y: "9", width: "12", height: "12", rx: "2" }
+            path { d: "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" }
+        },
+        Icon::Sparkles => rsx! {
+            path { d: "M10 3.5 11.7 8.3 16.5 10l-4.8 1.7L10 16.5l-1.7-4.8L3.5 10l4.8-1.7zM18 14l.9 2.1L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.9z" }
+        },
+        Icon::CheckCircle => rsx! {
+            circle { cx: "12", cy: "12", r: "9.5" }
+            path { d: "m8 12.3 2.8 2.7L16 9.5" }
+        },
+        Icon::Circle => rsx! {
+            circle { cx: "12", cy: "12", r: "9.5" }
         },
     };
     rsx! {

@@ -1,4 +1,4 @@
-//! Listening history, for the stats page and the "most played" sorts.
+//! Listening history, for the stats page, the "most played" sorts and Home.
 //!
 //! The player runs in its own process (and keeps playing with the app closed),
 //! so it can't write here. It appends one line per song it played to a log
@@ -18,7 +18,7 @@ use rusqlite::params;
 use crate::{Library, Result, TRACK_COLUMN_COUNT, TRACK_COLUMNS, Track, track_from_row};
 
 /// Listens of the period with whether each one counts as a play.
-const PLAYED: &str = "p AS (
+pub(crate) const PLAYED: &str = "p AS (
     SELECT l.video_id, l.ms, l.ms >= MIN(30000, COALESCE(t.duration, 60) * 500) AS play
     FROM listens l LEFT JOIN tracks t ON t.video_id = l.video_id
     WHERE l.started_at >= ?1
@@ -233,7 +233,7 @@ impl Library {
 }
 
 /// Unix seconds where `period` starts: local midnight or the first of the month.
-fn period_start(db: &rusqlite::Connection, period: Period) -> rusqlite::Result<i64> {
+pub(crate) fn period_start(db: &rusqlite::Connection, period: Period) -> rusqlite::Result<i64> {
     let modifiers = match period {
         Period::Week => "'start of day', '-6 days'",
         Period::Month => "'start of day', '-29 days'",

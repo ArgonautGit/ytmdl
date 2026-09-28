@@ -483,3 +483,100 @@ fn keeps_and_measures_replaygain() {
     let gains: Vec<Option<Gain>> = fresh.tracks_by_id(&[1, 2]).unwrap().into_iter().map(|t| t.gain).collect();
     assert!(gains.iter().all(Option::is_some), "{gains:?}");
 }
+
+#[test]
+fn finds_songs_downloaded_twice() {
+    let tmp = TempDir::new("duplicates");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let song = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Anti-Hero", Some("Midnights"), &["Taylor Swift"], Some(3)));
+    let video = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Taylor Swift - Anti-Hero (Official Music Video)", None, &["TaylorSwiftVEVO"], None));
+    add(&lib, &tmp.0, meta("ccccccccccc", "Anti-Hero (Live)", Some("Tour"), &["Taylor Swift"], None));
+    add(&lib, &tmp.0, meta("ddddddddddd", "Lavender Haze", Some("Midnights"), &["Taylor Swift"], Some(1)));
+
+    let found = lib.duplicates().unwrap();
+    assert_eq!(found.len(), 1);
+    let ids: Vec<i64> = found[0].tracks.iter().map(|t| t.id).collect();
+    assert_eq!(ids, [song.id, video.id]);
+    assert_eq!(lib.song_keys().unwrap().get(&found[0].key).map(|t| t.id), Some(song.id));
+
+    // Kept, until a third upload shows up.
+    lib.keep_duplicates(&found[0]).unwrap();
+    assert!(lib.duplicates().unwrap().is_empty());
+    add(&lib, &tmp.0, meta("eeeeeeeeeee", "Anti-Hero [4K]", None, &["Taylor Swift"], None));
+    assert_eq!(lib.duplicates().unwrap()[0].tracks.len(), 3);
+}
+
+#[test]
+fn fills_home() {
+    let tmp = TempDir::new("home");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Tune", Some("Record"), &["Band"], Some(1)));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Other", Some("Record"), &["Band"], Some(2)));
+    let old = add(&lib, &tmp.0, meta("ccccccccccc", "Old Favourite", Some("Earlier"), &["Band"], Some(1)));
+    add(&lib, &tmp.0, meta("ddddddddddd", "Never Played", Some("Latest"), &["Band"], Some(1)));
+    let home = lib.home().unwrap();
+    assert!(home.recent.is_empty() && home.top.is_empty() && home.forgotten.is_empty());
+    assert_eq!(home.added.first().map(|a| a.title.as_str()), Some("Latest"));
+    assert!(home.hour < 24);
+
+    let now = now();
+    let line = |t: &Track, ago: i64, ms: i64| format!("{}\t{}\t{ms}\n", now - ago, t.id);
+    let log = tmp.0.join("listens.log");
+    let text = [
+        line(&a, 300, 180_000),
+        line(&a, 200, 180_000),
+        line(&b, 100, 180_000),
+        // A skip doesn't make it the last played.
+        line(&a, 50, 2_000),
+        line(&old, 60 * 86400, 180_000),
+        line(&old, 50 * 86400, 180_000),
+        line(&old, 40 * 86400, 180_000),
+    ]
+    .concat();
+    fs::write(&log, text).unwrap();
+    lib.import_listens(&log).unwrap();
+
+    let home = lib.home().unwrap();
+    let titles = |tracks: &[Track]| tracks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+    assert_eq!(titles(&home.recent), ["Other", "Tune", "Old Favourite"]);
+    assert_eq!(titles(&home.top), ["Tune", "Other"]);
+    assert_eq!(titles(&home.forgotten), ["Old Favourite"]);
+}
+
+/// Needs `.deps/fixtures/tone.m4a`, like the scan tests.
+#[test]
+fn tidies_titles_in_place() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.deps/fixtures/tone.m4a");
+    if !fixture.exists() {
+        eprintln!("skipping: {} is missing", fixture.display());
+        return;
+    }
+    let tmp = TempDir::new("retitle");
+    let music = tmp.0.join("Music");
+    let singles = music.join("TaylorSwiftVEVO/Singles");
+    fs::create_dir_all(&singles).unwrap();
+    let file = singles.join("Taylor Swift - Anti-Hero (Official Music Video) [bbbbbbbbbbb].m4a");
+    fs::copy(&fixture, &file).unwrap();
+    let m = meta("bbbbbbbbbbb", "Taylor Swift - Anti-Hero (Official Music Video)", None, &["TaylorSwiftVEVO"], None);
+    write_tags(&file, &m, None).unwrap();
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    lib.add_download(&Downloaded { path: file.clone(), meta: m, tagged: true }).unwrap();
+    let tidy = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Lavender Haze", Some("Midnights"), &["Taylor Swift"], Some(1)));
+
+    let untidy = lib.untidy().unwrap();
+    assert_eq!(untidy.len(), 1);
+    assert_eq!((untidy[0].title.as_str(), untidy[0].artists.as_slice()), ("Anti-Hero", &["Taylor Swift".to_owned()][..]));
+    assert!(untidy.iter().all(|r| r.track.id != tidy.id));
+
+    let track = lib.retitle(&untidy[0], true).unwrap();
+    let moved = music.join("Taylor Swift/Singles/Anti-Hero [bbbbbbbbbbb].m4a");
+    assert_eq!(track.path, moved);
+    assert_eq!((track.title.as_str(), track.album_artist.as_str()), ("Anti-Hero", "Taylor Swift"));
+    assert!(!music.join("TaylorSwiftVEVO").exists());
+    let tags = ytmdl_core::tag::read_tags(&moved).unwrap();
+    assert_eq!((tags.title.as_deref(), tags.artists.as_slice()), (Some("Anti-Hero"), &["Taylor Swift".to_owned()][..]));
+    assert!(lib.untidy().unwrap().is_empty());
+    // The index already knows the file as it is now.
+    assert!(!lib.scan(std::slice::from_ref(&music)).unwrap().changed());
+    assert_eq!(lib.artists().unwrap().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Taylor Swift"]);
+}

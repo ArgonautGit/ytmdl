@@ -11,6 +11,7 @@ pub mod remux;
 pub mod runtime;
 pub mod selftest;
 pub mod tag;
+pub mod titles;
 
 use std::path::PathBuf;
 
@@ -194,10 +195,13 @@ impl Downloader {
             .iter()
             .find_map(|d| d.filepath.clone())
             .ok_or_else(|| Error::Invalid("yt-dlp reported no output file".into()))?;
-        let mut meta = info.to_track();
+        // yt-dlp named the file from the upload's own title and artist.
+        let named = info.untidied_track();
+        let mut meta = named.clone().tidied();
         if meta.track_number.is_none() {
             meta.track_number = opts.track_number;
         }
+        let path = retitle_file(path, &named, &meta);
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
         // YouTube audio is DASH-fragmented; yt-dlp only fixes that when it has ffmpeg.
@@ -255,6 +259,23 @@ impl Downloader {
             }
         }
         None
+    }
+}
+
+/// Renames a download named from its untidied title (see [`titles`]).
+fn retitle_file(path: PathBuf, named: &TrackMeta, meta: &TrackMeta) -> PathBuf {
+    fn first(m: &TrackMeta) -> Option<&str> {
+        m.artists.first().map(String::as_str)
+    }
+    let Some(to) = titles::retitled_path(&path, &meta.id, (&named.title, first(named)), (&meta.title, first(meta))) else {
+        return path;
+    };
+    match titles::relocate(&path, &to) {
+        Ok(()) => to,
+        Err(e) => {
+            tracing::warn!(target: "ytmdl", "could not rename {} to {}: {e}", path.display(), to.display());
+            path
+        }
     }
 }
 
