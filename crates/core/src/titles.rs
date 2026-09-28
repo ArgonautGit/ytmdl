@@ -115,6 +115,15 @@ pub fn relocate(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Where a song goes in the music folder: `<Artist>/<Album>/<Title> [<id>].<ext>`,
+/// as [`crate::DEFAULT_TEMPLATE`] has yt-dlp put downloads (a song with no
+/// album is in `Singles`).
+pub fn library_path(artist: &str, album: Option<&str>, title: &str, id: &str, ext: &str) -> PathBuf {
+    let artist = if artist.trim().is_empty() { "Unknown Artist" } else { artist };
+    let album = album.filter(|a| !a.trim().is_empty()).unwrap_or("Singles");
+    PathBuf::from(name_part(artist)).join(name_part(album)).join(file_name(title, id, ext))
+}
+
 /// `<title> [<id>].<ext>`, as yt-dlp names downloads.
 pub fn file_name(title: &str, id: &str, ext: &str) -> String {
     format!("{} [{id}].{ext}", name_part(title))
@@ -419,6 +428,15 @@ mod tests {
             Some(PathBuf::from("/m/Various Artists/Hits/Song [b1kbLwvqugk].m4a"))
         );
         assert_eq!(retitled_path(album, "b1kbLwvqugk", ("Same", Some("A")), ("Same", Some("A"))), None);
+    }
+
+    #[test]
+    fn places_songs_in_the_library() {
+        assert_eq!(
+            library_path("AC/DC", Some("Back in Black"), "Hells Bells", "abc", "m4a"),
+            PathBuf::from("AC⧸DC/Back in Black/Hells Bells [abc].m4a")
+        );
+        assert_eq!(library_path("", None, "Song", "abc", "opus"), PathBuf::from("Unknown Artist/Singles/Song [abc].opus"));
     }
 
     #[test]

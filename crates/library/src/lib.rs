@@ -7,6 +7,7 @@
 //! drops tracks whose files were deleted elsewhere.
 
 mod art;
+mod cache;
 mod duplicates;
 mod home;
 mod listens;
@@ -28,6 +29,7 @@ use ytmdl_core::{Downloaded, Entry};
 
 pub use art::{ART_LARGE, ART_SMALL};
 use art::ArtCache;
+use cache::CACHED_COLUMNS;
 pub use duplicates::Duplicates;
 pub use home::Home;
 pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
@@ -150,6 +152,26 @@ ALTER TABLE tracks ADD COLUMN measured INTEGER NOT NULL DEFAULT 0; -- gain known
 CREATE TABLE kept_duplicates (
     key       TEXT PRIMARY KEY,
     video_ids TEXT NOT NULL                     -- JSON array
+);
+"#, r#"
+-- Songs played without downloading them (see cache.rs), as tracks has them.
+CREATE TABLE cached (
+    id           INTEGER PRIMARY KEY,
+    video_id     TEXT NOT NULL UNIQUE,
+    url          TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    artists      TEXT NOT NULL,             -- JSON array
+    album        TEXT,
+    album_artist TEXT NOT NULL,
+    track_number INTEGER,
+    disc_number  INTEGER,
+    year         INTEGER,
+    duration     REAL,
+    art          TEXT,
+    gain         REAL,
+    peak         REAL,
+    played_at    INTEGER NOT NULL           -- unix seconds, for trimming the least recently played
 );
 "#];
 
@@ -280,6 +302,11 @@ impl Library {
     /// Records a finished download. Blocking: reads the file's cover art and
     /// writes resized copies, so call it off the UI thread.
     pub fn add_download(&self, done: &Downloaded) -> Result<Track> {
+        self.upsert(&self.downloaded(done)?)
+    }
+
+    /// What to store for a finished download.
+    fn downloaded(&self, done: &Downloaded) -> Result<NewTrack> {
         let meta = &done.meta;
         let (file_size, file_mtime) = file_stamp(&done.path)?;
         let art = scan::read_cover(&done.path).and_then(|data| self.0.art.store(&data));
@@ -290,7 +317,7 @@ impl Library {
             .map(|_| meta.album_artists.join(", "))
             .or_else(|| meta.artists.first().cloned())
             .unwrap_or_default();
-        self.upsert(&NewTrack {
+        Ok(NewTrack {
             video_id: meta.id.clone(),
             url: meta.url.clone(),
             path: done.path.clone(),
@@ -365,17 +392,26 @@ impl Library {
         Ok(self.db().query_row(&sql, [id], track_from_row).optional()?)
     }
 
-    /// Tracks in the order of `ids`, skipping ids that are gone.
+    /// Tracks in the order of `ids`, skipping ids that are gone. Negative ids
+    /// are cached songs (see cache.rs).
     pub fn tracks_by_id(&self, ids: &[i64]) -> Result<Vec<Track>> {
         let db = self.db();
         let mut stmt = db.prepare_cached(&format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE id = ?1"))?;
+        let mut cached = db.prepare_cached(&format!("SELECT {CACHED_COLUMNS} FROM cached WHERE id = -?1"))?;
         let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
+        for &id in ids {
+            let stmt = if id < 0 { &mut cached } else { &mut stmt };
             if let Some(t) = stmt.query_row([id], track_from_row).optional()? {
                 out.push(t);
             }
         }
         Ok(out)
+    }
+
+    /// The library's song of a video.
+    pub fn track_by_video(&self, video_id: &str) -> Result<Option<Track>> {
+        let sql = format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE video_id = ?1");
+        Ok(self.db().query_row(&sql, [video_id], track_from_row).optional()?)
     }
 
     /// Albums, most recently added to first.

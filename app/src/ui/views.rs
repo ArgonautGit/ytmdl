@@ -267,6 +267,16 @@ fn total_text(secs: f64) -> String {
     }
 }
 
+/// "34 MB", "1.5 GB"
+pub fn size_text(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        let gb = bytes as f64 / 1e9;
+        if gb.fract() < 0.05 { format!("{gb:.0} GB") } else { format!("{gb:.1} GB") }
+    } else {
+        format!("{} MB", (bytes as f64 / 1e6).round() as u64)
+    }
+}
+
 fn mb(bytes: u64) -> String {
     format!("{:.1}", bytes as f64 / 1e6)
 }
@@ -427,12 +437,18 @@ fn Ring(fraction: f64) -> Element {
     }
 }
 
+/// A row's button pressed, without also tapping the row.
+fn act(e: MouseEvent, action: EventHandler<()>) {
+    e.stop_propagation();
+    action.call(());
+}
+
 /// The trailing control of a track row.
 #[component]
 fn TrackAction(state: TrackState, ondownload: EventHandler<()>) -> Element {
     match state {
         TrackState::Idle => rsx! {
-            button { class: "icon-btn", "aria-label": "Download", onclick: move |_| ondownload.call(()),
+            button { class: "icon-btn", "aria-label": "Download", onclick: move |e| act(e, ondownload),
                 Svg { icon: Icon::DownloadCircle }
             }
         },
@@ -448,24 +464,25 @@ fn TrackAction(state: TrackState, ondownload: EventHandler<()>) -> Element {
             }
         },
         TrackState::Failed => rsx! {
-            button { class: "icon-btn failed", "aria-label": "Retry", onclick: move |_| ondownload.call(()),
+            button { class: "icon-btn failed", "aria-label": "Retry", onclick: move |e| act(e, ondownload),
                 Svg { icon: Icon::Retry }
             }
         },
         TrackState::Similar => rsx! {
-            button { class: "icon-btn similar", "aria-label": "In your library from another upload", onclick: move |_| ondownload.call(()),
+            button { class: "icon-btn similar", "aria-label": "In your library from another upload", onclick: move |e| act(e, ondownload),
                 Svg { icon: Icon::CheckCircle }
             }
         },
     }
 }
 
+/// A song from YouTube Music; tapping it plays it (`onplay`).
 #[component]
-pub fn SongRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>) -> Element {
+pub fn SongRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, onplay: EventHandler<()>) -> Element {
     let album = entry.album.clone().filter(|a| *a != entry.title);
     let sub = dotted([Some(entry.artists.join(", ")), album, entry.duration_secs.map(duration_text)]);
     rsx! {
-        li { class: "row",
+        li { class: "row tappable", onclick: move |_| onplay.call(()),
             Cover { url: entry.thumbnail.clone() }
             div { class: "meta",
                 div { class: "title", "{entry.title}" }
@@ -477,10 +494,10 @@ pub fn SongRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>) ->
 }
 
 #[component]
-pub fn VideoRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>) -> Element {
+pub fn VideoRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, onplay: EventHandler<()>) -> Element {
     let artists = entry.artists.join(", ");
     rsx! {
-        li { class: "row",
+        li { class: "row tappable", onclick: move |_| onplay.call(()),
             div { class: "thumb",
                 Cover { url: entry.thumbnail.clone(), class: "cover wide" }
                 if let Some(d) = entry.duration_secs {
@@ -560,6 +577,8 @@ pub fn SearchPage(
     onclear: EventHandler<()>,
     onsource: EventHandler<SearchSource>,
     ondownload: EventHandler<Entry>,
+    /// Plays a song (without downloading it).
+    onplay: EventHandler<Entry>,
     /// Opens an album.
     onopen: EventHandler<Entry>,
     onopenartist: EventHandler<Entry>,
@@ -640,14 +659,32 @@ pub fn SearchPage(
             ResultsView::Songs(rows) => rsx! {
                 ul { class: "list",
                     for (entry , state) in rows {
-                        SongRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                        SongRow {
+                            key: "{entry.id}",
+                            entry: entry.clone(),
+                            state,
+                            ondownload: {
+                                let entry = entry.clone();
+                                move |_| ondownload.call(entry.clone())
+                            },
+                            onplay: move |_| onplay.call(entry.clone()),
+                        }
                     }
                 }
             },
             ResultsView::Videos(rows) => rsx! {
                 ul { class: "list",
                     for (entry , state) in rows {
-                        VideoRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                        VideoRow {
+                            key: "{entry.id}",
+                            entry: entry.clone(),
+                            state,
+                            ondownload: {
+                                let entry = entry.clone();
+                                move |_| ondownload.call(entry.clone())
+                            },
+                            onplay: move |_| onplay.call(entry.clone()),
+                        }
                     }
                 }
             },
@@ -693,13 +730,17 @@ pub fn AlbumPage(
     #[props(default)]
     onopensaved: EventHandler<()>,
     onretry: EventHandler<()>,
+    /// Plays the songs from this one (without downloading them).
+    onplay: EventHandler<usize>,
 ) -> Element {
     rsx! {
         div { class: "album",
             BackButton { onback }
             Hero { cover: header.cover.as_deref().map(|u| art_url(u, 544)), title: header.title.clone(), meta: header.meta(),
                 match &tracks {
-                    AlbumTracks::Loaded(rows) => rsx! { AlbumSummary { rows: rows.clone(), saved, ondownloadall, onopensaved } },
+                    AlbumTracks::Loaded(rows) => rsx! {
+                        AlbumSummary { rows: rows.clone(), saved, ondownloadall, onopensaved, onplay: move |_| onplay.call(0) }
+                    },
                     _ => rsx! {},
                 }
             }
@@ -720,7 +761,7 @@ pub fn AlbumPage(
                 AlbumTracks::Loaded(rows) => rsx! {
                     ol { class: "list tracks",
                         for (i , (entry , state)) in rows.into_iter().enumerate() {
-                            li { key: "{entry.id}", class: "row",
+                            li { key: "{entry.id}", class: "row tappable", onclick: move |_| onplay.call(i),
                                 span { class: "index", "{i + 1}" }
                                 div { class: "meta",
                                     div { class: "title", "{entry.title}" }
@@ -781,24 +822,29 @@ fn AlbumSummary(
     saved: Option<bool>,
     ondownloadall: EventHandler<()>,
     onopensaved: EventHandler<()>,
+    onplay: EventHandler<()>,
 ) -> Element {
     let total: f64 = rows.iter().filter_map(|(e, _)| e.duration_secs).sum();
     let done = rows.iter().filter(|(_, s)| *s == TrackState::Done).count();
     let todo = rows.iter().filter(|(_, s)| s.wants_download()).count();
     let busy = rows.len() - done - todo;
     let line = dotted([Some(plural(rows.len(), "song", "songs")), (total > 0.0).then(|| total_text(total))]);
+    let empty = rows.is_empty();
     rsx! {
         div { class: "sub", "{line}" }
         if saved == Some(false) {
             div { class: "sub", "Saves it to your playlists, kept in sync with YouTube" }
         }
-        if saved == Some(false) && todo == 0 {
-            button { class: "primary", onclick: move |_| ondownloadall.call(()),
-                Svg { icon: Icon::Plus, size: 20 }
-                "Add to library"
+        div { class: "hero-actions",
+            if !empty {
+                button { class: "secondary", onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
             }
-        } else if saved == Some(true) {
-            div { class: "hero-actions",
+            if saved == Some(false) && todo == 0 {
+                button { class: "primary", onclick: move |_| ondownloadall.call(()),
+                    Svg { icon: Icon::Plus, size: 20 }
+                    "Add to library"
+                }
+            } else if saved == Some(true) {
                 if todo > 0 {
                     button { class: "primary", onclick: move |_| ondownloadall.call(()),
                         Svg { icon: Icon::Download, size: 20 }
@@ -809,16 +855,16 @@ fn AlbumSummary(
                     Svg { icon: Icon::Playlist, size: 20 }
                     "Open playlist"
                 }
+            } else if todo > 0 {
+                button { class: "primary", onclick: move |_| ondownloadall.call(()),
+                    Svg { icon: Icon::Download, size: 20 }
+                    if done + busy == 0 { "Download all" } else { "Download {todo} more" }
+                }
+            } else if busy > 0 {
+                div { class: "primary ghost", div { class: "spinner small" } "Downloading {busy}" }
+            } else if done > 0 {
+                div { class: "primary ghost", Svg { icon: Icon::Check, size: 20 } "Downloaded" }
             }
-        } else if todo > 0 {
-            button { class: "primary", onclick: move |_| ondownloadall.call(()),
-                Svg { icon: Icon::Download, size: 20 }
-                if done + busy == 0 { "Download all" } else { "Download {todo} more" }
-            }
-        } else if busy > 0 {
-            div { class: "primary ghost", div { class: "spinner small" } "Downloading {busy}" }
-        } else if done > 0 {
-            div { class: "primary ghost", Svg { icon: Icon::Check, size: 20 } "Downloaded" }
         }
     }
 }
@@ -1418,6 +1464,8 @@ pub fn RemoteArtistPage(
     /// "Show all" of the shelf at this index.
     onshowall: EventHandler<usize>,
     onretry: EventHandler<()>,
+    /// Plays (shelf, song) and the shelf's songs after it.
+    onplay: EventHandler<(usize, usize)>,
 ) -> Element {
     let meta = dotted([Some("Artist".into()), audience]);
     rsx! {
@@ -1448,7 +1496,14 @@ pub fn RemoteArtistPage(
                 },
                 ArtistShelves::Loaded(shelves) => rsx! {
                     for (i , shelf) in shelves.into_iter().enumerate() {
-                        ArtistShelfView { key: "{i}", shelf, ondownload, onopen, onshowall: move |_| onshowall.call(i) }
+                        ArtistShelfView {
+                            key: "{i}",
+                            shelf,
+                            ondownload,
+                            onopen,
+                            onshowall: move |_| onshowall.call(i),
+                            onplay: move |j| onplay.call((i, j)),
+                        }
                     }
                     if let Some(about) = about {
                         h2 { class: "section", "About" }
@@ -1466,6 +1521,7 @@ fn ArtistShelfView(
     ondownload: EventHandler<Entry>,
     onopen: EventHandler<Entry>,
     onshowall: EventHandler<()>,
+    onplay: EventHandler<usize>,
 ) -> Element {
     let rows = matches!(shelf.kind, SectionKind::Songs | SectionKind::Videos);
     // Albums always offer it: the whole list is where they all download.
@@ -1484,15 +1540,27 @@ fn ArtistShelfView(
         match shelf.kind {
             SectionKind::Songs => rsx! {
                 ul { class: "list",
-                    for (entry , state) in entries {
-                        SongRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                    for (i , (entry , state)) in entries.into_iter().enumerate() {
+                        SongRow {
+                            key: "{entry.id}",
+                            entry: entry.clone(),
+                            state,
+                            ondownload: move |_| ondownload.call(entry.clone()),
+                            onplay: move |_| onplay.call(i),
+                        }
                     }
                 }
             },
             SectionKind::Videos => rsx! {
                 ul { class: "list",
-                    for (entry , state) in entries {
-                        VideoRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                    for (i , (entry , state)) in entries.into_iter().enumerate() {
+                        VideoRow {
+                            key: "{entry.id}",
+                            entry: entry.clone(),
+                            state,
+                            ondownload: move |_| ondownload.call(entry.clone()),
+                            onplay: move |_| onplay.call(i),
+                        }
                     }
                 }
             },
@@ -1552,6 +1620,8 @@ pub fn RemoteListPage(
     onopen: EventHandler<Entry>,
     /// Downloads every album (or song) listed.
     ondownloadall: EventHandler<()>,
+    /// Plays the songs from this one.
+    onplay: EventHandler<usize>,
 ) -> Element {
     let downloadable = match kind {
         SectionKind::Songs | SectionKind::Videos => entries.iter().filter(|(_, s)| s.wants_download()).count(),
@@ -1588,13 +1658,25 @@ pub fn RemoteListPage(
                 div { class: "sync-line failed list-error", Svg { icon: Icon::Alert, size: 16 } "Couldn't load all of it: {e}" }
             }
             ul { class: "list",
-                for (entry , state) in entries {
+                for (i , (entry , state)) in entries.into_iter().enumerate() {
                     match kind {
                         SectionKind::Songs => rsx! {
-                            SongRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                            SongRow {
+                                key: "{entry.id}",
+                                entry: entry.clone(),
+                                state,
+                                ondownload: move |_| ondownload.call(entry.clone()),
+                                onplay: move |_| onplay.call(i),
+                            }
                         },
                         SectionKind::Videos => rsx! {
-                            VideoRow { key: "{entry.id}", entry: entry.clone(), state, ondownload: move |_| ondownload.call(entry.clone()) }
+                            VideoRow {
+                                key: "{entry.id}",
+                                entry: entry.clone(),
+                                state,
+                                ondownload: move |_| ondownload.call(entry.clone()),
+                                onplay: move |_| onplay.call(i),
+                            }
                         },
                         SectionKind::Artists => rsx! {
                             ArtistEntryRow { key: "{entry.id}", entry: entry.clone(), onopen: move |_| onopen.call(entry.clone()) }
@@ -1656,6 +1738,27 @@ pub fn MiniPlayer(
     }
 }
 
+/// In the mini player's place while a song is fetched to play.
+#[component]
+pub fn StreamLoading(title: String, artists: String, art: Option<String>, oncancel: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "mini loading", role: "status",
+            div { class: "mini-progress", div { class: "mini-progress-fill indeterminate" } }
+            div { class: "cover-wrap",
+                Cover { url: art }
+                div { class: "cover-eq", div { class: "spinner small" } }
+            }
+            div { class: "meta",
+                div { class: "title", "{title}" }
+                div { class: "sub", {dotted([Some("Getting it ready".into()), Some(artists)])} }
+            }
+            button { class: "icon-btn", "aria-label": "Cancel", onclick: move |_| oncancel.call(()),
+                Svg { icon: Icon::Close }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn NowPlayingPage(
     now: NowItem,
@@ -1712,6 +1815,12 @@ pub fn NowPlayingPage(
     onlyricsline: EventHandler<usize>,
     /// Look the lyrics up on LRCLIB.
     onlyricssearch: EventHandler<()>,
+    /// The song is played from the cache, not the library.
+    #[props(default)]
+    cached: bool,
+    /// Adds it to the library.
+    #[props(default)]
+    onkeep: EventHandler<()>,
 ) -> Element {
     let max = duration.max(1.0);
     let pct = (position / max * 100.0).clamp(0.0, 100.0);
@@ -1766,6 +1875,12 @@ pub fn NowPlayingPage(
             div { class: "now-meta",
                 h1 { "{now.title}" }
                 div { class: "sub", "{sub}" }
+                if cached {
+                    button { class: "secondary small keep", onclick: move |_| onkeep.call(()),
+                        Svg { icon: Icon::Download, size: 18 }
+                        "Add to library"
+                    }
+                }
             }
             div { class: "seek",
                 if let Some((a, b)) = song_loop {
@@ -2550,6 +2665,11 @@ pub fn SettingsPage(
     duplicates: Option<usize>,
     ontitles: EventHandler<()>,
     onduplicates: EventHandler<()>,
+    /// What songs played without downloading take (bytes), and may take (MB).
+    #[props(default)]
+    cache_used: Option<u64>,
+    cache_limit_mb: u64,
+    oncache: EventHandler<()>,
 ) -> Element {
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
@@ -2562,6 +2682,24 @@ pub fn SettingsPage(
                         div { class: "title", "Save location" }
                         div { class: "sub", "{output}" }
                     }
+                }
+                div { class: "item tappable divided", role: "button", onclick: move |_| oncache.call(()),
+                    Svg { icon: Icon::Play }
+                    div { class: "meta",
+                        div { class: "title", "Song cache" }
+                        div { class: "sub",
+                            {
+                                dotted([
+                                    Some(match cache_used {
+                                        Some(used) => format!("{} of {}", size_text(used), size_text(cache_limit_mb * 1_000_000)),
+                                        None => format!("Up to {}", size_text(cache_limit_mb * 1_000_000)),
+                                    }),
+                                    Some("songs played without downloading".into()),
+                                ])
+                            }
+                        }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
                 }
                 if !storage {
                     div { class: "item",

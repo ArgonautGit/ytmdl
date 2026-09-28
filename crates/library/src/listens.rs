@@ -126,9 +126,11 @@ impl Library {
         let tx = db.transaction()?;
         let mut imported = 0;
         {
+            // Negative ids are cached songs (see cache.rs).
             let mut insert = tx.prepare(
                 "INSERT INTO listens (video_id, started_at, ms)
-                 VALUES ((SELECT video_id FROM tracks WHERE id = ?1), ?2, ?3)",
+                 VALUES (CASE WHEN ?1 < 0 THEN (SELECT video_id FROM cached WHERE id = -?1)
+                              ELSE (SELECT video_id FROM tracks WHERE id = ?1) END, ?2, ?3)",
             )?;
             for line in text.lines() {
                 let fields: Vec<&str> = line.split('\t').collect();

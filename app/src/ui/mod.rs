@@ -12,6 +12,7 @@ mod preview;
 mod retitle;
 mod sort;
 mod stats;
+mod stream;
 mod sync;
 mod update;
 mod version;
@@ -38,6 +39,7 @@ pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
 use retitle::TitlesScreen;
 use sort::Sorts;
 use stats::StatsScreen;
+use stream::{LIMITS_MB, Stream, use_stream};
 use sync::SyncState;
 use update::Updates;
 use views::*;
@@ -82,6 +84,8 @@ struct Ctx {
     lyrics_open: Signal<bool>,
     /// Songs without lyrics are looked up on LRCLIB.
     lyrics_lookup: Signal<bool>,
+    /// Songs played without downloading them.
+    stream: Stream,
 }
 
 /// The Settings switch for even loudness ("0" is off).
@@ -121,6 +125,11 @@ impl Ctx {
         let Some(svc) = self.services() else { return false };
         if self.owned.peek().contains(&entry.id) {
             return false;
+        }
+        // Played already: the cached file goes into the library.
+        if let Ok(Some(cached)) = self.library.get().cached(&entry.id) {
+            self.keep_cached(cached);
+            return true;
         }
         let previous = self.queue.jobs().peek().iter().rev().find(|j| j.entry.id == entry.id).map(|j| (j.id, j.state.clone()));
         match previous {
@@ -309,6 +318,8 @@ enum Sheet {
     SectionName { id: Option<i64>, name: String, video_id: String, a: i64, b: i64 },
     /// Asks before downloading `entry`, another upload of `existing`.
     Duplicate { entry: Box<Entry>, existing: Box<Track> },
+    /// The song cache's size.
+    Cache,
 }
 
 /// Where a song's menu was opened, which decides its items.
@@ -518,6 +529,7 @@ fn Shell(setup: Setup) -> Element {
     let lyrics = use_signal(LyricsCache::new);
     let lyrics_open = use_signal(|| false);
     let lyrics_lookup = use_signal(|| lyrics::lookup_enabled(&setup.library));
+    let stream = use_hook(|| Stream::new(setup.dirs.cache.join("songs"), &setup.library));
     let ctx = use_context_provider(|| Ctx {
         boot,
         queue,
@@ -537,6 +549,7 @@ fn Shell(setup: Setup) -> Element {
         lyrics,
         lyrics_open,
         lyrics_lookup,
+        stream,
     });
 
     let dirs = setup.dirs.clone();
@@ -564,8 +577,9 @@ fn Shell(setup: Setup) -> Element {
         library.subscribe();
         player.refresh();
     });
-    downloads_notification(queue);
+    downloads_notification(queue, stream);
     use_background_work(ctx);
+    use_stream(ctx);
     use_shared_links(ctx);
     // Installs itself once; the lists that allow swiping say so.
     use_hook(|| {
@@ -585,7 +599,8 @@ fn Shell(setup: Setup) -> Element {
     });
 
     let active = queue.jobs().read().iter().filter(|j| j.is_active()).count();
-    let has_mini = player.current().is_some();
+    let starting = (stream.starting)();
+    let has_mini = player.current().is_some() || starting.is_some();
     let paused = !player.snapshot().wants_play();
     rsx! {
         div { class: format!("app{}{}", if has_mini { " has-mini" } else { "" }, if paused { " paused" } else { "" }),
@@ -596,7 +611,16 @@ fn Shell(setup: Setup) -> Element {
             Page { visible: tab() == Tab::Downloads, DownloadsScreen {} }
             Page { visible: tab() == Tab::Settings, SettingsScreen {} }
             Overlays {}
-            if has_mini {
+            if let Some(entry) = starting {
+                StreamLoading {
+                    title: entry.title.clone(),
+                    artists: entry.artists.join(", "),
+                    art: entry.thumbnail.clone(),
+                    oncancel: move |_| {
+                        ctx.stop_stream();
+                    },
+                }
+            } else if has_mini {
                 MiniPlayerBar {}
             }
             BottomNav {
@@ -674,14 +698,19 @@ fn use_shared_links(ctx: Ctx) {
 }
 
 /// Keeps the downloads foreground service (and its notification) up while
-/// downloads run, so Android doesn't freeze them in the background.
-fn downloads_notification(queue: Queue) {
+/// downloads run, or songs of a list played without downloading are still
+/// to be fetched, so Android doesn't freeze the app in the background.
+fn downloads_notification(queue: Queue, stream: Stream) {
     let summary = use_memo(move || {
         let jobs = queue.jobs();
         let jobs = jobs.read();
         let active: Vec<&Job> = jobs.iter().filter(|j| j.is_active()).collect();
         if active.is_empty() {
-            return None;
+            let pending = stream.pending.read();
+            let next = stream.starting.read().clone().or_else(|| pending.front().cloned())?;
+            let more = pending.len();
+            let text = if more > 1 { format!("Next: {} • {more} to go", next.title) } else { format!("Next: {}", next.title) };
+            return Some(("Playing from YouTube Music".to_string(), text));
         }
         let running: Vec<&str> =
             active.iter().filter(|j| j.state == JobState::Downloading).map(|j| j.entry.title.as_str()).collect();
@@ -923,6 +952,8 @@ fn NowPlayingScreen() -> Element {
         _ => Vec::new(),
     };
     let search_track = track.clone();
+    let cached = track.id < 0 && !ctx.owned.read().contains(&track.video_id);
+    let keep_track = track.clone();
     rsx! {
         NowPlayingPage {
             now: now_item(&track),
@@ -1015,6 +1046,8 @@ fn NowPlayingScreen() -> Element {
                 }
             },
             onlyricssearch: move |_| ctx.search_lyrics(search_track.clone()),
+            cached,
+            onkeep: move |_| ctx.keep_cached(keep_track.clone()),
         }
     }
 }
@@ -1317,6 +1350,38 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::Section(section) => rsx! { SectionMenu { section } },
         Sheet::SectionName { id, name, video_id, a, b } => rsx! { SectionNameDialog { id, name, video_id, a, b } },
         Sheet::Duplicate { entry, existing } => rsx! { DuplicateDialog { entry: *entry, existing: *existing } },
+        Sheet::Cache => rsx! { CacheMenu {} },
+    }
+}
+
+/// How much the song cache may take, and emptying it.
+#[component]
+fn CacheMenu() -> Element {
+    let ctx = use_context::<Ctx>();
+    let limit = (ctx.stream.limit_mb)();
+    let mut items: Vec<MenuItem> = LIMITS_MB.iter().map(|&mb| MenuItem::choice(size_text(mb * 1_000_000), mb == limit)).collect();
+    items.push(MenuItem { sub: Some("Songs in the queue stay".into()), ..MenuItem::new(Icon::Trash, "Clear the cache") });
+    rsx! {
+        MenuSheet {
+            head: MenuHead {
+                title: "Song cache".into(),
+                sub: "Songs played without downloading".into(),
+                art: None,
+                icon: Icon::Play,
+            },
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| {
+                ctx.nav.back();
+                match LIMITS_MB.get(i) {
+                    Some(&mb) => ctx.set_cache_limit(mb),
+                    None => {
+                        ctx.clear_cache();
+                        ctx.notify("Cleared the song cache".into());
+                    }
+                }
+            },
+        }
     }
 }
 
@@ -1538,6 +1603,8 @@ enum SongAction {
     Album,
     Artist,
     Delete,
+    /// A cached song into the library.
+    Keep,
 }
 
 #[component]
@@ -1549,7 +1616,13 @@ fn SongMenu(track: Track, from: From) -> Element {
         add(Icon::ListStart, "Play next", SongAction::PlayNext);
         add(Icon::ListEnd, "Add to queue", SongAction::AddToQueue);
     }
-    add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
+    // Played from the cache: not in the library (until added).
+    let cached = track.id < 0;
+    if cached {
+        add(Icon::Download, "Add to library", SongAction::Keep);
+    } else {
+        add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
+    }
     add(Icon::Radio, "Start radio", SongAction::Radio);
     match &from {
         From::Playlist { entry, synced: false } => {
@@ -1558,14 +1631,16 @@ fn SongMenu(track: Track, from: From) -> Element {
         From::Queue(key) => add(Icon::CircleMinus, "Remove from queue", SongAction::RemoveFromQueue(key.clone())),
         _ => {}
     }
-    if track.album.is_some() && from != From::Album {
+    if track.album.is_some() && from != From::Album && !cached {
         add(Icon::Disc, "Go to album", SongAction::Album);
     }
     let artist = track.artists.first().cloned();
-    if artist.is_some() && !matches!(&from, From::Artist(a) if Some(a) == artist.as_ref()) {
+    if artist.is_some() && !matches!(&from, From::Artist(a) if Some(a) == artist.as_ref()) && !cached {
         add(Icon::Person, "Go to artist", SongAction::Artist);
     }
-    items.push((MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete from device") }, SongAction::Delete));
+    if !cached {
+        items.push((MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete from device") }, SongAction::Delete));
+    }
 
     let head = MenuHead {
         title: track.title.clone(),
@@ -1615,6 +1690,10 @@ fn SongMenu(track: Track, from: From) -> Element {
                     }
                     SongAction::Delete => {
                         ctx.nav.replace(Overlay::Sheet(Sheet::DeleteSongs { ids: vec![t.id], what: format!("“{}”", t.title), leave: false }))
+                    }
+                    SongAction::Keep => {
+                        ctx.nav.back();
+                        ctx.keep_cached(t);
                     }
                 }
             },
@@ -2045,6 +2124,7 @@ fn SearchScreen() -> Element {
                 search.call(false);
             },
             ondownload: move |e| ctx.download_asked(e),
+            onplay: move |e: Entry| ctx.play_entries(vec![e], 0),
             onopen: move |e: Entry| {
                 ctx.nav.push(Overlay::RemoteAlbum(OpenAlbum {
                     url: e.url.clone(),
@@ -2157,6 +2237,10 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
                 }
             },
             onretry: move |_| load.call(()),
+            onplay: move |i: usize| {
+                let Some(Ok(entries)) = tracks.peek().clone() else { return };
+                ctx.play_entries(entries.into_iter().map(album_track).collect(), i);
+            },
         }
     }
 }
@@ -2199,6 +2283,17 @@ fn SettingsScreen() -> Element {
         let library = lib.get();
         async move { crate::blocking(move || Ok::<_, ytmdl_library::Error>((library.untidy()?.len(), library.duplicates()?.len()))).await }
     });
+    // What the song cache takes.
+    let stream = ctx.stream;
+    let cache_used = use_resource(move || {
+        let _ = (stream.revision)();
+        let library = lib.get();
+        async move { crate::blocking(move || library.cache_size()).await }
+    });
+    let cache_used = match &*cache_used.read() {
+        Some(Ok(Ok(bytes))) => Some(*bytes),
+        _ => None,
+    };
     let counts = match &*counts.read() {
         Some(Ok(Ok(counts))) => Some(*counts),
         Some(Ok(Err(e))) => {
@@ -2247,6 +2342,9 @@ fn SettingsScreen() -> Element {
             duplicates: counts.map(|c| c.1),
             ontitles: move |_| ctx.nav.push(Overlay::Titles),
             onduplicates: move |_| ctx.nav.push(Overlay::Duplicates),
+            cache_used,
+            cache_limit_mb: (ctx.stream.limit_mb)(),
+            oncache: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Cache)),
         }
     }
 }
