@@ -518,6 +518,10 @@ fn Shell(setup: Setup) -> Element {
     downloads_notification(queue);
     use_background_work(ctx);
     use_shared_links(ctx);
+    // Installs itself once; the lists that allow swiping say so.
+    use_hook(|| {
+        let _ = document::eval(SWIPE_JS);
+    });
     app_update::use_install_results(ctx);
     app_update::use_updated_notice(ctx);
 
@@ -754,6 +758,8 @@ type Picking = Option<Option<String>>;
 
 /// Drag to reorder the queue; reports moves through `window.ytmdlQueueMoved`.
 const QUEUE_DRAG_JS: &str = include_str!("../../assets/queue-drag.js");
+/// Swipe song rows sideways (the queue, playlists): see `Swipe` in views.
+const SWIPE_JS: &str = include_str!("../../assets/swipe.js");
 
 #[component]
 fn NowPlayingScreen() -> Element {
@@ -844,6 +850,7 @@ fn NowPlayingScreen() -> Element {
     let secs = |ms: i64| ms as f64 / 1000.0;
     let entries = queue.clone();
     let menu_entries = queue.clone();
+    let swiped_entries = queue.clone();
 
     // The loop, if it is one of the song's saved sections.
     let song_loop = player.song_loop();
@@ -908,6 +915,11 @@ fn NowPlayingScreen() -> Element {
             onmore: move |i: usize| {
                 if let Some(e) = menu_entries.get(i) {
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track.clone()), from: From::Queue(e.key.clone()) }));
+                }
+            },
+            onremove: move |i: usize| {
+                if let Some(e) = swiped_entries.get(i) {
+                    player.remove_entry(&e.key);
                 }
             },
             onqueueloop: move |_| {
@@ -1168,6 +1180,12 @@ fn PlaylistScreen(id: i64) -> Element {
                 if let Some(e) = entry {
                     let from = From::Playlist { entry: e.entry_id, synced };
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track), from }));
+                }
+            },
+            onplaynext: move |i| {
+                let track = entries.peek().get(i).map(|e: &PlaylistEntry| e.track.clone());
+                if let Some(t) = track {
+                    ctx.play_next(&[t]);
                 }
             },
             onplaylistmore: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Playlist { id, open: true })),
