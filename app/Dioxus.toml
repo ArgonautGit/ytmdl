@@ -17,9 +17,7 @@ compile_sdk = 36
 # INTERNET is always added. Downloads go to the shared Music folder, which needs
 # all-files access on API 30+ (granted in Settings, or by appops in tests).
 # Playback and downloads run as foreground services (declared by
-# tools/patch-gradle-project); notifications show download progress. App
-# updates are installed by the app itself, without asking each time where
-# Android allows that (12+).
+# tools/patch-gradle-project); notifications show download progress.
 [android.raw]
 manifest = """
 <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
@@ -29,6 +27,4 @@ manifest = """
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.WAKE_LOCK" />
-<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-<uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 """

@@ -42,8 +42,7 @@ new APK.
   own and those of everything bundled with it. Songs play at an even
   loudness (a Settings switch turns that off): loud ones are turned down by
   their ReplayGain, and songs downloaded before ytmdl measured it are
-  measured in the background. The app updates itself from builds published
-  on GitHub (see [Published builds](#published-builds)). A song's menu starts
+  measured in the background. A song's menu starts
   its radio: the songs YouTube Music would play after it, to download. An
   artist's page (from Search → Artists, an artist link, or an artist's menu in
   the library) shows their songs, albums, singles, videos, playlists and
@@ -61,8 +60,7 @@ new APK.
   Downloads get a data-sync
   foreground service so Android doesn't freeze them in the background. The
   activity takes links shared from other apps ("Share", then ytmdl): a song
-  downloads, an album or playlist opens. App updates are installed through a
-  PackageInstaller session. `res/` has the launcher and
+  downloads, an album or playlist opens. `res/` has the launcher and
   notification icons and the Android Auto declaration.
   `tools/patch-gradle-project` adds all of it to the Gradle project dx
   generates.
@@ -122,7 +120,7 @@ needs USB debugging on; with several devices attached, pick one with
 
 `.github/workflows/apk.yml` builds the APK on GitHub (in `nix develop .#ci`,
 the dev shell with only what the APK build needs) and publishes it as the
-release `build-<n>`, with `ytmdl-update.json` describing it. Run it from the
+release `build-<n>`. Run it from the
 Actions tab (APK → Run workflow, for any branch) or with:
 
 ```sh
@@ -130,13 +128,10 @@ gh workflow run apk.yml                     # build main and publish it
 gh workflow run apk.yml --ref my-branch -f publish=false   # just build; the APK is a workflow artifact
 ```
 
-The app checks the newest release once a day (Settings → App, where the
-switch turns that off and "Check for updates" checks now) and downloads a
-build numbered higher than its own. Installing waits for the "Install build
-<n>" button, since it closes the app and stops playback. The first time,
-Android asks to allow ytmdl to install apps; after that, on Android 12 and
-later, updates install without asking. The library and settings stay, and
-the first start of the new build says "Updated to build <n>".
+The app doesn't update itself: install a release by hand, or have something
+else install new builds (my phone gets them from a home build server that
+builds `main` and signs it with its own key, so releases can't install over
+those). The first start of a newer build says "Updated to build <n>".
 
 Android installs an update only when it is signed with the same key as the
 installed app, and the APK is debug-signed, so publishing needs the debug

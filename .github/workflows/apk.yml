@@ -1,13 +1,11 @@
-# Builds the APK on GitHub and publishes it as the build the app updates to
-# (app/src/ui/app_update.rs). Start it from the Actions tab ("APK", then "Run
-# workflow", for any branch) or with
+# Builds the APK on GitHub and publishes it as a release. Start it from the
+# Actions tab ("APK", then "Run workflow", for any branch) or with
 #
 #   gh workflow run apk.yml [--ref <branch>] [-f publish=false]
 #
 # A published build is the release `build-<n>`, n from tools/build-number,
-# holding ytmdl-arm64.apk and ytmdl-update.json, which describes it. The app
-# reads the newest release's ytmdl-update.json and offers the build when n is
-# higher than its own. Every run also keeps the APK as a workflow artifact.
+# holding ytmdl-arm64.apk. Every run also keeps the APK as a workflow
+# artifact.
 #
 # Android only installs an update signed with the key of the installed app.
 # The APK is debug-signed, so publishing needs your debug keystore as the
@@ -19,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish it for the app to update to
+        description: Publish it as a release
         type: boolean
         default: true
 
@@ -147,28 +145,10 @@ jobs:
           tools/build-qjs
           tools/build-apk --no-autotest
 
-      - name: Describe the build
-        env:
-          BUILD: ${{ steps.number.outputs.build }}
-          TAG: ${{ steps.number.outputs.tag }}
-        run: |
-          apk=target/ytmdl-arm64.apk
-          jq -n \
-            --argjson build "$BUILD" \
-            --arg commit "$GITHUB_SHA" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/ytmdl-arm64.apk" \
-            --arg sha256 "$(sha256sum "$apk" | cut -d' ' -f1)" \
-            --argjson size "$(stat -c %s "$apk")" \
-            '{build: $build, commit: $commit, url: $url, sha256: $sha256, size: $size}' \
-            >target/ytmdl-update.json
-          cat target/ytmdl-update.json
-
       - uses: actions/upload-artifact@v7
         with:
           name: ytmdl-build-${{ steps.number.outputs.build }}
-          path: |
-            target/ytmdl-arm64.apk
-            target/ytmdl-update.json
+          path: target/ytmdl-arm64.apk
           if-no-files-found: error
 
       - name: Publish
@@ -177,5 +157,5 @@ jobs:
           BUILD: ${{ steps.number.outputs.build }}
           TAG: ${{ steps.number.outputs.tag }}
         run: |
-          gh release create "$TAG" target/ytmdl-arm64.apk target/ytmdl-update.json \
+          gh release create "$TAG" target/ytmdl-arm64.apk \
             --target "$GITHUB_SHA" --title "Build $BUILD" --generate-notes --latest

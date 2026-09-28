@@ -1,7 +1,6 @@
 //! App shell and state. The screens are presentational components in `views`,
 //! which `preview` also renders to static HTML with sample data.
 
-mod app_update;
 mod artist;
 mod icons;
 mod licenses;
@@ -12,6 +11,7 @@ mod sort;
 mod stats;
 mod sync;
 mod update;
+mod version;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -24,7 +24,6 @@ use crate::jobs::{Job, JobState, Queue, Services, entry_from_track};
 use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat, Sleep};
-use app_update::AppUpdates;
 use artist::{OpenArtist, OpenList, RemoteArtistScreen, RemoteListScreen};
 use icons::Icon;
 use licenses::{LicenseScreen, LicensesScreen, Notice};
@@ -66,8 +65,6 @@ struct Ctx {
     /// The sort of each library tab.
     sorts: Signal<Sorts>,
     updates: Signal<Updates>,
-    /// Builds of the app itself.
-    app_updates: Signal<AppUpdates>,
     /// Songs play at an even loudness (ReplayGain).
     normalize: Signal<bool>,
     /// Lyrics read or looked up this run, by track id.
@@ -464,7 +461,6 @@ fn Shell(setup: Setup) -> Element {
     let shared = use_signal(|| None);
     let sorts = use_signal(|| Sorts::load(&setup.library));
     let updates = use_signal(|| Updates::load(&setup.library));
-    let app_updates = use_signal(|| AppUpdates::load(&setup.library, setup.dirs.cache.join("app-update")));
     let normalize = use_signal(|| setup.library.setting(NORMALIZE).ok().flatten().as_deref() != Some("0"));
     let lyrics = use_signal(LyricsCache::new);
     let lyrics_open = use_signal(|| false);
@@ -483,7 +479,6 @@ fn Shell(setup: Setup) -> Element {
         shared,
         sorts,
         updates,
-        app_updates,
         normalize,
         lyrics,
         lyrics_open,
@@ -522,8 +517,7 @@ fn Shell(setup: Setup) -> Element {
     use_hook(|| {
         let _ = document::eval(SWIPE_JS);
     });
-    app_update::use_install_results(ctx);
-    app_update::use_updated_notice(ctx);
+    version::use_updated_notice(ctx);
 
     // Playback errors (a file deleted elsewhere, say) show once each.
     let mut shown_error = use_signal(|| None::<String>);
@@ -567,14 +561,13 @@ fn Shell(setup: Setup) -> Element {
 
 /// What runs once the downloader is up, whenever the app comes back to the
 /// screen, and every ten minutes while it is on screen: syncing playlists
-/// whose last sync is old, the daily yt-dlp and app update checks, and reading
+/// whose last sync is old, the daily yt-dlp update check, and reading
 /// the player's listening log (also whenever the song changes).
 fn use_background_work(ctx: Ctx) {
     use_effect(move || {
         if matches!(*ctx.boot.read(), Boot::Ready(_)) {
             ctx.sync_stale();
             ctx.auto_update_ytdlp();
-            ctx.auto_update_app();
         }
     });
     use_hook(move || {
@@ -593,7 +586,6 @@ fn use_background_work(ctx: Ctx) {
                 if ctx.services().is_some() {
                     ctx.sync_stale();
                     ctx.auto_update_ytdlp();
-                    ctx.auto_update_app();
                 }
             }
         })
@@ -2123,12 +2115,11 @@ fn DownloadsScreen() -> Element {
 fn SettingsScreen() -> Element {
     let ctx = use_context::<Ctx>();
     let updates = ctx.updates.read().clone();
-    let app_updates = ctx.app_updates.read().clone();
     let Some(svc) = ctx.services() else { return rsx! {} };
     let rt = svc.dl.runtime().clone();
     let v = rt.version().clone();
     let about = About {
-        app: app_update::version_text(),
+        app: version::version_text(),
         yt_dlp: v.yt_dlp.clone().unwrap_or_else(|| "unknown".into()),
         python: format!("{} ({})", v.python, v.platform),
         openssl: v.openssl.clone(),
@@ -2137,14 +2128,6 @@ fn SettingsScreen() -> Element {
     let output = if storage { &svc.output_dir } else { &svc.fallback_output_dir };
     // Rechecked whenever a check finishes.
     let next_version = if updates.checking { None } else { rt.next_version() };
-    let app_update = app_update::this_build().filter(|_| platform::app_update::SUPPORTED).map(|build| AppUpdateInfo {
-        build,
-        ready: app_updates.ready.as_ref().map(|r| r.build),
-        busy: app_updates.busy,
-        message: app_updates.message.clone(),
-        auto: app_updates.auto,
-        auto_note: app_updates.note(),
-    });
     rsx! {
         SettingsPage {
             about,
@@ -2157,10 +2140,6 @@ fn SettingsScreen() -> Element {
             auto_note: updates.note(),
             onupdate: move |channel: Channel| ctx.check_ytdlp(channel, true),
             ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
-            app_update,
-            oncheckapp: move |_| ctx.check_app_update(true),
-            oninstallapp: move |_| ctx.install_app_update(),
-            ontoggleautoapp: move |_| ctx.set_auto_update_app(!ctx.app_updates.peek().auto),
             onallow: move |_| platform::request_storage_access(),
             onlicenses: move |_| ctx.nav.push(Overlay::Licenses),
             normalize: (ctx.normalize)(),
