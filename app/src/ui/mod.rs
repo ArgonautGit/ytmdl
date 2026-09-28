@@ -2,6 +2,7 @@
 //! which `preview` also renders to static HTML with sample data.
 
 mod app_update;
+mod artist;
 mod icons;
 mod licenses;
 mod lyrics;
@@ -16,7 +17,7 @@ mod views;
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
-use ytmdl_core::{Channel, CollectionKind, Entry, Resolved, SearchSource};
+use ytmdl_core::{Channel, CollectionKind, Entry, RADIO_SONGS, RadioSeed, Resolved, SearchSource};
 use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, PlayCounts, Playlist, PlaylistEntry, Section, Track};
 
 use crate::jobs::{Job, JobState, Queue, Services, entry_from_track};
@@ -24,6 +25,7 @@ use crate::library::LibraryHandle;
 use crate::platform::{self, Dirs};
 use crate::player::{Player, Repeat, Sleep};
 use app_update::AppUpdates;
+use artist::{OpenArtist, OpenList, RemoteArtistScreen, RemoteListScreen};
 use icons::Icon;
 use licenses::{LicenseScreen, LicensesScreen, Notice};
 use lyrics::LyricsCache;
@@ -182,6 +184,41 @@ impl Ctx {
         let entries = self.library.get().playlist_tracks(id).unwrap_or_default();
         entries.into_iter().map(|e| e.track).collect()
     }
+
+    /// Whether the downloader is up; says so when it isn't.
+    fn online(&self) -> bool {
+        match &*self.boot.peek() {
+            Boot::Ready(_) => true,
+            Boot::Starting => {
+                self.notify("The downloader is still starting".into());
+                false
+            }
+            Boot::Failed(_) => {
+                self.notify("The downloader could not start".into());
+                false
+            }
+        }
+    }
+
+    /// Opens YouTube Music's radio of `t` (songs like it) over its menu.
+    fn song_radio(&self, t: &Track) {
+        if !self.online() {
+            self.nav.back();
+            return;
+        }
+        self.nav.replace(Overlay::RemoteAlbum(OpenAlbum {
+            url: t.url.clone(),
+            header: AlbumHeader {
+                title: t.title.clone(),
+                artists: t.artists.clone(),
+                year: None,
+                kind: Some("radio".into()),
+                cover: art_src(t.art.as_deref(), ART_LARGE),
+            },
+            tracks: None,
+            radio: Some(RadioSeed::Song(t.video_id.clone())),
+        }));
+    }
 }
 
 /// Pages opened over the tabs (albums, artists) and menus. Each is a browser
@@ -194,8 +231,12 @@ struct Nav {
 
 #[derive(Clone, PartialEq)]
 enum Overlay {
-    /// A YouTube Music album or playlist from search.
+    /// A YouTube Music album, playlist or radio.
     RemoteAlbum(OpenAlbum),
+    /// An artist's YouTube Music page.
+    RemoteArtist(OpenArtist),
+    /// All of one list of an artist page.
+    RemoteList(OpenList),
     /// A downloaded album.
     Album { title: String, artist: String },
     Artist(String),
@@ -214,6 +255,8 @@ enum Overlay {
 enum Sheet {
     Song { track: Box<Track>, from: From },
     Album { title: String, artist: String },
+    /// An artist in the library.
+    Artist(String),
     /// `open`: from the playlist's own page (closed when it is deleted).
     Playlist { id: i64, open: bool },
     /// Picks a playlist for the songs.
@@ -658,6 +701,8 @@ fn Overlays() -> Element {
                     div { key: "{id}", class,
                         match overlay {
                             Overlay::RemoteAlbum(open) => rsx! { RemoteAlbumScreen { open } },
+                            Overlay::RemoteArtist(open) => rsx! { RemoteArtistScreen { open } },
+                            Overlay::RemoteList(open) => rsx! { RemoteListScreen { open } },
                             Overlay::Album { title, artist } => rsx! { LocalAlbumScreen { title, artist } },
                             Overlay::Artist(name) => rsx! { ArtistScreen { name } },
                             Overlay::Playlist(id) => rsx! { PlaylistScreen { id } },
@@ -1159,6 +1204,7 @@ fn ArtistScreen(name: String) -> Element {
     let list = tracks.read();
     let current = ctx.player.current_id();
     let artist = name.clone();
+    let n = name.clone();
     rsx! {
         ArtistPage {
             name,
@@ -1180,6 +1226,7 @@ fn ArtistScreen(name: String) -> Element {
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(track), from: From::Artist(artist.clone()) }));
                 }
             },
+            onartistmore: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Artist(n.clone()))),
         }
     }
 }
@@ -1191,6 +1238,7 @@ fn SheetScreen(sheet: Sheet) -> Element {
     match sheet {
         Sheet::Song { track, from } => rsx! { SongMenu { track: *track, from } },
         Sheet::Album { title, artist } => rsx! { AlbumMenu { title, artist } },
+        Sheet::Artist(name) => rsx! { ArtistMenu { name } },
         Sheet::Playlist { id, open } => rsx! { PlaylistMenu { id, open } },
         Sheet::AddTo { tracks } => rsx! { AddToPlaylist { tracks } },
         Sheet::Name { id, name, tracks } => rsx! { NameDialog { id, name, tracks } },
@@ -1396,6 +1444,7 @@ enum SongAction {
     PlayNext,
     AddToQueue,
     AddToPlaylist,
+    Radio,
     RemoveFromPlaylist(i64),
     RemoveFromQueue(String),
     Album,
@@ -1413,6 +1462,7 @@ fn SongMenu(track: Track, from: From) -> Element {
         add(Icon::ListEnd, "Add to queue", SongAction::AddToQueue);
     }
     add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
+    add(Icon::Radio, "Start radio", SongAction::Radio);
     match &from {
         From::Playlist { entry, synced: false } => {
             add(Icon::CircleMinus, "Remove from playlist", SongAction::RemoveFromPlaylist(*entry))
@@ -1454,6 +1504,7 @@ fn SongMenu(track: Track, from: From) -> Element {
                         ctx.add_to_queue(&[t]);
                     }
                     SongAction::AddToPlaylist => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo { tracks: vec![t.id] })),
+                    SongAction::Radio => ctx.song_radio(&t),
                     SongAction::RemoveFromPlaylist(entry) => {
                         ctx.nav.back();
                         match ctx.library.get().remove_from_playlist(entry) {
@@ -1526,6 +1577,43 @@ fn AlbumMenu(title: String, artist: String) -> Element {
                         ctx.nav.replace(Overlay::Sheet(Sheet::DeleteSongs { ids, what, leave: true }))
                     }
                 }
+            },
+        }
+    }
+}
+
+/// An artist in the library.
+#[component]
+fn ArtistMenu(name: String) -> Element {
+    let ctx = use_context::<Ctx>();
+    let tracks = ctx.library.get().artist_tracks(&name).unwrap_or_default();
+    let head = MenuHead {
+        title: name.clone(),
+        sub: plural(tracks.len(), "song", "songs"),
+        art: art_src(tracks.iter().find_map(|t| t.art.as_deref()), ART_SMALL),
+        icon: Icon::Person,
+    };
+    let items = vec![
+        MenuItem::new(Icon::ListStart, "Play next"),
+        MenuItem::new(Icon::ListEnd, "Add to queue"),
+        MenuItem { sub: Some("Albums, songs and similar artists".into()), ..MenuItem::new(Icon::Search, "On YouTube Music") },
+    ];
+    rsx! {
+        MenuSheet {
+            head,
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| match i {
+                0 => {
+                    ctx.nav.back();
+                    ctx.play_next(&tracks);
+                }
+                1 => {
+                    ctx.nav.back();
+                    ctx.add_to_queue(&tracks);
+                }
+                _ if ctx.online() => ctx.nav.replace(Overlay::RemoteArtist(OpenArtist::named(&name))),
+                _ => ctx.nav.back(),
             },
         }
     }
@@ -1745,6 +1833,8 @@ struct OpenAlbum {
     url: String,
     header: AlbumHeader,
     tracks: Option<Vec<Entry>>,
+    /// A radio's songs come from YouTube Music's radio instead of `url`.
+    radio: Option<RadioSeed>,
 }
 
 #[component]
@@ -1771,6 +1861,12 @@ fn SearchScreen() -> Element {
         };
         found.set(Found::Loading);
         spawn(async move {
+            // An artist link opens their page.
+            if let Some(id) = ytmdl_core::artist_id(&q) {
+                found.set(Found::Idle);
+                ctx.nav.push(Overlay::RemoteArtist(OpenArtist { id, name: String::new(), cover: None }));
+                return;
+            }
             // A pasted link is resolved instead of searched.
             if q.starts_with("http://") || q.starts_with("https://") {
                 let result = svc.dl.resolve(&q).await;
@@ -1798,6 +1894,7 @@ fn SearchScreen() -> Element {
                                 cover: entries.iter().find_map(|e| e.thumbnail.clone()),
                             },
                             tracks: Some(entries),
+                            radio: None,
                         }));
                     }
                     Err(e) => found.set(Found::Error(e.to_string())),
@@ -1834,6 +1931,7 @@ fn SearchScreen() -> Element {
         (_, Found::Loading) => ResultsView::Loading,
         (_, Found::Error(e)) => ResultsView::Error(e),
         (_, Found::Entries(SearchSource::MusicAlbums, entries)) => ResultsView::Albums(entries),
+        (_, Found::Entries(SearchSource::MusicArtists, entries)) => ResultsView::Artists(entries),
         (_, Found::Entries(SearchSource::YouTube, entries)) => ResultsView::Videos(with_states(entries, &states)),
         (_, Found::Entries(SearchSource::MusicSongs, entries)) => ResultsView::Songs(with_states(entries, &states)),
     };
@@ -1860,8 +1958,14 @@ fn SearchScreen() -> Element {
             },
             ondownload: move |e| ctx.download(e),
             onopen: move |e: Entry| {
-                ctx.nav.push(Overlay::RemoteAlbum(OpenAlbum { url: e.url.clone(), header: AlbumHeader::from_entry(&e), tracks: None }))
+                ctx.nav.push(Overlay::RemoteAlbum(OpenAlbum {
+                    url: e.url.clone(),
+                    header: AlbumHeader::from_entry(&e),
+                    tracks: None,
+                    radio: None,
+                }))
             },
+            onopenartist: move |e: Entry| ctx.nav.push(Overlay::RemoteArtist(OpenArtist::from_entry(&e))),
             onallow: move |_| platform::request_storage_access(),
         }
     }
@@ -1879,19 +1983,32 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
         lib.subscribe();
         source.as_deref().and_then(|s| lib.get().synced_playlist(s).ok().flatten())
     });
+    // Only an album's tracks share its cover.
+    let is_album = !is_playlist && open.radio.is_none();
     let url = open.url.clone();
+    let radio = open.radio.clone();
+    // What the page was opened as decides what the link is: all of an
+    // artist's songs are a playlist with an album's kind of id.
+    let hint = match open.header.kind.as_deref() {
+        Some("playlist") => Some(CollectionKind::Playlist),
+        Some("album" | "ep" | "single") => Some(CollectionKind::Album),
+        _ => None,
+    };
     let mut header = use_signal(|| open.header.clone());
     let mut tracks = use_signal(|| open.tracks.clone().map(Ok::<_, String>));
 
     let load = use_callback(move |()| {
         let Some(svc) = ctx.services() else { return };
-        let url = url.clone();
+        let (url, radio) = (url.clone(), radio.clone());
         tracks.set(None);
         spawn(async move {
-            let result = match svc.dl.resolve(&url).await {
-                Ok(Resolved::Collection { entries, .. }) => Ok(entries),
-                Ok(Resolved::Track(t)) => Ok(vec![entry_from_track(t)]),
-                Err(e) => Err(e.to_string()),
+            let result = match &radio {
+                Some(seed) => svc.dl.radio(seed, RADIO_SONGS).await.map_err(|e| e.to_string()),
+                None => match svc.dl.resolve_as(&url, hint).await {
+                    Ok(Resolved::Collection { entries, .. }) => Ok(entries),
+                    Ok(Resolved::Track(t)) => Ok(vec![entry_from_track(t)]),
+                    Err(e) => Err(e.to_string()),
+                },
             };
             if let Ok(entries) = &result
                 && header.peek().cover.is_none()
@@ -1909,7 +2026,7 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
 
     // Album tracks list video thumbnails; the queue shows the album's square art instead.
     let album_track = move |mut entry: Entry| {
-        if let Some(cover) = header.peek().cover.clone().filter(|_| !is_playlist) {
+        if let Some(cover) = header.peek().cover.clone().filter(|_| is_album) {
             entry.thumbnail = Some(cover);
         }
         entry

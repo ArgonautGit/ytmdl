@@ -110,6 +110,163 @@ pub enum Resolved {
     },
 }
 
+/// Where a YouTube Music radio starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RadioSeed {
+    /// Songs like this one (its video id), starting with it.
+    Song(String),
+    /// A mix YouTube Music names, such as an artist's.
+    Mix { playlist_id: String, params: Option<String> },
+}
+
+impl RadioSeed {
+    /// The bridge's `music_radio` request.
+    pub(crate) fn request(&self, limit: usize) -> serde_json::Value {
+        match self {
+            RadioSeed::Song(id) => serde_json::json!({ "video_id": id, "limit": limit }),
+            RadioSeed::Mix { playlist_id, params } => {
+                serde_json::json!({ "playlist_id": playlist_id, "params": params, "limit": limit })
+            }
+        }
+    }
+}
+
+/// A YouTube Music artist page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtistPage {
+    /// The artist's channel id.
+    pub id: String,
+    /// Empty if the page doesn't say.
+    pub name: String,
+    /// The artist's picture (a wide banner; [`art_url`] crops it square).
+    pub art: Option<String>,
+    /// "7.97M monthly audience", or "20.5M subscribers".
+    pub audience: Option<String>,
+    pub description: Option<String>,
+    /// The artist's mix.
+    pub radio: Option<RadioSeed>,
+    pub sections: Vec<ArtistSection>,
+}
+
+/// One list of an artist page, as YouTube Music shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtistSection {
+    /// YouTube Music's heading: "Top songs", "Albums", "Fans might also like".
+    pub title: String,
+    pub kind: SectionKind,
+    pub entries: Vec<Entry>,
+    /// The whole list, when the page shows part of it.
+    pub more: Option<More>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SectionKind {
+    Songs,
+    Videos,
+    /// Albums, singles and EPs.
+    Albums,
+    Playlists,
+    /// Other artists.
+    Artists,
+}
+
+/// Where the whole of an artist page's section is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum More {
+    /// A playlist (all of the artist's songs, say), opened like any other.
+    Playlist(String),
+    /// A list [`crate::Downloader::browse`] reads (all of the artist's albums).
+    Browse { browse_id: String, params: Option<String> },
+}
+
+/// The bridge's `music_radio` and `music_browse` answer.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct EntryList {
+    #[serde(default)]
+    pub entries: Vec<Info>,
+}
+
+impl EntryList {
+    pub(crate) fn entries(&self) -> Vec<Entry> {
+        self.entries.iter().filter_map(Info::to_entry).collect()
+    }
+}
+
+/// The bridge's `music_artist` answer.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawArtist {
+    id: String,
+    name: Option<String>,
+    #[serde(default)]
+    thumbnails: Vec<Thumbnail>,
+    subscribers: Option<String>,
+    audience: Option<String>,
+    description: Option<String>,
+    radio: Option<RawMix>,
+    #[serde(default)]
+    sections: Vec<RawSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawMix {
+    playlist_id: String,
+    params: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSection {
+    title: Option<String>,
+    /// Unknown kinds (from a newer bridge) are left out.
+    kind: String,
+    more: Option<RawMore>,
+    #[serde(default)]
+    entries: Vec<Info>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawMore {
+    browse_id: String,
+    params: Option<String>,
+}
+
+impl RawArtist {
+    pub(crate) fn into_page(self) -> ArtistPage {
+        let art = self
+            .thumbnails
+            .iter()
+            .max_by_key(|t| t.width.unwrap_or(0) * t.height.unwrap_or(0))
+            .map(|t| t.url.clone());
+        let sections = self
+            .sections
+            .into_iter()
+            .filter_map(|s| {
+                let kind = serde_json::from_value(serde_json::Value::String(s.kind)).ok()?;
+                let entries: Vec<Entry> = s.entries.iter().filter_map(Info::to_entry).collect();
+                (!entries.is_empty()).then(|| ArtistSection {
+                    title: s.title.unwrap_or_default(),
+                    kind,
+                    entries,
+                    more: s.more.map(|m| match m.browse_id.strip_prefix("VL") {
+                        Some(list) => More::Playlist(format!("https://music.youtube.com/playlist?list={list}")),
+                        None => More::Browse { browse_id: m.browse_id, params: m.params },
+                    }),
+                })
+            })
+            .collect();
+        ArtistPage {
+            id: self.id,
+            name: self.name.unwrap_or_default(),
+            art,
+            audience: self.audience.or_else(|| self.subscribers.map(|s| format!("{s} subscribers"))),
+            description: self.description,
+            radio: self.radio.map(|r| RadioSeed::Mix { playlist_id: r.playlist_id, params: r.params }),
+            sections,
+        }
+    }
+}
+
 /// A finished download.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Downloaded {
@@ -249,6 +406,19 @@ pub fn playlist_url(url: &str) -> Option<String> {
     valid.then(|| format!("https://music.youtube.com/playlist?list={id}"))
 }
 
+/// The artist a YouTube Music artist link names (`/channel/UC…` or
+/// `/browse/UC…`): their channel id.
+pub fn artist_id(url: &str) -> Option<String> {
+    let (host, path) = url.split_once("://")?.1.split_once('/')?;
+    if host != "music.youtube.com" {
+        return None;
+    }
+    let path = path.split(['?', '#']).next()?;
+    let id = path.strip_prefix("channel/").or_else(|| path.strip_prefix("browse/"))?.trim_end_matches('/');
+    let valid = id.len() > 2 && id.starts_with("UC") && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    valid.then(|| id.to_owned())
+}
+
 /// The link in text shared from another app ("Check this out https://…").
 /// A song link keeps only its video: YouTube Music adds the list it was
 /// playing from (`list=RD…`), which would open that mix instead of the song.
@@ -341,6 +511,72 @@ mod tests {
         assert_eq!(shared_link(&format!("Album {album}")).as_deref(), Some(album));
         assert_eq!(shared_link("no link here"), None);
         assert_eq!(shared_link("https://music.youtube.com/watch?v=<x>"), None);
+    }
+
+    #[test]
+    fn finds_artist_ids() {
+        let id = Some("UC9ouIc5bVUPVzZ0X_JETPEA");
+        assert_eq!(artist_id("https://music.youtube.com/channel/UC9ouIc5bVUPVzZ0X_JETPEA").as_deref(), id);
+        assert_eq!(artist_id("https://music.youtube.com/browse/UC9ouIc5bVUPVzZ0X_JETPEA?si=x").as_deref(), id);
+        assert_eq!(artist_id("https://music.youtube.com/channel/UC9ouIc5bVUPVzZ0X_JETPEA/").as_deref(), id);
+        // An album, a YouTube channel (not an artist page), no id.
+        assert_eq!(artist_id("https://music.youtube.com/browse/MPREb_abc"), None);
+        assert_eq!(artist_id("https://www.youtube.com/channel/UC9ouIc5bVUPVzZ0X_JETPEA"), None);
+        assert_eq!(artist_id("https://music.youtube.com/channel/"), None);
+        assert_eq!(artist_id("https://music.youtube.com/channel/UC<x>"), None);
+    }
+
+    #[test]
+    fn asks_for_radios() {
+        assert_eq!(
+            RadioSeed::Song("abc".into()).request(50),
+            serde_json::json!({ "video_id": "abc", "limit": 50 })
+        );
+        let mix = RadioSeed::Mix { playlist_id: "RDEMx".into(), params: Some("wAEB".into()) };
+        assert_eq!(mix.request(20), serde_json::json!({ "playlist_id": "RDEMx", "params": "wAEB", "limit": 20 }));
+    }
+
+    #[test]
+    fn maps_artist_pages() {
+        let raw: RawArtist = serde_json::from_value(serde_json::json!({
+            "id": "UCx",
+            "name": "Pentatonix",
+            "thumbnails": [
+                {"url": "https://yt3.googleusercontent.com/p=w540-h225-p-l90-rj", "width": 540, "height": 225},
+                {"url": "https://yt3.googleusercontent.com/p=w1440-h600-p-l90-rj", "width": 1440, "height": 600}
+            ],
+            "subscribers": "20.5M",
+            "audience": null,
+            "radio": {"playlist_id": "RDEMx", "params": "wAEB"},
+            "sections": [
+                {"title": "Top songs", "kind": "songs",
+                 "more": {"browse_id": "VLOLAK5uy_x", "params": "ggMCCAI%3D"},
+                 "entries": [{"_type": "url", "id": "v1", "url": "https://music.youtube.com/watch?v=v1",
+                              "title": "Jolene", "artists": ["Pentatonix"], "ytmdl_kind": "song"}]},
+                {"title": "Albums", "kind": "albums",
+                 "more": {"browse_id": "UCx", "params": "abc"},
+                 "entries": [{"_type": "url", "id": "MPREb_1", "url": "https://music.youtube.com/browse/MPREb_1",
+                              "title": "PTX", "release_year": 2014, "ytmdl_page": "album"}]},
+                {"title": "Coming soon", "kind": "concerts", "entries": [{"id": "x", "title": "x"}]},
+                {"title": "Empty", "kind": "videos", "entries": []}
+            ]
+        }))
+        .unwrap();
+        let page = raw.into_page();
+        assert_eq!(page.name, "Pentatonix");
+        assert_eq!(page.art.as_deref(), Some("https://yt3.googleusercontent.com/p=w1440-h600-p-l90-rj"));
+        assert_eq!(page.audience.as_deref(), Some("20.5M subscribers"));
+        assert_eq!(page.radio, Some(RadioSeed::Mix { playlist_id: "RDEMx".into(), params: Some("wAEB".into()) }));
+        // Unknown kinds and empty sections are left out.
+        assert_eq!(page.sections.len(), 2);
+        let songs = &page.sections[0];
+        assert_eq!((songs.title.as_str(), songs.kind), ("Top songs", SectionKind::Songs));
+        assert_eq!(songs.more, Some(More::Playlist("https://music.youtube.com/playlist?list=OLAK5uy_x".into())));
+        assert_eq!(songs.entries[0].title, "Jolene");
+        let albums = &page.sections[1];
+        assert_eq!(albums.more, Some(More::Browse { browse_id: "UCx".into(), params: Some("abc".into()) }));
+        assert_eq!(albums.entries[0].url, "https://music.youtube.com/browse/MPREb_1");
+        assert_eq!(albums.entries[0].year, Some(2014));
     }
 
     #[test]

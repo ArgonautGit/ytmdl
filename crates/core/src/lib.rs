@@ -15,16 +15,22 @@ pub mod tag;
 use std::path::PathBuf;
 
 pub use error::{Error, Result};
-pub use model::{CollectionKind, Downloaded, Entry, Resolved, TrackMeta, art_url, playlist_url, shared_link};
+pub use model::{
+    ArtistPage, ArtistSection, CollectionKind, Downloaded, Entry, More, RadioSeed, Resolved, SectionKind, TrackMeta,
+    art_url, artist_id, playlist_url, shared_link,
+};
 pub use runtime::{CancelToken, Channel, Progress, Runtime, RuntimeConfig, UpdateOutcome, VersionInfo};
 
-use model::Info;
+use model::{EntryList, Info, RawArtist};
 
 /// Largest cover image we will embed.
 const MAX_COVER_BYTES: usize = 8 * 1024 * 1024;
 
 /// Prefer AAC in MP4 (taggable without ffmpeg), then any audio-only stream.
 pub const DEFAULT_FORMAT: &str = "bestaudio[ext=m4a]/bestaudio";
+
+/// Songs in a radio (YouTube Music gives about 50 at a time).
+pub const RADIO_SONGS: usize = 50;
 
 /// `<out>/<Artist>/<Album>/<Title> [<id>].<ext>`
 pub const DEFAULT_TEMPLATE: &str =
@@ -36,6 +42,8 @@ pub enum SearchSource {
     MusicSongs,
     /// YouTube Music "Albums" results.
     MusicAlbums,
+    /// YouTube Music "Artists" results.
+    MusicArtists,
     /// Regular YouTube search.
     YouTube,
 }
@@ -95,6 +103,7 @@ impl Downloader {
             SearchSource::YouTube => format!("ytsearch{limit}:{query}"),
             SearchSource::MusicSongs => format!("https://music.youtube.com/search?q={}#songs", encode_query(query)),
             SearchSource::MusicAlbums => format!("https://music.youtube.com/search?q={}#albums", encode_query(query)),
+            SearchSource::MusicArtists => format!("https://music.youtube.com/search?q={}#artists", encode_query(query)),
         };
         let mut args = self.rt.base_args();
         args.extend(["--flat-playlist".into(), "--playlist-end".into(), limit.to_string()]);
@@ -104,15 +113,22 @@ impl Downloader {
 
     /// Track metadata, or the members of an album/playlist.
     pub async fn resolve(&self, url: &str) -> Result<Resolved> {
+        self.resolve_as(url, None).await
+    }
+
+    /// Like [`Downloader::resolve`], for a link known to be an album or a
+    /// playlist: all of an artist's songs are an `OLAK5uy_` playlist, which
+    /// would otherwise pass for an album.
+    pub async fn resolve_as(&self, url: &str, kind: Option<CollectionKind>) -> Result<Resolved> {
         let mut args = self.rt.base_args();
         args.push("--flat-playlist".into());
         let info: Info = serde_json::from_str(&self.rt.extract_json(args, url.to_owned()).await?)?;
         if info.kind.as_deref() == Some("playlist") {
-            let kind = if url.contains("OLAK5uy_") || url.contains("/browse/MPREb") {
+            let kind = kind.unwrap_or(if url.contains("OLAK5uy_") || url.contains("/browse/MPREb") {
                 CollectionKind::Album
             } else {
                 CollectionKind::Playlist
-            };
+            });
             let mut title = info.title.clone().unwrap_or_default();
             let mut entries: Vec<Entry> = info.entries.iter().filter_map(Info::to_entry).collect();
             if kind == CollectionKind::Album {
@@ -125,6 +141,27 @@ impl Downloader {
             return Ok(Resolved::Collection { title, kind, entries });
         }
         Ok(Resolved::Track(info.to_track()))
+    }
+
+    /// YouTube Music's radio from `seed`: up to `limit` songs like it.
+    pub async fn radio(&self, seed: &RadioSeed, limit: usize) -> Result<Vec<Entry>> {
+        let json = self.rt.music_json("music_radio", self.rt.base_args(), seed.request(limit)).await?;
+        Ok(serde_json::from_str::<EntryList>(&json)?.entries())
+    }
+
+    /// The YouTube Music page of the artist with channel id `id`.
+    pub async fn artist(&self, id: &str) -> Result<ArtistPage> {
+        let request = serde_json::json!({ "browse_id": id });
+        let json = self.rt.music_json("music_artist", self.rt.base_args(), request).await?;
+        Ok(serde_json::from_str::<RawArtist>(&json)?.into_page())
+    }
+
+    /// Up to `limit` entries of a [`More::Browse`] list (all of an artist's
+    /// albums, say).
+    pub async fn browse(&self, browse_id: &str, params: Option<&str>, limit: usize) -> Result<Vec<Entry>> {
+        let request = serde_json::json!({ "browse_id": browse_id, "params": params, "limit": limit });
+        let json = self.rt.music_json("music_browse", self.rt.base_args(), request).await?;
+        Ok(serde_json::from_str::<EntryList>(&json)?.entries())
     }
 
     /// Downloads one track, then tags it.

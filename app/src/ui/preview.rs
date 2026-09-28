@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use dioxus::prelude::*;
-use ytmdl_core::{CancelToken, Entry, Progress, SearchSource};
+use ytmdl_core::{CancelToken, Entry, Progress, SearchSource, SectionKind};
 
 use super::icons::Icon;
 use super::sort::SortKey;
@@ -84,15 +84,21 @@ const SCREENS: &[Screen] = &[
     ("library-empty", "Library, empty", library_empty),
     ("library-album", "Downloaded album", library_album),
     ("artist", "Artist", artist),
+    ("artist-menu", "Artist menu", artist_menu),
     ("startup", "Starting", startup),
     ("search-starting", "Search while the downloader starts", search_starting),
     ("search-idle", "Search, nothing typed", search_idle),
     ("search-songs", "Songs, mixed download states", search_songs),
     ("search-albums", "Albums", search_albums),
+    ("search-artists", "Artists", search_artists),
     ("search-videos", "Videos", search_videos),
     ("search-loading", "Searching", search_loading),
     ("album", "Album page", album),
     ("album-loading", "Album loading", album_loading),
+    ("radio", "A song's radio", radio),
+    ("remote-artist", "Artist on YouTube Music", remote_artist),
+    ("remote-artist-loading", "Artist on YouTube Music, loading", remote_artist_loading),
+    ("remote-list", "All of an artist's albums", remote_list),
     ("downloads", "Downloads", downloads),
     ("downloads-empty", "Downloads, empty", downloads_empty),
     ("settings", "Settings, no storage access", settings),
@@ -176,6 +182,7 @@ fn search_page(source: SearchSource, query: &str, results: ResultsView, storage:
             onsource: |_| {},
             ondownload: |_| {},
             onopen: |_| {},
+            onopenartist: |_| {},
             onallow: |_| {},
         }
     }
@@ -493,6 +500,7 @@ fn song_menu() -> Element {
         MenuItem::new(Icon::ListStart, "Play next"),
         MenuItem::new(Icon::ListEnd, "Add to queue"),
         MenuItem::new(Icon::ListPlus, "Add to playlist"),
+        MenuItem::new(Icon::Radio, "Start radio"),
         MenuItem::new(Icon::Disc, "Go to album"),
         MenuItem::new(Icon::Person, "Go to artist"),
         MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete from device") },
@@ -641,6 +649,122 @@ fn artist() -> Element {
                     onshuffle: |_| {},
                     onalbum: |_| {},
                     onmore: |_| {},
+                    onartistmore: |_| {},
+                }
+            }
+        },
+    )
+}
+
+fn artist_menu() -> Element {
+    let head = MenuHead { title: "Kevin MacLeod".into(), sub: "22 songs".into(), art: sample().songs[1].thumbnail.clone(), icon: Icon::Person };
+    let items = vec![
+        MenuItem::new(Icon::ListStart, "Play next"),
+        MenuItem::new(Icon::ListEnd, "Add to queue"),
+        MenuItem { sub: Some("Albums, songs and similar artists".into()), ..MenuItem::new(Icon::Search, "On YouTube Music") },
+    ];
+    with_modal(
+        library_page_body(LibraryView::Artists, song_items()),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+/// Artists as YouTube Music lists them.
+fn artist_entries() -> Vec<Entry> {
+    ["Kevin MacLeod", "Kevin McLeod", "Incompetech", "Jason Shaw", "Chris Zabriskie"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| Entry { artists: Vec::new(), duration_secs: None, ..entry(80 + i, name, None, 0.0, "artist", None) })
+        .collect()
+}
+
+fn search_artists() -> Element {
+    shell(Tab::Search, 0, search_page(SearchSource::MusicArtists, "kevin", ResultsView::Artists(artist_entries()), true))
+}
+
+fn remote_artist_page(shelves: ArtistShelves) -> Element {
+    let loaded = matches!(shelves, ArtistShelves::Loaded(_));
+    shell(
+        Tab::Search,
+        2,
+        rsx! {
+            div { class: "overlay",
+                RemoteArtistPage {
+                    name: "Kevin MacLeod".to_string(),
+                    cover: artist_entries()[0].thumbnail.clone(),
+                    audience: loaded.then(|| "423M monthly audience".to_string()),
+                    about: loaded.then(|| {
+                        "Kevin MacLeod is an American composer. His music is released under Creative Commons \
+                         licenses, and has been used in thousands of films, games and videos."
+                            .to_string()
+                    }),
+                    shelves,
+                    radio: loaded,
+                    onback: |_| {},
+                    onradio: |_| {},
+                    ondownload: |_| {},
+                    onopen: |_| {},
+                    onshowall: |_| {},
+                    onretry: |_| {},
+                }
+            }
+        },
+    )
+}
+
+fn remote_artist() -> Element {
+    let s = sample();
+    let idle = |entries: &[Entry]| entries.iter().map(|e| (e.clone(), TrackState::Idle)).collect::<Vec<_>>();
+    let shelf = |title: &str, kind, entries, more| ArtistShelf { title: title.into(), kind, entries, more };
+    remote_artist_page(ArtistShelves::Loaded(vec![
+        shelf("Top songs", SectionKind::Songs, states_for(&s.songs), true),
+        shelf("Albums", SectionKind::Albums, idle(&s.albums), true),
+        shelf("Singles & EPs", SectionKind::Albums, idle(&s.albums[1..]), false),
+        shelf("Videos", SectionKind::Videos, idle(&s.videos), true),
+        shelf("Fans might also like", SectionKind::Artists, idle(&artist_entries()[1..]), false),
+    ]))
+}
+
+fn remote_artist_loading() -> Element {
+    remote_artist_page(ArtistShelves::Loading)
+}
+
+fn radio() -> Element {
+    let rows = sample()
+        .songs
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.clone(), if i == 0 { TrackState::Done } else { TrackState::Idle }))
+        .collect();
+    let first = &sample().songs[0];
+    let header = AlbumHeader {
+        title: first.title.clone(),
+        artists: first.artists.clone(),
+        year: None,
+        kind: Some("radio".into()),
+        cover: first.thumbnail.clone(),
+    };
+    album_page_with(AlbumTracks::Loaded(rows), header, None)
+}
+
+fn remote_list() -> Element {
+    let entries = sample().albums.iter().map(|e| (e.clone(), TrackState::Idle)).collect();
+    shell(
+        Tab::Search,
+        0,
+        rsx! {
+            div { class: "overlay",
+                RemoteListPage {
+                    title: "Albums".to_string(),
+                    sub: "Kevin MacLeod".to_string(),
+                    kind: SectionKind::Albums,
+                    entries,
+                    loading: false,
+                    error: None,
+                    onback: |_| {},
+                    ondownload: |_| {},
+                    onopen: |_| {},
+                    ondownloadall: |_| {},
                 }
             }
         },

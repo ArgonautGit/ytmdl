@@ -53,6 +53,8 @@ pub enum Icon {
     Bookmark,
     Volume,
     Lyrics,
+    /// Songs like this one (YouTube Music's radio).
+    Radio,
 }
 
 #[component]
@@ -198,6 +200,10 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         },
         Icon::Lyrics => rsx! {
             path { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2zM8 8h8M8 12h5" }
+        },
+        Icon::Radio => rsx! {
+            circle { cx: "12", cy: "12", r: "2" }
+            path { d: "M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" }
         },
     };
     rsx! {

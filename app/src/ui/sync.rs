@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
-use ytmdl_core::{Entry, Resolved};
+use ytmdl_core::{CollectionKind, Entry, Resolved};
 
 use super::views::plural;
 use super::Ctx;
@@ -69,7 +69,7 @@ impl Ctx {
         }
         syncs.write().insert(id, SyncState::Running);
         spawn(async move {
-            let result = match svc.dl.resolve(&url).await {
+            let result = match svc.dl.resolve_as(&url, Some(CollectionKind::Playlist)).await {
                 Ok(Resolved::Collection { entries, .. }) => ctx.apply_sync(id, entries, manual).await,
                 Ok(Resolved::Track(_)) => Err("the link no longer leads to a playlist".into()),
                 Err(e) => Err(e.to_string()),
