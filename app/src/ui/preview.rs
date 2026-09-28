@@ -379,6 +379,7 @@ fn now_playing_full(
                     onab: |_| {},
                     onskip: |_| {},
                     onmore: |_| {},
+                    onremove: |_| {},
                     onqueueloop: |_| {},
                     sleep: sleep.map(Into::into),
                     onsleep: |_| {},
@@ -587,6 +588,7 @@ fn playlist_page(sync: Option<SyncView>) -> Element {
                     onplay: |_| {},
                     onshuffle: |_| {},
                     onmore: |_| {},
+                    onplaynext: |_| {},
                     onplaylistmore: |_| {},
                 }
             }

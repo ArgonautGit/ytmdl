@@ -1062,9 +1062,29 @@ fn MoreButton(onmore: EventHandler<()>) -> Element {
     }
 }
 
+/// What swiping a song row sideways does (assets/swipe.js).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Swipe {
+    /// Either way: takes it out of the queue.
+    Remove,
+    /// To the right: plays it next.
+    PlayNext,
+}
+
+impl Swipe {
+    /// The list's `data-swipe`, which assets/swipe.js and the stylesheet read.
+    fn kind(self) -> &'static str {
+        match self {
+            Swipe::Remove => "remove",
+            Swipe::PlayNext => "next",
+        }
+    }
+}
+
 /// Downloaded songs; `numbered` shows album positions instead of covers,
-/// `onmore` adds each song's menu button, and `handles` drag handles for
-/// reordering (the queue; see assets/queue-drag.js).
+/// `onmore` adds each song's menu button, `handles` drag handles for
+/// reordering (the queue; see assets/queue-drag.js), and `swipe` what
+/// swiping a row does, which `onswipe` is called for.
 #[component]
 pub fn SongList(
     songs: Vec<SongItem>,
@@ -1072,9 +1092,12 @@ pub fn SongList(
     #[props(default)] onmore: Option<EventHandler<usize>>,
     #[props(default)] numbered: bool,
     #[props(default)] handles: bool,
+    #[props(default)] swipe: Option<Swipe>,
+    #[props(default)] onswipe: Option<EventHandler<usize>>,
 ) -> Element {
+    let onswipe = onswipe.filter(|_| swipe.is_some());
     rsx! {
-        ul { class: if numbered { "list tracks" } else { "list" },
+        ul { class: if numbered { "list tracks" } else { "list" }, "data-swipe": swipe.map(Swipe::kind),
             for (i , song) in songs.into_iter().enumerate() {
                 SongItemRow {
                     key: "{song.key}",
@@ -1083,6 +1106,7 @@ pub fn SongList(
                     handle: handles,
                     onplay: move |_| onplay.call(i),
                     onmore: onmore.map(|m| EventHandler::new(move |_| m.call(i))),
+                    onswipe: onswipe.map(|m| EventHandler::new(move |_| m.call(i))),
                 }
             }
         }
@@ -1096,6 +1120,7 @@ fn SongItemRow(
     handle: bool,
     onplay: EventHandler<()>,
     onmore: Option<EventHandler<()>>,
+    onswipe: Option<EventHandler<()>>,
 ) -> Element {
     let duration = song.duration_secs.map(duration_text);
     let sub = match index {
@@ -1151,6 +1176,20 @@ fn SongItemRow(
                     "aria-label": "Drag to reorder",
                     onclick: move |e| e.stop_propagation(),
                     Svg { icon: Icon::Grip, size: 20 }
+                }
+            }
+            if let Some(onswipe) = onswipe {
+                // assets/swipe.js clicks it when the row is swiped; the ⋮ menu
+                // offers the same action to everyone else.
+                button {
+                    class: "swipe-action",
+                    hidden: true,
+                    tabindex: "-1",
+                    "aria-hidden": "true",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        onswipe.call(());
+                    },
                 }
             }
         }
@@ -1258,6 +1297,8 @@ pub fn PlaylistPage(
     onshuffle: EventHandler<()>,
     /// A song's menu.
     onmore: EventHandler<usize>,
+    /// A song swiped to the right.
+    onplaynext: EventHandler<usize>,
     /// The playlist's menu.
     onplaylistmore: EventHandler<()>,
 ) -> Element {
@@ -1302,7 +1343,7 @@ pub fn PlaylistPage(
                     text: "Add songs from your library with their ⋮ menu.",
                 }
             } else {
-                SongList { songs, onplay, onmore }
+                SongList { songs, onplay, onmore, swipe: Swipe::PlayNext, onswipe: onplaynext }
             }
         }
     }
@@ -1650,6 +1691,8 @@ pub fn NowPlayingPage(
     onskip: EventHandler<usize>,
     /// A queue row's menu.
     onmore: EventHandler<usize>,
+    /// A queue row swiped away.
+    onremove: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
     /// The sleep timer's time left ("23 min", "End of song") while it is set.
@@ -1844,7 +1887,7 @@ pub fn NowPlayingPage(
                 }
             }
             div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
-                SongList { songs: queue, onplay: onskip, onmore, handles: true }
+                SongList { songs: queue, onplay: onskip, onmore, handles: true, swipe: Swipe::Remove, onswipe: onremove }
             }
         }
     }
