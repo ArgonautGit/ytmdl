@@ -101,9 +101,9 @@ needs USB debugging on; with several devices attached, pick one with
 ## Published builds
 
 `.github/workflows/apk.yml` builds the APK on GitHub (in `nix develop .#ci`,
-the dev shell without the emulator) and publishes it as the release
-`build-<n>`, with `ytmdl-update.json` describing it. Run it from the Actions
-tab (APK → Run workflow, for any branch) or with:
+the dev shell with only what the APK build needs) and publishes it as the
+release `build-<n>`, with `ytmdl-update.json` describing it. Run it from the
+Actions tab (APK → Run workflow, for any branch) or with:
 
 ```sh
 gh workflow run apk.yml                     # build main and publish it
