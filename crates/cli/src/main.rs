@@ -7,8 +7,8 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use ytmdl_core::{
-    CancelToken, Channel, DownloadOptions, Downloader, Resolved, Runtime, RuntimeConfig, SearchSource, loudness,
-    selftest, tag,
+    CancelToken, Channel, DownloadOptions, Downloader, RadioSeed, Resolved, Runtime, RuntimeConfig, SearchSource,
+    loudness, selftest, tag,
 };
 
 #[derive(Parser)]
@@ -44,6 +44,18 @@ enum Cmd {
     },
     /// Show a track's metadata or a collection's entries.
     Resolve { url: String },
+    /// Songs like one song: YouTube Music's radio.
+    Radio {
+        /// The song's video id or link.
+        song: String,
+        #[arg(short, default_value_t = ytmdl_core::RADIO_SONGS)]
+        n: usize,
+    },
+    /// An artist's YouTube Music page.
+    Artist {
+        /// The artist's channel id or link.
+        artist: String,
+    },
     /// Download and tag one track.
     Get {
         url: String,
@@ -102,6 +114,7 @@ enum Cmd {
 enum Source {
     Songs,
     Albums,
+    Artists,
     Youtube,
 }
 
@@ -162,6 +175,7 @@ async fn main() -> Result<()> {
             let source = match source {
                 Source::Songs => SearchSource::MusicSongs,
                 Source::Albums => SearchSource::MusicAlbums,
+                Source::Artists => SearchSource::MusicArtists,
                 Source::Youtube => SearchSource::YouTube,
             };
             let entries = dl.search(query, *n, source).await?;
@@ -182,6 +196,26 @@ async fn main() -> Result<()> {
                 s
             }
         })?,
+        Cmd::Radio { song, n } => {
+            let id = song.split_once("v=").map_or(song.as_str(), |(_, v)| v.split('&').next().unwrap_or(v));
+            let entries = dl.radio(&RadioSeed::Song(id.to_owned()), *n).await?;
+            print(&cli, &entries, |es| {
+                es.iter().map(|e| format!("{}  {} — {}", e.id, e.artists.join(", "), e.title)).collect::<Vec<_>>().join("\n")
+            })?
+        }
+        Cmd::Artist { artist } => {
+            let id = ytmdl_core::artist_id(artist).unwrap_or_else(|| artist.clone());
+            print(&cli, &dl.artist(&id).await?, |a| {
+                let mut s = format!("{} ({})", a.name, a.audience.as_deref().unwrap_or("?"));
+                for section in &a.sections {
+                    s.push_str(&format!("\n{} ({:?}, {} shown, more: {:?})", section.title, section.kind, section.entries.len(), section.more));
+                    for e in &section.entries {
+                        s.push_str(&format!("\n  {}  {}", e.id, e.title));
+                    }
+                }
+                s
+            })?
+        }
         Cmd::Get { url, output, no_tags, no_replaygain, no_lyrics } => {
             let mut opts = DownloadOptions::new(output);
             opts.write_tags = !no_tags;
