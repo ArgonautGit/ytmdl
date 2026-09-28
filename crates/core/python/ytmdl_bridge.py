@@ -592,24 +592,6 @@ def fetch(url, max_bytes, headers_json="{}", missing_ok=False):
     return data
 
 
-def fetch_to_file(url, path, max_bytes):
-    """Streams a large HTTP GET (an app update) to `path`, reading at most
-    `max_bytes`; returns the SHA-256 of what it wrote, in hex."""
-    import yt_dlp
-    from yt_dlp.networking import Request
-
-    digest, size = hashlib.sha256(), 0
-    with yt_dlp.YoutubeDL({"quiet": True, "logger": _Logger()}) as ydl:
-        with ydl.urlopen(Request(url)) as resp, open(path, "wb") as f:
-            while chunk := resp.read(1 << 16):
-                size += len(chunk)
-                if size > max_bytes:
-                    raise ValueError(f"response from {url} exceeds {max_bytes} bytes")
-                digest.update(chunk)
-                f.write(chunk)
-    return digest.hexdigest()
-
-
 # --- updater (stdlib only: runs before yt-dlp is imported) ---------------------
 
 _REPOS = {"stable": "yt-dlp/yt-dlp", "nightly": "yt-dlp/yt-dlp-nightly-builds"}

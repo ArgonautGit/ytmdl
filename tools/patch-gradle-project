@@ -7,8 +7,7 @@ tools/build-apk).
 - app/android/*.kt: the Media3 playback service, the library it offers to
   cars (Browse, with ArtProvider serving the covers), its JNI bridge
   (YtmdlPlayer), the downloads foreground service, the receiver of shared
-  links, the installer of app updates, and a MainActivity replacing the
-  generated one.
+  links, and a MainActivity replacing the generated one.
 - app/android/res: the launcher and notification icons (overriding dx's), and
   what lists the app in Android Auto.
 - Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
@@ -17,10 +16,10 @@ tools/build-apk).
   requires to not go down when an update is installed.
 - The manifest: the playback service, in its own ":player" process and
   browsable as a media library (Android Auto), with the cover art provider;
-  the downloads service, the receiver of app update results, and the activity
-  handling every configuration change, single-task and taking shared text.
-  The Rust side can't survive the activity being re-created, or a second one,
-  in one process (see MainActivity.kt).
+  the downloads service, and the activity handling every configuration
+  change, single-task and taking shared text. The Rust side can't survive the
+  activity being re-created, or a second one, in one process (see
+  MainActivity.kt).
 
 Safe to run again on an already patched project.
 """
@@ -77,11 +76,6 @@ CAR_APP = """\
             android:resource="@xml/automotive_app_desc" />
 """
 
-# Hears how an app update's install went (Update.kt).
-UPDATE_RECEIVER = """\
-        <receiver android:name="dev.nick.ytmdl.UpdateReceiver" android:exported="false" />
-"""
-
 
 def main() -> None:
     project, root, build = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
@@ -92,7 +86,7 @@ def main() -> None:
     shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
     ours = kotlin / "dev/nick/ytmdl"
     ours.mkdir(parents=True, exist_ok=True)
-    for name in ("PlaybackService.kt", "Browse.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt", "Update.kt"):
+    for name in ("PlaybackService.kt", "Browse.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt"):
         shutil.copy(sources / name, ours / name)
     shutil.copytree(sources / "res", main_dir / "res", dirs_exist_ok=True)
 
@@ -131,9 +125,6 @@ def main() -> None:
     if old in text:
         text = text.replace(old, LIBRARY_ACTIONS)
     assert "android.media.browse.MediaBrowserService" in text, "the playback service's intent filter not found"
-    if "UpdateReceiver" not in text:
-        text = text.replace("    </application>", UPDATE_RECEIVER + "    </application>")
-        assert "UpdateReceiver" in text, "could not place the update receiver"
     if "ArtProvider" not in text:
         text = text.replace("    </application>", ART_PROVIDER + "    </application>")
         assert "ArtProvider" in text, "could not place the art provider"
