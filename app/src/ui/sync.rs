@@ -37,7 +37,8 @@ impl Ctx {
         };
         let library = ctx.library.get();
         let name = title.clone();
-        spawn(async move {
+        // Not tied to the page, which may be left before it's saved.
+        dioxus::core::spawn_forever(async move {
             let id = match crate::blocking(move || library.create_synced_playlist(&name, &source)).await {
                 Ok(Ok(id)) => id,
                 Ok(Err(e)) => return ctx.notify(format!("Couldn't save the playlist: {e}")),
@@ -68,7 +69,8 @@ impl Ctx {
             return;
         }
         syncs.write().insert(id, SyncState::Running);
-        spawn(async move {
+        // Not tied to the menu it may come from, which closes before this runs.
+        dioxus::core::spawn_forever(async move {
             let result = match svc.dl.resolve_as(&url, Some(CollectionKind::Playlist)).await {
                 Ok(Resolved::Collection { entries, .. }) => ctx.apply_sync(id, entries, manual).await,
                 Ok(Resolved::Track(_)) => Err("the link no longer leads to a playlist".into()),
