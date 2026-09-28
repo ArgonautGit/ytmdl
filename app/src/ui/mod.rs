@@ -164,7 +164,8 @@ impl Ctx {
     fn delete_tracks(&self, ids: Vec<i64>) {
         let ctx = *self;
         let library = ctx.library.get();
-        spawn(async move {
+        // Not tied to the dialog that asked, which closes before this runs.
+        dioxus::core::spawn_forever(async move {
             let result = crate::blocking(move || {
                 let (mut deleted, mut failed) = (Vec::new(), None);
                 for id in ids {

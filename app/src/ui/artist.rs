@@ -53,7 +53,8 @@ impl Ctx {
         let ctx = *self;
         let Some(svc) = ctx.services() else { return };
         ctx.notify(format!("Looking up {}", plural(albums.len(), "release", "releases")));
-        spawn(async move {
+        // Not tied to the page, which may be left while the albums are looked up.
+        dioxus::core::spawn_forever(async move {
             let (mut started, mut failed) = (0, 0);
             for album in albums {
                 match svc.dl.resolve_as(&album.url, Some(CollectionKind::Album)).await {
