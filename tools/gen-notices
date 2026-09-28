@@ -7,7 +7,13 @@ crates built into it (from cargo-about; see tools/notices/about.toml).
   tools/gen-notices --check   fail if it is out of date (run by tools/build-apk)
 
 Run it after changing dependencies. Needs cargo-about, which the dev shell has.
+
+cargo-about takes half a minute, so a run saves a digest of what the answer
+depends on in target/notices.stamp, and --check passes at once while that is
+unchanged.
 """
+import glob
+import hashlib
 import json
 import os
 import re
@@ -18,6 +24,7 @@ import tomllib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTICES = os.path.join(ROOT, "tools", "notices")
 OUT = os.path.join(ROOT, "app", "notices.json")
+STAMP = os.path.join(ROOT, "target", "notices.stamp")
 
 
 class Texts:
@@ -126,10 +133,43 @@ def rust_crates(texts):
     return {"title": "Rust crates", "items": items}
 
 
+def digest():
+    """Of everything app/notices.json is made from, and the file itself."""
+    with open(os.path.join(NOTICES, "bundled.toml"), "rb") as f:
+        pins = {item["pin"][0] for group in tomllib.load(f)["group"] for item in group["item"] if "pin" in item}
+    paths = {"Cargo.lock", "Cargo.toml", "app/Cargo.toml", "app/notices.json", "tools/gen-notices", *pins}
+    for pattern in ("crates/*/Cargo.toml", "tools/notices/*"):
+        paths.update(os.path.relpath(p, ROOT) for p in glob.glob(os.path.join(ROOT, pattern)))
+    h = hashlib.sha256()
+    for path in sorted(paths):
+        try:
+            with open(os.path.join(ROOT, path), "rb") as f:
+                h.update(f"{path} {hashlib.sha256(f.read()).hexdigest()}\n".encode())
+        except FileNotFoundError:
+            h.update(f"{path} missing\n".encode())
+    about = subprocess.run(["cargo", "about", "--version"], capture_output=True, text=True)
+    h.update(about.stdout.encode())
+    return h.hexdigest()
+
+
+def stamp(value):
+    os.makedirs(os.path.dirname(STAMP), exist_ok=True)
+    with open(STAMP, "w") as f:
+        f.write(value + "\n")
+
+
 def main():
     check = sys.argv[1:] == ["--check"]
     if sys.argv[1:] and not check:
         sys.exit(__doc__)
+    before = digest()
+    if check:
+        try:
+            with open(STAMP) as f:
+                if f.read().strip() == before:
+                    return
+        except FileNotFoundError:
+            pass
     texts = Texts()
     groups = bundled(texts)
     groups.append(rust_crates(texts))
@@ -142,10 +182,12 @@ def main():
     if check:
         if output != current:
             sys.exit("app/notices.json is out of date; run tools/gen-notices")
+        stamp(before)
         return
     if output != current:
         with open(OUT, "w", encoding="utf-8") as f:
             f.write(output)
+    stamp(digest())
     crates = len(groups[-1]["items"])
     size = len(output.encode()) / 1000
     print(f"app/notices.json: {crates} crates, {len(texts.list)} texts, {size:.0f} kB")

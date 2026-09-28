@@ -66,13 +66,23 @@
           "x86_64-linux-android"
         ];
       };
+      # CI only builds the arm64 APK: no docs, clippy, rustfmt, rust-analyzer or
+      # rust-src to fetch and assemble.
+      rustCi = pkgs.rust-bin.stable.${versions.rust}.minimal.override {
+        targets = [ "aarch64-linux-android" ];
+      };
 
       # Host interpreter for desktop builds; same minor version as python.org's Android build.
       python = pkgs.python314;
 
-      # The dev environment around an Android SDK composition.
+      # The dev environment around an Android SDK composition and a Rust toolchain.
       devEnv =
-        android:
+        {
+          android,
+          rust,
+          extraEnv,
+          extraTools,
+        }:
         let
           sdk = "${android.androidsdk}/libexec/android-sdk";
           ndk = "${sdk}/ndk/${versions.ndk}";
@@ -91,7 +101,6 @@
             # 16 GB desktop shared with an emulated Android guest.
             CARGO_BUILD_JOBS = "2";
             CMAKE_BUILD_PARALLEL_LEVEL = "2";
-            LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
             CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${ndkBin}/aarch64-linux-android${api}-clang";
             CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "${ndkBin}/x86_64-linux-android${api}-clang";
             CC_aarch64_linux_android = "${ndkBin}/aarch64-linux-android${api}-clang";
@@ -102,7 +111,8 @@
             PYO3_PYTHON = "${python}/bin/python3.14";
             YTMDL_PYTHON_HOME = "${python}";
             YTMDL_QJS = "${lib.getBin pkgs.quickjs-ng}/bin/qjs";
-          };
+          }
+          // extraEnv;
 
           gradleProperties = pkgs.writeText "ytmdl-gradle.properties" ''
             org.gradle.daemon=false
@@ -118,7 +128,6 @@
             pkgs.jdk17
             rust
             pkgs.dioxus-cli
-            pkgs.cargo-ndk
             python
             pkgs.quickjs-ng
             pkgs.pkg-config
@@ -127,17 +136,12 @@
             pkgs.ninja
             pkgs.git
             pkgs.curl
-            pkgs.wget
             pkgs.unzip
             pkgs.file
             pkgs.jq
-            pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
             pkgs.cargo-about # tools/gen-notices
-            # arm64 test layers
-            pkgs.qemu-user
-            pkgs.erofs-utils
-            pkgs.e2fsprogs
-          ];
+          ]
+          ++ extraTools;
 
           # Shared by the dev shell and the apps; sets $root to the checkout.
           setup = ''
@@ -146,7 +150,6 @@
             mkdir -p "$GRADLE_USER_HOME"
             ln -sfn ${gradleProperties} "$GRADLE_USER_HOME/gradle.properties"
             export PATH="${sdk}/cmake/${versions.cmake}/bin:${ndkBin}:$PATH"
-            export RUST_SRC_PATH="${rust}/lib/rustlib/src/rust/library"
             # Pieces downloaded by tools/fetch-deps.
             root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
             export YTMDL_YTDLP="$root/.deps/yt-dlp/yt-dlp.zip"
@@ -155,8 +158,29 @@
         {
           inherit env tools setup;
         };
-      local = devEnv android;
-      ci = devEnv androidCi;
+      local = devEnv {
+        inherit android rust;
+        # Not needed to build the APK, so left out of CI's shell.
+        extraEnv = {
+          # For bindgen (1.4 GB of clang and LLVM).
+          LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
+        };
+        extraTools = [
+          pkgs.cargo-ndk
+          pkgs.wget
+          pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
+          # arm64 test layers
+          pkgs.qemu-user
+          pkgs.erofs-utils
+          pkgs.e2fsprogs
+        ];
+      };
+      ci = devEnv {
+        android = androidCi;
+        rust = rustCi;
+        extraEnv = { };
+        extraTools = [ ];
+      };
 
       # `nix run .#<name>` in the checkout: `text` runs there with the dev
       # shell's tools and environment.
@@ -189,6 +213,7 @@
           // {
             packages = local.tools;
             RA_SERVER_PATH = "${rust}/bin/rust-analyzer";
+            RUST_SRC_PATH = "${rust}/lib/rustlib/src/rust/library";
             shellHook = local.setup;
           }
         );

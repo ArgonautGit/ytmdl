@@ -2,6 +2,9 @@
 # Cross-compiles QuickJS-NG's `qjs` for Android with the NDK. Run inside `nix develop`.
 #
 #   tools/build-qjs [arm64-v8a|x86_64]   (default arm64-v8a)
+#
+# Does nothing when .deps/qjs/<abi>/qjs.stamp shows the binary there was built
+# from the same source, NDK and API level by this script.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,6 +15,12 @@ out="$root/.deps/qjs/$abi"
 
 : "${ANDROID_NDK_ROOT:?run inside nix develop}"
 : "${YTMDL_ANDROID_API:?run inside nix develop}"
+
+stamp="$(basename "$src") $ANDROID_NDK_ROOT android-$YTMDL_ANDROID_API $(sha256sum <"${BASH_SOURCE[0]}" | cut -d' ' -f1)"
+if [ -x "$out/qjs" ] && [ "$(cat "$out/qjs.stamp" 2>/dev/null)" = "$stamp" ]; then
+    echo "$out/qjs is up to date"
+    exit 0
+fi
 
 cmake -S "$src" -B "$build" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
@@ -25,4 +34,5 @@ cmake --build "$build" --target qjs_exe
 mkdir -p "$out"
 bin="$(find "$build" -maxdepth 2 -type f -name qjs -perm -u+x | head -1)"
 "$ANDROID_NDK_ROOT"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o "$out/qjs" "$bin"
+echo "$stamp" >"$out/qjs.stamp"
 file "$out/qjs"
