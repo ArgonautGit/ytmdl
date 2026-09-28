@@ -25,6 +25,8 @@ on:
 
 permissions:
   contents: write
+  # For cache-nix-action to delete the Nix store caches it replaces.
+  actions: write
 
 concurrency:
   group: apk
@@ -72,17 +74,53 @@ jobs:
         with:
           github_access_token: ${{ github.token }}
 
+      # The dev shell's store paths. Without them `nix develop` takes minutes
+      # to download the SDK, NDK and Rust and unpack them (cache.nixos.org
+      # doesn't have them unpacked).
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ hashFiles('flake.nix', 'flake.lock', 'nix/versions.nix') }}
+          restore-prefixes-first-match: nix-
+          # Before saving, delete all but what the next step roots.
+          gc-max-store-size-linux: 0
+          purge: true
+          purge-prefixes: nix-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Dev shell
+        run: |
+          # Roots the shell and the flake's inputs (which it doesn't reference,
+          # but evaluating it reads), so the saved store has what the next run
+          # needs and none of the archives the SDK and Rust were unpacked from.
+          roots="$RUNNER_TEMP/nix-roots"
+          mkdir -p "$roots"
+          nix develop .#ci --profile "$roots/ci" --command true
+          nix flake archive --json | jq -r '.inputs | .. | .path? // empty' | sort -u |
+            while read -r path; do
+              nix-store --add-root "$roots/${path#/nix/store/}" --realise "$path" >/dev/null
+            done
+
+      # Cargo's downloads and build: the build scripts and proc macros in
+      # target/android-release, the code for the phone in
+      # target/aarch64-linux-android. Gradle's downloads. What tools/fetch-deps,
+      # tools/build-qjs and tools/gen-notices keep to skip work. The key covers
+      # what all that comes from (all of tools/, for short), so it changes when
+      # they need saving again.
       - uses: actions/cache@v6
         with:
           path: |
             .deps/dl
+            .deps/qjs
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             ~/.cache/android-nix/gradle/caches
             ~/.cache/android-nix/gradle/wrapper
+            target/android-release
             target/aarch64-linux-android
-          key: apk-${{ hashFiles('Cargo.lock', 'flake.lock', 'nix/versions.nix', 'tools/deps.sha256') }}
+            target/notices.stamp
+          key: apk-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'flake.lock', 'nix/versions.nix', 'tools/**', 'app/notices.json') }}
           restore-keys: apk-
 
       - name: Signing key
