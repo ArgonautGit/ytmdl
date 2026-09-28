@@ -241,6 +241,15 @@ impl Runtime {
         .await
     }
 
+    /// Runs one of the bridge's YouTube Music readers (`music_radio`,
+    /// `music_artist`, `music_browse`) on a JSON request; returns its JSON.
+    pub async fn music_json(&self, name: &'static str, args: Vec<String>, request: serde_json::Value) -> Result<String> {
+        self.run(&self.0.meta, move |py, bridge| {
+            call(py, bridge, name, (serde_json::to_string(&args)?, request.to_string()))
+        })
+        .await
+    }
+
     /// Downloads `url` and returns the sanitized info JSON of the result.
     pub async fn download_json(
         &self,

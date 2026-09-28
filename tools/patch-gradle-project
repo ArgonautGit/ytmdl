@@ -4,17 +4,20 @@ tools/build-apk).
 
   tools/patch-gradle-project <gradle project dir> <repo root> <build number>
 
-- app/android/*.kt: the Media3 playback service and its JNI bridge
+- app/android/*.kt: the Media3 playback service, the library it offers to
+  cars (Browse, with ArtProvider serving the covers), its JNI bridge
   (YtmdlPlayer), the downloads foreground service, the receiver of shared
   links, the installer of app updates, and a MainActivity replacing the
   generated one.
-- app/android/res: the launcher and notification icons (overriding dx's).
+- app/android/res: the launcher and notification icons (overriding dx's), and
+  what lists the app in Android Auto.
 - Media3, pinned to 1.9.x: the newest built against Kotlin 2.0, which the
   generated project compiles with (1.10+ pulls in kotlin-stdlib 2.2).
 - The build number (tools/build-number) as the versionCode, which Android
   requires to not go down when an update is installed.
-- The manifest: the playback service, in its own ":player" process, the
-  downloads service, the receiver of app update results, and the activity
+- The manifest: the playback service, in its own ":player" process and
+  browsable as a media library (Android Auto), with the cover art provider;
+  the downloads service, the receiver of app update results, and the activity
   handling every configuration change, single-task and taking shared text.
   The Rust side can't survive the activity being re-created, or a second one,
   in one process (see MainActivity.kt).
@@ -43,15 +46,35 @@ SHARE_FILTER = """\
             </intent-filter>
 """
 
+# Media3's own controllers find the service by the first action, Android Auto
+# and older media browsers by the other.
+LIBRARY_ACTIONS = """\
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+"""
+
 SERVICES = """\
         <service android:name="dev.nick.ytmdl.PlaybackService" android:process=":player"
             android:exported="true" android:foregroundServiceType="mediaPlayback">
             <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
+""" + LIBRARY_ACTIONS + """\
             </intent-filter>
         </service>
         <service android:name="dev.nick.ytmdl.DownloadService"
             android:exported="false" android:foregroundServiceType="dataSync" />
+"""
+
+# Cover art for the car and the system's media controls (Browse.kt), in the
+# player's process, which runs whenever they are connected.
+ART_PROVIDER = """\
+        <provider android:name="dev.nick.ytmdl.ArtProvider" android:process=":player"
+            android:authorities="${applicationId}.art" android:exported="true" />
+"""
+
+# Lists the app in Android Auto.
+CAR_APP = """\
+        <meta-data android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
 """
 
 # Hears how an app update's install went (Update.kt).
@@ -69,7 +92,7 @@ def main() -> None:
     shutil.copy(sources / "MainActivity.kt", kotlin / "dev/dioxus/main/MainActivity.kt")
     ours = kotlin / "dev/nick/ytmdl"
     ours.mkdir(parents=True, exist_ok=True)
-    for name in ("PlaybackService.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt", "Update.kt"):
+    for name in ("PlaybackService.kt", "Browse.kt", "YtmdlPlayer.kt", "Downloads.kt", "Share.kt", "Update.kt"):
         shutil.copy(sources / name, ours / name)
     shutil.copytree(sources / "res", main_dir / "res", dirs_exist_ok=True)
 
@@ -103,9 +126,20 @@ def main() -> None:
         assert text.count("</application>") == 1
         text = text.replace("    </application>", SERVICES + "    </application>")
         assert "PlaybackService" in text, "could not place the services"
+    # A project patched before the service was a library service.
+    old = '                <action android:name="androidx.media3.session.MediaSessionService" />\n'
+    if old in text:
+        text = text.replace(old, LIBRARY_ACTIONS)
+    assert "android.media.browse.MediaBrowserService" in text, "the playback service's intent filter not found"
     if "UpdateReceiver" not in text:
         text = text.replace("    </application>", UPDATE_RECEIVER + "    </application>")
         assert "UpdateReceiver" in text, "could not place the update receiver"
+    if "ArtProvider" not in text:
+        text = text.replace("    </application>", ART_PROVIDER + "    </application>")
+        assert "ArtProvider" in text, "could not place the art provider"
+    if "com.google.android.gms.car.application" not in text:
+        text = text.replace("    </application>", CAR_APP + "    </application>")
+        assert "automotive_app_desc" in text, "could not place the Android Auto declaration"
     manifest.write_text(text)
 
 
