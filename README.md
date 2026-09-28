@@ -30,7 +30,8 @@ new APK.
   artist pages from YouTube Music, song radio, downloads, settings, listening
   stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
-  queue and lyrics that follow the song). Songs without lyrics are looked up
+  queue and lyrics that follow the song). Swiping a song sideways takes it
+  out of the queue, or on a playlist plays it next. Songs without lyrics are looked up
   when their lyrics are opened, and what is found is saved into the file; a
   switch in Settings turns the LRCLIB lookups off. Playlists downloaded from a link stay synced with YouTube: new songs
   there are downloaded, removed ones leave the playlist (the files stay), and
