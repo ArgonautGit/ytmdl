@@ -1034,6 +1034,21 @@ button.icon-btn:active { background: var(--press); }
 }
 
 /* Home. */
+/* Home's playlists: two columns of compact cards, above everything else. */
+.quick-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 4px 16px 12px;
+    padding: 0;
+    list-style: none;
+}
+.quick { display: flex; align-items: center; gap: 10px; min-width: 0; border-radius: 6px; overflow: hidden; background: var(--surface); }
+.quick:active { background: var(--surface-2); }
+.quick .cover { border-radius: 0; }
+.quick .meta { min-width: 0; padding-right: 8px; }
+.quick .title { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick .sub { font-size: 12px; color: var(--muted); }
 .home-actions { display: flex; gap: 10px; margin: 4px 16px 6px; }
 .home-actions .primary:disabled { opacity: 0.5; }
 .group.home-card { margin: 14px 16px 4px; }

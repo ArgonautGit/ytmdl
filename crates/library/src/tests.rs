@@ -772,3 +772,20 @@ fn keeps_playlist_progress_until_the_playlist_goes() {
     lib.delete_playlist(id).unwrap();
     assert!(lib.playlist_progress(id).unwrap().is_none());
 }
+
+#[test]
+fn recent_playlists_put_the_last_played_first() {
+    let tmp = TempDir::new("recent-playlists");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    let old = lib.create_playlist("Old").unwrap();
+    let new = lib.create_playlist("New").unwrap();
+    lib.create_playlist("Empty").unwrap();
+    lib.add_to_playlist(old, &[a.id]).unwrap();
+    lib.add_to_playlist(new, &[a.id]).unwrap();
+    let names = |lib: &Library| lib.recent_playlists(6).unwrap().into_iter().map(|p| p.name).collect::<Vec<_>>();
+    assert_eq!(names(&lib), ["New", "Old"]);
+    lib.set_playlist_progress(old, &Progress::in_order(&[a.id], 0, None)).unwrap();
+    assert_eq!(names(&lib), ["Old", "New"]);
+    assert_eq!(lib.home().unwrap().playlists.len(), 2);
+}

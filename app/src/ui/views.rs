@@ -2305,6 +2305,8 @@ pub struct HomeView {
     pub greeting: String,
     /// The library has no songs.
     pub empty: bool,
+    /// Playlists, the last played first.
+    pub playlists: Vec<PlaylistItem>,
     /// Songs played lately, as tiles (large art).
     pub recent: Vec<SongItem>,
     /// The most played songs of the last 30 days.
@@ -2338,6 +2340,7 @@ pub fn HomePage(
     onsearch: EventHandler<()>,
     onshuffle: EventHandler<()>,
     onstats: EventHandler<()>,
+    onplaylist: EventHandler<usize>,
     /// A song tapped: plays its list from it.
     onplay: EventHandler<(HomeList, usize)>,
     /// A song's menu.
@@ -2374,6 +2377,19 @@ pub fn HomePage(
                 }
             },
             Some(home) => rsx! {
+                if !home.playlists.is_empty() {
+                    ul { class: "quick-grid",
+                        for (i , playlist) in home.playlists.into_iter().enumerate() {
+                            li { key: "{i}", class: "quick tappable", onclick: move |_| onplaylist.call(i),
+                                Cover { url: playlist.art.clone(), icon: Icon::Playlist }
+                                div { class: "meta",
+                                    div { class: "title", "{playlist.name}" }
+                                    div { class: "sub", {plural(playlist.tracks as usize, "song", "songs")} }
+                                }
+                            }
+                        }
+                    }
+                }
                 div { class: "home-actions",
                     button { class: "primary", onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle all" }
                 }

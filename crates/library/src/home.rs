@@ -1,13 +1,15 @@
-//! What the Home tab shows: the songs played lately and most, favourites not
-//! played in a while, and the albums added last.
+//! What the Home tab shows: the playlists played lately, the songs played
+//! lately and most, favourites not played in a while, and the albums added last.
 
 use rusqlite::params;
 
 use crate::listens::{PLAYED, period_start};
-use crate::{Album, Library, Period, Result, TRACK_COLUMNS, Track, track_from_row};
+use crate::{Album, Library, Period, Playlist, Result, TRACK_COLUMNS, Track, track_from_row};
 
 /// Songs in each list, at most.
 const SONGS: i64 = 20;
+/// Playlists shown, at most.
+const PLAYLISTS: usize = 6;
 /// Albums in the latest added.
 const ALBUMS: usize = 12;
 /// Plays that make a song not played this month a forgotten favourite.
@@ -15,6 +17,8 @@ const FAVOURITE_PLAYS: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Home {
+    /// Playlists, the last played first.
+    pub playlists: Vec<Playlist>,
     /// Songs played lately (at least as long as a play counts), the last first.
     pub recent: Vec<Track>,
     /// The most played songs of the last 30 days.
@@ -30,6 +34,7 @@ pub struct Home {
 impl Library {
     pub fn home(&self) -> Result<Home> {
         let added = self.albums()?.into_iter().take(ALBUMS).collect();
+        let playlists = self.recent_playlists(PLAYLISTS)?;
         let db = self.db();
         let month = period_start(&db, Period::Month)?;
         let tracks = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> Result<Vec<Track>> {
@@ -67,6 +72,6 @@ impl Library {
             params![0, FAVOURITE_PLAYS, month, SONGS],
         )?;
         let hour = db.query_row("SELECT CAST(strftime('%H', 'now', 'localtime') AS INTEGER)", [], |r| r.get(0))?;
-        Ok(Home { recent, top, forgotten, added, hour })
+        Ok(Home { playlists, recent, top, forgotten, added, hour })
     }
 }

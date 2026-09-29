@@ -1,11 +1,11 @@
-//! The Home tab: what was played lately and most, radios made from those
+//! The Home tab: the playlists played lately, what was played lately and most, radios made from those
 //! songs, the albums added last, and songs in the library more than once.
 
 use dioxus::prelude::*;
 use ytmdl_library::{ART_LARGE, Home, Track};
 
 use super::views::{HomeList, HomePage, HomeView, SongItem};
-use super::{Ctx, From, Overlay, Sheet, album_item, art_src, radio_page, song_item};
+use super::{Ctx, From, Overlay, Sheet, album_item, art_src, playlist_item, radio_page, song_item};
 
 /// Radios offered, at most.
 const RADIOS: usize = 8;
@@ -38,6 +38,7 @@ pub(super) fn HomeScreen(onsearch: EventHandler<()>) -> Element {
     let home = home.unwrap_or_default();
     let radios = radio_seeds(&home);
     let added = home.added.clone();
+    let playlists = home.playlists.clone();
     let for_menu = home.clone();
     rsx! {
         HomePage {
@@ -45,6 +46,11 @@ pub(super) fn HomeScreen(onsearch: EventHandler<()>) -> Element {
             onsearch,
             onshuffle: move |_| ctx.player.shuffle(lib.get().tracks().unwrap_or_default()),
             onstats: move |_| ctx.nav.push(Overlay::Stats),
+            onplaylist: move |i: usize| {
+                if let Some(p) = playlists.get(i) {
+                    ctx.nav.push(Overlay::Playlist(p.id));
+                }
+            },
             onplay: move |(which, i)| ctx.player.play(songs(&home, which).to_vec(), i),
             onmore: move |(which, i): (HomeList, usize)| {
                 if let Some(track) = songs(&for_menu, which).get(i).cloned() {
@@ -83,6 +89,7 @@ fn home_view(home: &Home, duplicates: usize, empty: bool, current: Option<i64>) 
     HomeView {
         greeting: greeting(home.hour).into(),
         empty,
+        playlists: home.playlists.iter().map(playlist_item).collect(),
         recent: home.recent.iter().map(tile).collect(),
         top: rows(&home.top),
         radios: radio_seeds(home).iter().map(|t| SongItem { playing: false, ..tile(t) }).collect(),
