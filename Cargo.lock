@@ -94,7 +94,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "apkd-log"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ArgonautGit/apkd.git#7b0c0d6d040ee285a57d164a3083247641fd88d2"
+source = "git+ssh://git@github.com/ArgonautGit/apkd.git#8e67cbe4524c9170242cfafaaad21d541c093f4c"
 dependencies = [
  "apkd-proto",
  "flate2",
@@ -110,7 +110,7 @@ dependencies = [
 [[package]]
 name = "apkd-proto"
 version = "0.1.0"
-source = "git+ssh://git@github.com/ArgonautGit/apkd.git#7b0c0d6d040ee285a57d164a3083247641fd88d2"
+source = "git+ssh://git@github.com/ArgonautGit/apkd.git#8e67cbe4524c9170242cfafaaad21d541c093f4c"
 dependencies = [
  "serde",
 ]

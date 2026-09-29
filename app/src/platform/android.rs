@@ -21,13 +21,44 @@ use super::{DOWNLOAD_WORKERS, Dirs};
 
 const RUNTIME_ASSET: &str = "assets/ytmdl/runtime.zip";
 
+/// Media3's logcat tags for playing audio and its session, service and
+/// notification (1.9.4; `MCImpl…` is the controller, `MediaNtfMng` the
+/// notification): their warnings are kept, like playback and codec errors.
+const MEDIA3_TAGS: &[&str] = &[
+    "ExoPlayerImpl*",
+    "MediaCodec*",
+    "DefaultAudioSink",
+    "AudioTrackAudioOutput",
+    "ATAudioOutputProvider",
+    "DecoderAudioRenderer",
+    "ProgressiveMediaPeriod",
+    "LoadTask",
+    "MediaPeriodHolder",
+    "MediaSourceList",
+    "MediaSession*",
+    "MSessionService",
+    "MSSLegacyStub",
+    "MLSLegacyStub",
+    "MCImpl*",
+    "MediaController*",
+    "MB2ImplLegacy",
+    "MBServiceCompat",
+    "MediaNtfMng",
+    "NotificationProvider",
+    "MediaButtonReceiver",
+];
+
 /// Logcat (tag `ytmdl`) and files that apkd-log sends to apkd: this code's
-/// events, and what the rest of the process logs (the Kotlin code, crashes).
+/// events, and what the rest of the process logs (all the Kotlin code's lines,
+/// Media3's warnings, errors and crashes).
 pub fn init_logging() {
-    apkd_log::Logger::new("ytmdl")
+    let mut logger = apkd_log::Logger::new("ytmdl")
         .filter("warn,ytmdl=debug,symphonia_core::formats::probe=error")
-        .build(apkd_log::Build { commit: option_env!("YTMDL_COMMIT").or(option_env!("APKD_COMMIT")), ..apkd_log::build!() })
-        .start();
+        .build(apkd_log::Build { commit: option_env!("YTMDL_COMMIT").or(option_env!("APKD_COMMIT")), ..apkd_log::build!() });
+    for tag in MEDIA3_TAGS {
+        logger = logger.logcat_tag(tag, apkd_log::LogLevel::Warn);
+    }
+    logger.start();
 }
 
 pub fn dirs() -> Result<Dirs> {
