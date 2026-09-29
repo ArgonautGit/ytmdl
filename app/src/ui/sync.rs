@@ -69,6 +69,7 @@ impl Ctx {
             return;
         }
         syncs.write().insert(id, SyncState::Running);
+        tracing::info!(target: "ytmdl", "syncing playlist {id} ({name:?}){}", if manual { ", asked for" } else { "" });
         // Not tied to the menu it may come from, which closes before this runs.
         dioxus::core::spawn_forever(async move {
             let result = match svc.dl.resolve_as(&url, Some(CollectionKind::Playlist)).await {
@@ -78,6 +79,7 @@ impl Ctx {
             };
             match result {
                 Ok(n) => {
+                    tracing::info!(target: "ytmdl", "synced playlist {id}: {n} downloads started");
                     syncs.write().remove(&id);
                     if n > 0 {
                         ctx.notify(format!("Downloading {} new in {name}", plural(n, "song", "songs")));
@@ -111,6 +113,7 @@ impl Ctx {
             .map_err(|e| format!("{e:#}"))?
             .map_err(|e| e.to_string())?;
         self.library.changed();
+        tracing::debug!(target: "ytmdl", "playlist {id}: YouTube lists {} songs, {} not downloaded", entries.len(), missing.len());
         let missing: HashSet<String> = missing.into_iter().collect();
         let started = entries.into_iter().filter(|e| missing.contains(&e.id)).filter(|e| self.download_entry(e.clone(), retry)).count();
         Ok(started)

@@ -55,7 +55,16 @@ impl LibraryHandle {
     pub async fn scan(self, dirs: Vec<PathBuf>) {
         let library = self.get();
         match crate::blocking(move || library.scan(&dirs)).await {
-            Ok(Ok(report)) if report.changed() => self.changed(),
+            Ok(Ok(report)) if report.changed() => {
+                tracing::info!(
+                    target: "ytmdl",
+                    "library scan: {} added, {} updated, {} removed",
+                    report.added,
+                    report.updated,
+                    report.removed
+                );
+                self.changed();
+            }
             Ok(Ok(_)) => {}
             Ok(Err(e)) => tracing::warn!(target: "ytmdl", "library scan: {e}"),
             Err(e) => tracing::warn!(target: "ytmdl", "library scan: {e:#}"),

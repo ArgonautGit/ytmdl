@@ -21,16 +21,13 @@ use super::{DOWNLOAD_WORKERS, Dirs};
 
 const RUNTIME_ASSET: &str = "assets/ytmdl/runtime.zip";
 
+/// Logcat (tag `ytmdl`) and files that apkd-log sends to apkd: this code's
+/// events, and what the rest of the process logs (the Kotlin code, crashes).
 pub fn init_logging() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,ytmdl=info,symphonia_core::formats::probe=error".into()),
-        )
-        .with_ansi(false)
-        .without_time()
-        .with_writer(logcat::Logcat)
-        .init();
-    std::panic::set_hook(Box::new(|info| tracing::error!(target: "ytmdl", "panic: {info}")));
+    apkd_log::Logger::new("ytmdl")
+        .filter("warn,ytmdl=debug,symphonia_core::formats::probe=error")
+        .build(apkd_log::Build { commit: option_env!("YTMDL_COMMIT").or(option_env!("APKD_COMMIT")), ..apkd_log::build!() })
+        .start();
 }
 
 pub fn dirs() -> Result<Dirs> {
@@ -491,70 +488,4 @@ fn string(env: &mut JNIEnv, obj: JObject) -> jni::errors::Result<String> {
 fn file_path(env: &mut JNIEnv, file: JObject) -> jni::errors::Result<String> {
     let path = env.call_method(&file, "getAbsolutePath", "()Ljava/lang/String;", &[])?.l()?;
     string(env, path)
-}
-
-/// tracing -> logcat (tag `ytmdl`); stdout/stderr go nowhere in an Android app.
-mod logcat {
-    use std::ffi::{CString, c_char, c_int};
-    use std::io;
-
-    use tracing::{Level, Metadata};
-    use tracing_subscriber::fmt::MakeWriter;
-
-    #[link(name = "log")]
-    unsafe extern "C" {
-        fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
-    }
-
-    pub struct Logcat;
-
-    /// One formatted event; written to logcat on drop.
-    pub struct Line {
-        prio: c_int,
-        buf: Vec<u8>,
-    }
-
-    impl io::Write for Line {
-        fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-            self.buf.extend_from_slice(data);
-            Ok(data.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl Drop for Line {
-        fn drop(&mut self) {
-            let text = String::from_utf8_lossy(&self.buf);
-            let text = text.trim_end();
-            if text.is_empty() {
-                return;
-            }
-            if let Ok(text) = CString::new(text.replace('\0', "")) {
-                // SAFETY: both pointers are valid NUL-terminated strings for the call.
-                unsafe { __android_log_write(self.prio, c"ytmdl".as_ptr(), text.as_ptr()) };
-            }
-        }
-    }
-
-    impl<'a> MakeWriter<'a> for Logcat {
-        type Writer = Line;
-
-        fn make_writer(&'a self) -> Line {
-            Line { prio: 4, buf: Vec::new() }
-        }
-
-        fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Line {
-            let prio = match *meta.level() {
-                Level::ERROR => 6,
-                Level::WARN => 5,
-                Level::INFO => 4,
-                Level::DEBUG => 3,
-                Level::TRACE => 2,
-            };
-            Line { prio, buf: Vec::new() }
-        }
-    }
 }

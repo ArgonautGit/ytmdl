@@ -1,6 +1,7 @@
 //! Download queue shared by the UI and the autotest hook.
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use dioxus::prelude::*;
 use tokio::sync::mpsc;
@@ -174,6 +175,7 @@ impl Queue {
 
     /// Runs a failed or cancelled job again, in place.
     pub fn retry(&self, svc: Services, id: u64) {
+        tracing::info!(target: "ytmdl", "retrying download {id}");
         let mut jobs = self.jobs;
         {
             let mut list = jobs.write();
@@ -202,6 +204,8 @@ impl Queue {
             return Err(Error::Cancelled);
         };
         let tx = self.tx.read().clone();
+        let started = Instant::now();
+        tracing::info!(target: "ytmdl", "download {id}: {:?} ({}) to {}", entry.title, entry.url, svc.current_output_dir().display());
         let mut opts = DownloadOptions::new(svc.current_output_dir());
         opts.track_number = entry.track_number;
         opts.lyrics = crate::ui::lyrics_lookup_enabled(&self.library.get());
@@ -216,6 +220,18 @@ impl Queue {
         if let Ok(done) = &result {
             platform::media_scan(&done.path);
             self.add_to_library(done.clone()).await;
+        }
+        let secs = started.elapsed().as_secs_f32();
+        match &result {
+            Ok(done) => tracing::info!(
+                target: "ytmdl",
+                "download {id} done in {secs:.1} s: {}{}",
+                done.path.display(),
+                if done.tagged { "" } else { " (not tagged)" }
+            ),
+            Err(Error::Cancelled) => tracing::info!(target: "ytmdl", "download {id} cancelled after {secs:.1} s"),
+            // The caller logs it.
+            Err(_) => tracing::debug!(target: "ytmdl", "download {id} failed after {secs:.1} s"),
         }
         let state = match &result {
             Ok(done) => JobState::Done { path: done.path.clone(), tagged: done.tagged },
@@ -249,6 +265,7 @@ impl Queue {
     }
 
     pub fn cancel(&self, id: u64) {
+        tracing::info!(target: "ytmdl", "cancelling download {id}");
         let mut jobs = self.jobs;
         let was_queued = jobs.write().iter_mut().find(|j| j.id == id).is_some_and(Self::cancel_job);
         if was_queued {
@@ -274,6 +291,7 @@ impl Queue {
         for id in queued {
             self.save(id, &JobState::Cancelled);
         }
+        tracing::info!(target: "ytmdl", "cancelled {count} downloads");
         count
     }
 
