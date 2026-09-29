@@ -1283,11 +1283,18 @@ fn PlayButtons(
     onplay: EventHandler<()>,
     onshuffle: EventHandler<()>,
     #[props(default)] onmore: Option<EventHandler<()>>,
+    /// Set for a playlist that was left part way.
+    #[props(default)]
+    onresume: Option<EventHandler<()>>,
     #[props(default)] empty: bool,
 ) -> Element {
+    let play_class = if onresume.is_some() { "secondary" } else { "primary" };
     rsx! {
         div { class: "hero-actions",
-            button { class: "primary", disabled: empty, onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
+            if let Some(onresume) = onresume {
+                button { class: "primary", disabled: empty, onclick: move |_| onresume.call(()), Svg { icon: Icon::Resume, size: 20 } "Resume" }
+            }
+            button { class: play_class, disabled: empty, onclick: move |_| onplay.call(()), Svg { icon: Icon::Play, size: 20 } "Play" }
             button { class: "secondary", disabled: empty, onclick: move |_| onshuffle.call(()), Svg { icon: Icon::Shuffle, size: 20 } "Shuffle" }
             if let Some(onmore) = onmore {
                 button { class: "secondary round", "aria-label": "More", onclick: move |_| onmore.call(()), Svg { icon: Icon::More, size: 20 } }
@@ -1331,6 +1338,10 @@ pub fn PlaylistPage(
     /// Set for a synced playlist.
     #[props(default)]
     sync: Option<SyncView>,
+    /// Where it was left (the song, and how far in), if it can be resumed.
+    #[props(default)]
+    resume: Option<String>,
+    #[props(default)] onresume: EventHandler<()>,
     onback: EventHandler<()>,
     onplay: EventHandler<usize>,
     onshuffle: EventHandler<()>,
@@ -1367,7 +1378,16 @@ pub fn PlaylistPage(
                     },
                     None => rsx! {},
                 }
-                PlayButtons { onplay: move |_| onplay.call(0), onshuffle, onmore: onplaylistmore, empty: songs.is_empty() }
+                if let Some(left_at) = &resume {
+                    div { class: "sync-line", Svg { icon: Icon::Resume, size: 16 } "Left off at {left_at}" }
+                }
+                PlayButtons {
+                    onplay: move |_| onplay.call(0),
+                    onshuffle,
+                    onmore: onplaylistmore,
+                    onresume: resume.is_some().then_some(onresume),
+                    empty: songs.is_empty(),
+                }
             }
             if songs.is_empty() && waiting {
                 EmptyState {

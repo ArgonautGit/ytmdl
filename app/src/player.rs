@@ -6,13 +6,16 @@
 //! Queue entries have keys "<track id>.<n>", unique in the queue, so a song can
 //! be queued twice and the A-B loops can name entries. The loops themselves run
 //! in the service, and so does the sleep timer.
+//!
+//! A queue started from a playlist remembers it, and the library keeps where
+//! each playlist was left (see `ytmdl_library::Progress`) for "Resume".
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use ytmdl_library::{ART_LARGE, Library, Track};
+use ytmdl_library::{ART_LARGE, Library, Progress, Rng, Track};
 
 use crate::library::LibraryHandle;
 use crate::platform::player as backend;
@@ -102,6 +105,9 @@ struct Saved {
     ids: Vec<i64>,
     index: usize,
     position_ms: i64,
+    /// The playlist the queue was made from.
+    #[serde(default)]
+    playlist: Option<i64>,
 }
 
 const SAVED: &str = "player";
@@ -118,6 +124,8 @@ pub struct Player {
     tick: Signal<u64>,
     /// Point A of a song loop being set: (entry key, ms).
     loop_start: Signal<Option<(String, i64)>>,
+    /// The playlist the queue was started from, while it is still that queue.
+    playlist: Signal<Option<i64>>,
     /// Next `n` for entry keys; kept past the keys the service reports, which
     /// can come from an earlier run of the app.
     serial: CopyValue<u64>,
@@ -133,6 +141,7 @@ impl Player {
             queue: Signal::new(Vec::new()),
             tick: Signal::new(0),
             loop_start: Signal::new(None),
+            playlist: Signal::new(None),
             serial: CopyValue::new(0),
             library,
         };
@@ -156,6 +165,8 @@ impl Player {
         // A fresh service (not playing from before this start) gets the saved queue.
         if first && s.ids.is_empty() {
             self.restore();
+        } else if first {
+            self.adopt_playlist(&s);
         }
         let old = snapshot.peek().clone();
         if s.ids != old.ids {
@@ -166,8 +177,11 @@ impl Player {
                 serial.set(used + 1);
             }
         }
-        if !s.ids.is_empty() && (s.ids != old.ids || s.index != old.index || s.play_when_ready != old.play_when_ready) {
+        if !s.ids.is_empty()
+            && (s.ids != old.ids || s.index != old.index || s.play_when_ready != old.play_when_ready || s.ended != old.ended)
+        {
             self.save(&s);
+            self.track_playlist(&s);
         }
         received.set(Instant::now());
         snapshot.set(s);
@@ -218,6 +232,7 @@ impl Player {
             ids: s.ids.iter().filter_map(|k| track_id(k)).collect(),
             index: s.index,
             position_ms: s.position_ms.max(0),
+            playlist: *self.playlist.peek(),
         };
         let json = serde_json::to_string(&saved).expect("plain data");
         if let Err(e) = self.library.get().set_setting(SAVED, &json) {
@@ -236,7 +251,33 @@ impl Player {
             return;
         }
         let (index, position) = current.map_or((0, 0), |i| (i, saved.position_ms));
+        let mut playlist = self.playlist;
+        playlist.set(saved.playlist);
         backend::set_queue(&self.items(&tracks).0, index, position, false);
+    }
+
+    /// A service that kept its queue across the app's restart: it is a
+    /// playlist's if it is what was saved for one.
+    fn adopt_playlist(&self, s: &Snapshot) {
+        let saved = self.library.get().setting(SAVED).ok().flatten().and_then(|j| serde_json::from_str::<Saved>(&j).ok());
+        let ids: Vec<i64> = s.ids.iter().filter_map(|k| track_id(k)).collect();
+        let mut playlist = self.playlist;
+        playlist.set(saved.filter(|saved| saved.ids == ids).and_then(|saved| saved.playlist));
+    }
+
+    /// Notes in the library where the queue's playlist has got to.
+    fn track_playlist(&self, s: &Snapshot) {
+        let Some(playlist) = *self.playlist.peek() else { return };
+        let Some(id) = s.ids.get(s.index).and_then(|k| track_id(k)) else { return };
+        let library = self.library.get();
+        let Some(mut progress) = library.playlist_progress(playlist).ok().flatten() else { return };
+        let before = progress.clone();
+        progress.note(id, s.position_ms, s.ended);
+        if progress != before {
+            if let Err(e) = library.set_playlist_progress(playlist, &progress) {
+                tracing::warn!(target: "ytmdl", "saving playlist progress: {e}");
+            }
+        }
     }
 
     /// Queue entries as YtmdlPlayer takes them, with new keys; and the keys.
@@ -280,6 +321,8 @@ impl Player {
         }
         let start = start.min(tracks.len() - 1);
         let (items, keys) = self.items(&tracks);
+        let mut playlist = self.playlist;
+        playlist.set(None);
         backend::set_queue(&items, start, 0, true);
         keys
     }
@@ -288,6 +331,46 @@ impl Player {
     pub fn shuffle(&self, mut tracks: Vec<Track>) {
         shuffle(&mut tracks);
         self.play(tracks, 0);
+    }
+
+    /// Plays playlist `id` (its `tracks`, in order) from `start`.
+    pub fn play_playlist(&self, id: i64, tracks: Vec<Track>, start: usize) {
+        let ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
+        let previous = self.library.get().playlist_progress(id).ok().flatten();
+        self.start_playlist(id, Progress::in_order(&ids, start, previous.as_ref()), &tracks);
+    }
+
+    /// Plays playlist `id` shuffled, the songs not heard in earlier shuffles of
+    /// it first, so songs don't come round again before the rest have.
+    pub fn shuffle_playlist(&self, id: i64, tracks: Vec<Track>) {
+        let ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
+        let previous = self.library.get().playlist_progress(id).ok().flatten();
+        self.start_playlist(id, Progress::shuffled(&ids, previous.as_ref(), seed()), &tracks);
+    }
+
+    /// Carries on with playlist `id` where it was left: the same order, the
+    /// same song and place in it.
+    pub fn resume_playlist(&self, id: i64, tracks: Vec<Track>) {
+        let ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
+        let progress = self.library.get().playlist_progress(id).ok().flatten().and_then(|p| p.resume(&ids, seed()));
+        if let Some(progress) = progress {
+            self.start_playlist(id, progress, &tracks);
+        }
+    }
+
+    fn start_playlist(&self, id: i64, progress: Progress, tracks: &[Track]) {
+        let by_id: std::collections::HashMap<i64, &Track> = tracks.iter().map(|t| (t.id, t)).collect();
+        let queue: Vec<Track> = progress.order.iter().filter_map(|i| by_id.get(i).map(|&t| t.clone())).collect();
+        if queue.len() != progress.order.len() || queue.is_empty() {
+            return;
+        }
+        if let Err(e) = self.library.get().set_playlist_progress(id, &progress) {
+            tracing::warn!(target: "ytmdl", "saving playlist progress: {e}");
+        }
+        let (items, _) = self.items(&queue);
+        let mut playlist = self.playlist;
+        playlist.set(Some(id));
+        backend::set_queue(&items, progress.index, progress.position_ms, true);
     }
 
     /// Queues `tracks` right after the current song.
@@ -305,6 +388,12 @@ impl Player {
         let (items, keys) = self.items(tracks);
         backend::insert(&items, false);
         keys
+    }
+
+    /// The playlist the queue is playing.
+    pub fn playlist(&self) -> Option<i64> {
+        let playlist = (*self.playlist.read())?;
+        (!self.snapshot.read().ids.is_empty()).then_some(playlist)
     }
 
     /// Track ids of the queue's songs, without subscribing.
@@ -557,14 +646,10 @@ fn position(s: &Snapshot, received: Instant) -> f64 {
     secs.min(duration)
 }
 
-/// Fisher-Yates with xorshift; good enough for a play order.
+fn seed() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0x2545_f491_4f6c_dd1d, |d| d.as_nanos() as u64)
+}
+
 fn shuffle<T>(items: &mut [T]) {
-    let seed = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0x2545_f491_4f6c_dd1d, |d| d.as_nanos() as u64);
-    let mut x = seed | 1;
-    for i in (1..items.len()).rev() {
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        items.swap(i, (x % (i as u64 + 1)) as usize);
-    }
+    Rng(seed() | 1).shuffle(items);
 }

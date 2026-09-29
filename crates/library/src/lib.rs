@@ -12,6 +12,7 @@ mod duplicates;
 mod home;
 mod listens;
 mod playlists;
+mod progress;
 mod retitle;
 mod scan;
 mod sections;
@@ -34,6 +35,7 @@ pub use duplicates::Duplicates;
 pub use home::Home;
 pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
 pub use playlists::{Playlist, PlaylistEntry};
+pub use progress::{Progress, Rng};
 pub use retitle::Retitle;
 pub use scan::ScanReport;
 pub use sections::Section;
@@ -172,6 +174,12 @@ CREATE TABLE cached (
     gain         REAL,
     peak         REAL,
     played_at    INTEGER NOT NULL           -- unix seconds, for trimming the least recently played
+);
+"#, r#"
+-- Where each playlist was left (see progress.rs).
+CREATE TABLE playlist_progress (
+    playlist_id INTEGER PRIMARY KEY REFERENCES playlists (id) ON DELETE CASCADE,
+    state       TEXT NOT NULL               -- JSON of Progress
 );
 "#];
 

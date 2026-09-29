@@ -627,3 +627,148 @@ fn caches_songs_played_without_downloading() {
     assert_eq!(lib.track_by_video("ccccccccccc").unwrap().map(|t| t.id), Some(kept.id));
     assert_eq!(lib.stats(Period::All).unwrap().top_tracks[0].track.id, kept.id);
 }
+
+fn ids(from: i64, to: i64) -> Vec<i64> {
+    (from..=to).collect()
+}
+
+#[test]
+fn shuffling_again_plays_unheard_songs_first() {
+    let tracks = ids(1, 10);
+    let mut p = Progress::shuffled(&tracks, None, 7);
+    assert_eq!(p.split, 10);
+    let mut sorted = p.order.clone();
+    sorted.sort();
+    assert_eq!(sorted, tracks);
+
+    // Listen through four songs, leaving in the fifth.
+    let first_four: Vec<i64> = p.order[..4].to_vec();
+    p.note(p.order[4], 30_000, false);
+    assert_eq!(p.index, 4);
+    for id in &first_four {
+        assert!(p.heard.contains(id));
+    }
+    assert_eq!(p.heard.len(), 4);
+
+    // Shuffling again starts with the six not heard, then the four.
+    let q = Progress::shuffled(&tracks, Some(&p), 99);
+    assert_eq!(q.split, 6);
+    assert!(q.order[..6].iter().all(|id| !first_four.contains(id)));
+    assert!(q.order[6..].iter().all(|id| first_four.contains(id)));
+    assert_eq!(q.heard.len(), 4);
+}
+
+#[test]
+fn a_round_of_shuffling_ends_and_the_next_starts_clean() {
+    let tracks = ids(1, 4);
+    let mut p = Progress::shuffled(&tracks, None, 3);
+    for i in 0..4 {
+        p.note(p.order[i], 0, false);
+    }
+    // Reached the last song: three heard, the fourth playing.
+    assert_eq!(p.heard.len(), 3);
+    p.note(p.order[3], 0, true);
+    assert!(p.done);
+    assert_eq!(p.heard.len(), 4);
+    assert_eq!(p.split, 0);
+    // All heard: the next shuffle is a new round over everything.
+    let q = Progress::shuffled(&tracks, Some(&p), 5);
+    assert_eq!((q.split, q.heard.len()), (4, 0));
+}
+
+#[test]
+fn the_queue_carries_on_into_the_next_round() {
+    let tracks = ids(1, 6);
+    let mut p = Progress::shuffled(&tracks, None, 11);
+    p.note(p.order[1], 0, false);
+    let mut q = Progress::shuffled(&tracks, Some(&p), 12);
+    assert_eq!(q.split, 5);
+    // Play through the five unheard and into the heard one.
+    q.note(q.order[5], 0, false);
+    assert_eq!(q.split, 0);
+    let before: Vec<i64> = q.order[..5].to_vec();
+    let mut heard = q.heard.clone();
+    heard.sort();
+    let mut expected = before;
+    expected.sort();
+    assert_eq!(heard, expected);
+}
+
+#[test]
+fn resume_follows_the_playlist_as_it_is_now() {
+    let tracks = ids(1, 8);
+    let mut p = Progress::shuffled(&tracks, None, 21);
+    let current = p.order[3];
+    p.note(current, 42_000, false);
+    assert!(p.resumable());
+
+    // Same playlist: same queue, same place.
+    let same = p.resume(&tracks, 1).unwrap();
+    assert_eq!(same.order, p.order);
+    assert_eq!((same.index, same.position_ms), (3, 42_000));
+
+    // A song removed from the heard part and one added.
+    let removed = p.order[1];
+    let mut now: Vec<i64> = tracks.iter().copied().filter(|&t| t != removed).collect();
+    now.push(100);
+    let r = p.resume(&now, 2).unwrap();
+    assert!(!r.order.contains(&removed));
+    assert_eq!(r.order.len(), 8);
+    assert_eq!(r.order[r.index], current);
+    assert_eq!(r.position_ms, 42_000);
+    let at = r.order.iter().position(|&t| t == 100).unwrap();
+    assert!(at > r.index && at <= r.split, "new song joins the unheard songs to come: {r:?}");
+
+    // The current song deleted: carries on with the next one from its start.
+    let without: Vec<i64> = tracks.iter().copied().filter(|&t| t != current).collect();
+    let r = p.resume(&without, 3).unwrap();
+    assert_eq!(r.order[r.index], p.order[4]);
+    assert_eq!(r.position_ms, 0);
+
+    // Nothing left after it.
+    let mut last = Progress::shuffled(&tracks, None, 21);
+    last.note(last.order[7], 1_000, false);
+    let only_earlier: Vec<i64> = last.order[..7].to_vec();
+    assert!(last.resume(&only_earlier, 4).is_none());
+}
+
+#[test]
+fn a_plain_playlist_resumes_in_its_own_order() {
+    let tracks = ids(1, 5);
+    let mut p = Progress::in_order(&tracks, 0, None);
+    assert!(!p.resumable());
+    p.note(3, 5_000, false);
+    assert!(p.resumable());
+    assert!(p.heard.is_empty());
+    // A song added to the front and the order changed since.
+    let now = vec![9, 5, 4, 3, 2, 1];
+    let r = p.resume(&now, 1).unwrap();
+    assert_eq!(r.order, now);
+    assert_eq!((r.current(), r.position_ms), (Some(3), 5_000));
+    // A song queued to play next isn't the playlist's; it changes nothing.
+    p.note(77, 1_000, false);
+    assert_eq!((p.current(), p.position_ms), (Some(3), 5_000));
+    // Finishing the last song leaves nothing to resume.
+    p.note(5, 0, true);
+    assert!(!p.resumable());
+}
+
+#[test]
+fn keeps_playlist_progress_until_the_playlist_goes() {
+    let tmp = TempDir::new("progress");
+    let lib = Library::open_in_memory(&tmp.0).unwrap();
+    let id = lib.create_playlist("Run").unwrap();
+    assert!(lib.playlist_progress(id).unwrap().is_none());
+    let mut p = Progress::shuffled(&ids(1, 5), None, 8);
+    p.note(p.order[2], 9_000, false);
+    lib.set_playlist_progress(id, &p).unwrap();
+    assert_eq!(lib.playlist_progress(id).unwrap(), Some(p.clone()));
+    p.note(p.order[3], 0, false);
+    lib.set_playlist_progress(id, &p).unwrap();
+    assert_eq!(lib.playlist_progress(id).unwrap(), Some(p));
+    // Not stored for a playlist that isn't there.
+    lib.set_playlist_progress(id + 1, &Progress::default()).unwrap();
+    assert!(lib.playlist_progress(id + 1).unwrap().is_none());
+    lib.delete_playlist(id).unwrap();
+    assert!(lib.playlist_progress(id).unwrap().is_none());
+}

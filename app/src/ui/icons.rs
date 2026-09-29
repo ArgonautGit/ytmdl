@@ -41,6 +41,8 @@ pub enum Icon {
     /// Remove from a list.
     CircleMinus,
     Sync,
+    /// Resume a playlist.
+    Resume,
     Unlink,
     /// Sleep timer.
     Moon,
@@ -182,6 +184,9 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         Icon::CircleMinus => rsx! {
             circle { cx: "12", cy: "12", r: "10" }
             path { d: "M8 12h8" }
+        },
+        Icon::Resume => rsx! {
+            path { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2" }
         },
         Icon::Sync => rsx! {
             path { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" }
