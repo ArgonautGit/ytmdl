@@ -1,0 +1,4 @@
+# apkd-log comes from a private repo over ssh: cargo's own git client doesn't
+# use ssh keys or GIT_SSH_COMMAND (apkd's deploy key), git does.
+[net]
+git-fetch-with-cli = true
