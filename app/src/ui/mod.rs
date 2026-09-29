@@ -1240,6 +1240,16 @@ fn PlaylistScreen(id: i64) -> Element {
         })
         .collect();
     let synced = p.is_synced();
+    // Where it was left, unless the queue is this playlist's already.
+    let resume = (ctx.player.playlist() != Some(id))
+        .then(|| lib.get().playlist_progress(id).ok().flatten())
+        .flatten()
+        .filter(|p| p.resumable())
+        .and_then(|p| {
+            let track = entries.read().iter().map(|e| &e.track).find(|t| Some(t.id) == p.current())?.clone();
+            let at = if p.position_ms > 0 { duration_text(p.position_ms as f64 / 1000.0) } else { String::new() };
+            Some(dotted_text(&[track.title, at]))
+        });
     let sync = synced.then(|| match ctx.syncs.read().get(&id) {
         Some(SyncState::Running) => SyncView::Syncing,
         Some(SyncState::Failed(e)) => SyncView::Failed(e.clone()),
@@ -1255,8 +1265,10 @@ fn PlaylistScreen(id: i64) -> Element {
             songs,
             sync,
             onback: move |_| ctx.nav.back(),
-            onplay: move |i| ctx.player.play(tracks(), i),
-            onshuffle: move |_| ctx.player.shuffle(tracks()),
+            resume,
+            onresume: move |_| ctx.player.resume_playlist(id, tracks()),
+            onplay: move |i| ctx.player.play_playlist(id, tracks(), i),
+            onshuffle: move |_| ctx.player.shuffle_playlist(id, tracks()),
             onmore: move |i| {
                 let entry: Option<PlaylistEntry> = entries.peek().get(i).cloned();
                 if let Some(e) = entry {

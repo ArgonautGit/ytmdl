@@ -37,7 +37,10 @@ new APK.
   stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
   queue and lyrics that follow the song). Swiping a song sideways takes it
-  out of the queue, or on a playlist plays it next. Songs without lyrics are looked up
+  out of the queue, or on a playlist plays it next. A playlist remembers where it was left: Resume carries on with
+  the same song and place in it, in the same shuffled order, and shuffling it
+  again plays the songs not heard in earlier shuffles first, so every song comes
+  round before any repeats, even across restarts. Songs without lyrics are looked up
   when their lyrics are opened, and what is found is saved into the file; a
   switch in Settings turns the LRCLIB lookups off. Playlists downloaded from a link stay synced with YouTube: new songs
   there are downloaded, removed ones leave the playlist (the files stay), and

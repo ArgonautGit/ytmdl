@@ -87,6 +87,7 @@ const SCREENS: &[Screen] = &[
     ("library-playlists", "Library, playlists", library_playlists),
     ("playlist", "Playlist", playlist),
     ("playlist-synced", "Synced playlist, still downloading", playlist_synced),
+    ("playlist-resume", "Playlist left part way", playlist_resume),
     ("remote-playlist", "Playlist from a link, not saved yet", remote_playlist),
     ("library-albums", "Library, albums", library_albums),
     ("library-artists", "Library, artists", library_artists),
@@ -773,14 +774,18 @@ fn library_playlists() -> Element {
 }
 
 fn playlist() -> Element {
-    playlist_page(None)
+    playlist_page(None, None)
 }
 
 fn playlist_synced() -> Element {
-    playlist_page(Some(SyncView::Synced { ago: "5 min ago".into(), pending: 3 }))
+    playlist_page(Some(SyncView::Synced { ago: "5 min ago".into(), pending: 3 }), None)
 }
 
-fn playlist_page(sync: Option<SyncView>) -> Element {
+fn playlist_resume() -> Element {
+    playlist_page(None, Some("Blinding Lights • 1:23".into()))
+}
+
+fn playlist_page(sync: Option<SyncView>, resume: Option<String>) -> Element {
     let songs = song_items().into_iter().skip(2).take(7).collect();
     let cover = sample().songs[3].thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544));
     shell(
@@ -793,6 +798,7 @@ fn playlist_page(sync: Option<SyncView>) -> Element {
                     cover,
                     songs,
                     sync,
+                    resume,
                     onback: |_| {},
                     onplay: |_| {},
                     onshuffle: |_| {},
