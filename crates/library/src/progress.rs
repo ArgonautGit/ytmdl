@@ -179,9 +179,9 @@ impl Library {
     pub fn set_playlist_progress(&self, playlist: i64, progress: &Progress) -> Result<()> {
         // Not for a playlist deleted meanwhile.
         self.db().execute(
-            "INSERT INTO playlist_progress (playlist_id, state) SELECT id, ?2 FROM playlists WHERE id = ?1
-             ON CONFLICT (playlist_id) DO UPDATE SET state = excluded.state",
-            params![playlist, serde_json::to_string(progress)?],
+            "INSERT INTO playlist_progress (playlist_id, state, played_at) SELECT id, ?2, ?3 FROM playlists WHERE id = ?1
+             ON CONFLICT (playlist_id) DO UPDATE SET state = excluded.state, played_at = excluded.played_at",
+            params![playlist, serde_json::to_string(progress)?, crate::now()],
         )?;
         Ok(())
     }

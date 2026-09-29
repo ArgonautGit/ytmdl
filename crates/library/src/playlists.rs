@@ -104,6 +104,20 @@ impl Library {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Playlists with songs, the last played first, then the ones never
+    /// played, the newest first.
+    pub fn recent_playlists(&self, limit: usize) -> Result<Vec<Playlist>> {
+        let db = self.db();
+        let mut stmt = db.prepare(&format!(
+            "SELECT {PLAYLIST_COLUMNS} FROM playlists p LEFT JOIN playlist_progress pp ON pp.playlist_id = p.id
+             WHERE EXISTS (SELECT 1 FROM playlist_tracks pt WHERE pt.playlist_id = p.id)
+             ORDER BY COALESCE(pp.played_at, 0) DESC, pp.playlist_id IS NOT NULL DESC, p.created_at DESC, p.id DESC
+             LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map([limit as i64], playlist_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn playlist(&self, id: i64) -> Result<Option<Playlist>> {
         let sql = format!("SELECT {PLAYLIST_COLUMNS} FROM playlists p WHERE p.id = ?1");
         Ok(self.db().query_row(&sql, [id], playlist_from_row).optional()?)

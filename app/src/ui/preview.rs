@@ -322,6 +322,7 @@ fn home_view(played: bool) -> HomeView {
     HomeView {
         greeting: "Good evening".into(),
         empty: false,
+        playlists: if played { playlist_items() } else { Vec::new() },
         recent: if_played(tiles.clone()),
         top: if_played(songs.iter().skip(1).take(8).cloned().collect()),
         radios: if_played(tiles.iter().rev().cloned().collect()),
@@ -341,6 +342,7 @@ fn home_page(home: Option<HomeView>) -> Element {
                 onsearch: |_| {},
                 onshuffle: |_| {},
                 onstats: |_| {},
+                onplaylist: |_| {},
                 onplay: |_| {},
                 onmore: |_| {},
                 onradio: |_| {},

@@ -521,7 +521,7 @@ fn Shell(setup: Setup) -> Element {
     let storage = use_signal(platform::has_storage_access);
     let toast = use_signal(|| None);
     let syncs = use_signal(HashMap::new);
-    let mut tab = use_signal(|| Tab::Library);
+    let mut tab = use_signal(|| Tab::Home);
     let shared = use_signal(|| None);
     let sorts = use_signal(|| Sorts::load(&setup.library));
     let updates = use_signal(|| Updates::load(&setup.library));
@@ -1079,7 +1079,7 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
     let ctx = use_context::<Ctx>();
     let lib = ctx.library;
     let sorts = ctx.sorts;
-    let mut view = use_signal(|| LibraryView::Playlists);
+    let mut view = use_signal(|| LibraryView::Songs);
     // The search field's text while it is open.
     let mut query = use_signal(|| None::<String>);
     let tracks = use_memo(move || {

@@ -181,6 +181,8 @@ CREATE TABLE playlist_progress (
     playlist_id INTEGER PRIMARY KEY REFERENCES playlists (id) ON DELETE CASCADE,
     state       TEXT NOT NULL               -- JSON of Progress
 );
+"#, r#"
+ALTER TABLE playlist_progress ADD COLUMN played_at INTEGER; -- unix seconds, for Home's recent playlists
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
