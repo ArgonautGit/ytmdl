@@ -32,7 +32,7 @@ new APK.
   Songs played without downloading are indexed apart, with their files in
   the app's cache, trimmed to a size limit, the least recently played first. The files stay the record: a scan of the music folders
   re-indexes them from their tags and forgets deleted ones.
-- `app`: the Dioxus app (Home, library with search and sorting, playlists, search,
+- `app`: the Dioxus app, which opens on the playlists (Home, library with search and sorting, playlists, search,
   artist pages from YouTube Music, song radio, downloads, settings, listening
   stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
