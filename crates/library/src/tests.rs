@@ -431,6 +431,12 @@ fn saves_sections() {
     lib.delete_section(chorus.id).unwrap();
     assert_eq!(names(&lib), ["Guitar solo"]);
     assert_eq!(lib.sections("bbbbbbbbbbb").unwrap().len(), 1);
+
+    assert!(!solo.skip);
+    lib.set_section_skip(solo.id, true).unwrap();
+    assert!(lib.sections("aaaaaaaaaaa").unwrap()[0].skip);
+    lib.set_section_skip(solo.id, false).unwrap();
+    assert!(!lib.sections("aaaaaaaaaaa").unwrap()[0].skip);
 }
 
 /// Needs `.deps/fixtures/tone.m4a`, like `scan_indexes_tagged_files_and_forgets_deleted_ones`.

@@ -5,7 +5,7 @@
 //!
 //! Queue entries have keys "<track id>.<n>", unique in the queue, so a song can
 //! be queued twice and the A-B loops can name entries. The loops themselves run
-//! in the service, and so does the sleep timer.
+//! in the service, and so do the sleep timer and skipped sections.
 //!
 //! A queue started from a playlist remembers it, and the library keeps where
 //! each playlist was left (see `ytmdl_library::Progress`) for "Resume".
@@ -541,12 +541,17 @@ impl Player {
         backend::set_queue_loop(None);
     }
 
-    /// Off, then all, then one.
     /// Plays songs at an even loudness, from their ReplayGain.
     pub fn set_normalize(&self, on: bool) {
         backend::set_normalize(on);
     }
 
+    /// Has the service pick up skipped sections changed in the library.
+    pub fn reload_skips(&self) {
+        backend::reload_skips();
+    }
+
+    /// Off, then all, then one.
     pub fn cycle_repeat(&self) {
         let mode = match self.repeat() {
             Repeat::Off => 2,

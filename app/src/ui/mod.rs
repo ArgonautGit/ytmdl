@@ -939,7 +939,14 @@ fn NowPlayingScreen() -> Element {
         .read()
         .iter()
         .enumerate()
-        .map(|(i, s)| SectionChip { name: s.name.clone(), times: section_times(s.a_ms, s.b_ms), active: active == Some(i) })
+        .map(|(i, s)| SectionChip {
+            name: s.name.clone(),
+            times: section_times(s.a_ms, s.b_ms),
+            a: secs(s.a_ms),
+            b: secs(s.b_ms),
+            active: active == Some(i),
+            skipped: s.skip,
+        })
         .collect();
     let sleep = player.sleep().map(|s| match s {
         Sleep::EndOfSong => "End of song".to_string(),
@@ -1496,7 +1503,7 @@ fn SleepMenu() -> Element {
     }
 }
 
-/// A song's saved sections; picking one offers to rename or delete it.
+/// A song's saved sections; picking one offers to skip, rename or delete it.
 #[component]
 fn SectionsMenu(video_id: String, title: String) -> Element {
     let ctx = use_context::<Ctx>();
@@ -1509,7 +1516,11 @@ fn SectionsMenu(video_id: String, title: String) -> Element {
     let items = sections
         .read()
         .iter()
-        .map(|s| MenuItem { sub: Some(section_times(s.a_ms, s.b_ms)), ..MenuItem::new(Icon::Bookmark, s.name.clone()) })
+        .map(|s| {
+            let times = section_times(s.a_ms, s.b_ms);
+            let sub = if s.skip { format!("{times} · Skipped") } else { times };
+            MenuItem { sub: Some(sub), ..MenuItem::new(if s.skip { Icon::Next } else { Icon::Bookmark }, s.name.clone()) }
+        })
         .collect();
     rsx! {
         MenuSheet {
@@ -1530,14 +1541,16 @@ fn SectionMenu(section: Section) -> Element {
     let ctx = use_context::<Ctx>();
     let items = vec![
         MenuItem::new(Icon::Repeat, "Loop it"),
+        if section.skip { MenuItem::new(Icon::Play, "Play it again") } else { MenuItem::new(Icon::Next, "Skip it") },
         MenuItem::new(Icon::Pencil, "Rename"),
         MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete") },
     ];
+    let times = section_times(section.a_ms, section.b_ms);
     let head = MenuHead {
         title: section.name.clone(),
-        sub: section_times(section.a_ms, section.b_ms),
+        sub: if section.skip { format!("{times} · Skipped") } else { times },
         art: None,
-        icon: Icon::Bookmark,
+        icon: if section.skip { Icon::Next } else { Icon::Bookmark },
     };
     rsx! {
         MenuSheet {
@@ -1554,6 +1567,23 @@ fn SectionMenu(section: Section) -> Element {
                         }
                     }
                     1 => {
+                        ctx.nav.back();
+                        if let Err(e) = ctx.library.get().set_section_skip(s.id, !s.skip) {
+                            ctx.notify(format!("Couldn't change it: {e}"));
+                            return;
+                        }
+                        ctx.library.changed();
+                        ctx.player.reload_skips();
+                        // Looping it would keep playing it.
+                        let looping = ctx.player.song_loop().and_then(|(a, b)| Some((a, b?)));
+                        let near = |x: i64, y: i64| (x - y).abs() < 50;
+                        let playing = ctx.player.current().is_some_and(|t| t.video_id == s.video_id);
+                        if !s.skip && playing && looping.is_some_and(|(a, b)| near(a, s.a_ms) && near(b, s.b_ms)) {
+                            ctx.player.stop_song_loop();
+                        }
+                        ctx.notify(if s.skip { format!("Playing “{}” again", s.name) } else { format!("Skipping “{}”", s.name) });
+                    }
+                    2 => {
                         let sheet = Sheet::SectionName { id: Some(s.id), name: s.name, video_id: s.video_id, a: s.a_ms, b: s.b_ms };
                         ctx.nav.replace(Overlay::Sheet(sheet));
                     }
@@ -1562,6 +1592,9 @@ fn SectionMenu(section: Section) -> Element {
                         match ctx.library.get().delete_section(s.id) {
                             Ok(()) => {
                                 ctx.library.changed();
+                                if s.skip {
+                                    ctx.player.reload_skips();
+                                }
                                 ctx.notify(format!("Deleted “{}”", s.name));
                             }
                             Err(e) => ctx.notify(format!("Couldn't delete it: {e}")),

@@ -47,6 +47,11 @@ import kotlin.math.pow
  * last one ends. So does the sleep timer. The app sets them with custom
  * commands and reads them back from the session extras.
  *
+ * Skipped sections are read from the library here (they hold in the car and
+ * with the app closed too): playing into one jumps to its end, and so does
+ * landing in one (a seek, a song starting with one). A song loop over one
+ * plays it, though.
+ *
  * Every song played is logged to `files/listens.log` for the app's listening
  * stats (see crates/library/src/listens.rs), since the app may not be running.
  *
@@ -63,6 +68,8 @@ class PlaybackService : MediaLibraryService() {
         const val SLEEP = "dev.nick.ytmdl.SLEEP"
         /** Args: "on", whether songs play at an even loudness. */
         const val NORMALIZE = "dev.nick.ytmdl.NORMALIZE"
+        /** No args: the skipped sections changed in the library. */
+        const val SKIPS = "dev.nick.ytmdl.SKIPS"
         /** A song's ReplayGain (dB) and peak, in its metadata extras. */
         const val GAIN = "gain"
         const val PEAK = "peak"
@@ -83,6 +90,8 @@ class PlaybackService : MediaLibraryService() {
 
     private data class SongLoop(val id: String, val a: Long, val b: Long)
     private data class QueueLoop(val first: String, val last: String)
+    /** A part of a song left out, in ms. */
+    private data class Skip(val a: Long, val b: Long)
 
     private var session: MediaLibrarySession? = null
     private var player: ExoPlayer? = null
@@ -91,6 +100,8 @@ class PlaybackService : MediaLibraryService() {
     private val io: ListeningExecutorService = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private var songLoop: SongLoop? = null
     private var queueLoop: QueueLoop? = null
+    /** Skipped sections by track id (negative for cached songs, as in media ids). */
+    private var skips: Map<Long, List<Skip>> = emptyMap()
     /** Positions are per queue index, so these are rebuilt when the queue changes. */
     private val loopMessages = ArrayList<PlayerMessage>()
     private var currentId: String? = null
@@ -131,6 +142,7 @@ class PlaybackService : MediaLibraryService() {
         this.player = player
         browse = Browse(this)
         normalize = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMALIZE, true)
+        loadSkips()
 
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider.Builder(this).build().apply { setSmallIcon(R.drawable.ytmdl_notification) }
@@ -194,6 +206,7 @@ class PlaybackService : MediaLibraryService() {
                         .add(SessionCommand(QUEUE_LOOP, Bundle.EMPTY))
                         .add(SessionCommand(SLEEP, Bundle.EMPTY))
                         .add(SessionCommand(NORMALIZE, Bundle.EMPTY))
+                        .add(SessionCommand(SKIPS, Bundle.EMPTY))
                         .build()
                 )
             }
@@ -223,6 +236,10 @@ class PlaybackService : MediaLibraryService() {
                     normalize = args.getBoolean("on", true)
                     getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(NORMALIZE, normalize).apply()
                     applyVolume()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                SKIPS -> {
+                    loadSkips()
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
@@ -322,8 +339,15 @@ class PlaybackService : MediaLibraryService() {
 
     private val loopListener = object : Player.Listener {
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) armLoops()
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                armLoops()
+                // A song downloaded again has a new track id.
+                loadSkips()
+            }
         }
+
+        override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) =
+            skipOut()
 
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
             val left = currentId
@@ -333,6 +357,7 @@ class PlaybackService : MediaLibraryService() {
                 songLoop = null
                 armLoops()
             }
+            skipOut()
             // The end-of-last-song message was missed (seeking right to its end,
             // say): catch the automatic move on from it instead.
             val loop = queueLoop ?: return
@@ -348,6 +373,7 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY) skipOut()
             if (state == Player.STATE_ENDED && sleepAtEnd) clearSleep()
             // The loop's last song was also the queue's last.
             val loop = queueLoop ?: return
@@ -369,7 +395,55 @@ class PlaybackService : MediaLibraryService() {
         return C.INDEX_UNSET
     }
 
-    /** Recreates the messages behind the loops, dropping loops whose songs left the queue. */
+    /** The skipped sections of queue entry [index], less any the song loop plays. */
+    private fun skipsAt(p: Player, index: Int): List<Skip> {
+        val id = p.getMediaItemAt(index).mediaId
+        val found = id.substringBefore('.').toLongOrNull()?.let { skips[it] } ?: return emptyList()
+        val loop = songLoop?.takeIf { it.id == id } ?: return found
+        return found.filter { it.b <= loop.a || it.a >= loop.b }
+    }
+
+    /** Where skip [s] of the song playing ends: at the song's end, at most. */
+    private fun endOf(p: Player, s: Skip): Long {
+        val duration = p.duration
+        return if (duration == C.TIME_UNSET) s.b else minOf(s.b, duration)
+    }
+
+    /** Jumps to the end of skip [s] of the song playing, unless it is the whole song. */
+    private fun skipPast(p: Player, s: Skip) {
+        val end = endOf(p, s)
+        if (s.a <= 0 && end == p.duration) return
+        p.seekTo(end)
+    }
+
+    /** Leaves a skipped section the song is in. */
+    private fun skipOut() {
+        val p = player ?: return
+        val index = p.currentMediaItemIndex
+        if (index == C.INDEX_UNSET || index >= p.mediaItemCount) return
+        val at = p.currentPosition
+        skipsAt(p, index).firstOrNull { at >= it.a && at < endOf(p, it) }?.let { skipPast(p, it) }
+    }
+
+    /** Reads the skipped sections from the library, off the main thread. */
+    private fun loadSkips() {
+        if (io.isShutdown) return
+        io.execute {
+            val found = browse.skips().mapValues { (_, l) -> l.map { (a, b) -> Skip(a, b) } }
+            main.post {
+                if (found != skips) {
+                    skips = found
+                    armLoops()
+                    skipOut()
+                }
+            }
+        }
+    }
+
+    /**
+     * Recreates the messages behind the loops and skips, dropping loops whose
+     * songs left the queue.
+     */
     private fun armLoops() {
         val p = player ?: return
         loopMessages.forEach { it.cancel() }
@@ -417,6 +491,21 @@ class PlaybackService : MediaLibraryService() {
                     .setLooper(main)
                     .setDeleteAfterDelivery(false)
                     .send()
+            }
+        }
+
+        if (skips.isNotEmpty()) {
+            for (i in 0 until p.mediaItemCount) {
+                for (skip in skipsAt(p, i)) {
+                    loopMessages += p.createMessage { _, _ ->
+                        // Still skipped (a song loop may have started over it since).
+                        if (p.currentMediaItemIndex == i && skip in skipsAt(p, i)) skipPast(p, skip)
+                    }
+                        .setPosition(i, skip.a)
+                        .setLooper(main)
+                        .setDeleteAfterDelivery(false)
+                        .send()
+                }
             }
         }
         publish()

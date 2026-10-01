@@ -344,6 +344,11 @@ pub mod player {
         call("setNormalize", "(Z)V", |_| Ok(vec![JValueOwned::Bool(on.into())]));
     }
 
+    /// Has the service read the skipped sections from the library again.
+    pub fn reload_skips() {
+        call("reloadSkips", "()V", |_| Ok(Vec::new()));
+    }
+
     pub fn play() {
         call("play", "()V", |_| Ok(Vec::new()));
     }

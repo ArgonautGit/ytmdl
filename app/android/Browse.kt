@@ -179,6 +179,21 @@ class Browse(private val context: Context) {
         id.toString(),
     )
 
+    /**
+     * Skipped sections (see crates/library/src/sections.rs) as (a, b) ms, by
+     * track id: negative for cached songs, as in media ids.
+     */
+    fun skips(): Map<Long, List<Pair<Long, Long>>> = read { db ->
+        val sql = "SELECT t.id, s.a_ms, s.b_ms FROM sections s JOIN tracks t ON t.video_id = s.video_id WHERE s.skip " +
+            "UNION ALL SELECT -c.id, s.a_ms, s.b_ms FROM sections s JOIN cached c ON c.video_id = s.video_id WHERE s.skip " +
+            "ORDER BY 2"
+        db.rawQuery(sql, null).use { c ->
+            val skips = HashMap<Long, MutableList<Pair<Long, Long>>>()
+            while (c.moveToNext()) skips.getOrPut(c.getLong(0)) { ArrayList() }.add(c.getLong(1) to c.getLong(2))
+            skips
+        }
+    } ?: emptyMap()
+
     /** The queue the app saved last (see `Saved` in src/player.rs): tracks, index, position. */
     private fun savedQueue(): Triple<List<Track>, Int, Long>? {
         val json = read { db ->

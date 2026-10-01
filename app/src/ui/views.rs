@@ -114,8 +114,13 @@ pub struct SectionChip {
     pub name: String,
     /// "0:32–1:05"
     pub times: String,
+    /// Where it starts and ends, in seconds.
+    pub a: f64,
+    pub b: f64,
     /// Looping now.
     pub active: bool,
+    /// Left out when the song plays.
+    pub skipped: bool,
 }
 
 /// What a menu sheet is about, shown above its items.
@@ -1816,7 +1821,7 @@ pub fn NowPlayingPage(
     sleep: Option<String>,
     /// The sleep timer button.
     onsleep: EventHandler<()>,
-    /// The song's saved A-B sections.
+    /// The song's saved A-B sections; the skipped ones are marked on the seek bar.
     #[props(default)]
     sections: Vec<SectionChip>,
     /// A loop is set that isn't saved yet.
@@ -1903,6 +1908,13 @@ pub fn NowPlayingPage(
                 }
             }
             div { class: "seek",
+                if sections.iter().any(|s| s.skipped) {
+                    div { class: "skip-track",
+                        for (i , s) in sections.iter().enumerate().filter(|(_, s)| s.skipped) {
+                            div { key: "{i}", class: "skip-range", style: "left: {at(s.a):.2}%; width: {at(s.b) - at(s.a):.2}%" }
+                        }
+                    }
+                }
                 if let Some((a, b)) = song_loop {
                     div { class: "ab-track",
                         if let Some(b) = b {
@@ -1946,8 +1958,15 @@ pub fn NowPlayingPage(
                     for (i , section) in sections.iter().cloned().enumerate() {
                         button {
                             key: "{i}",
-                            class: if section.active { "chip section selected" } else { "chip section" },
+                            class: match (section.active, section.skipped) {
+                                (true, _) => "chip section selected",
+                                (false, true) => "chip section skipped",
+                                (false, false) => "chip section",
+                            },
                             onclick: move |_| onsection.call(i),
+                            if section.skipped {
+                                Svg { icon: Icon::Next, size: 14 }
+                            }
                             "{section.name}"
                             span { class: "times", "{section.times}" }
                         }

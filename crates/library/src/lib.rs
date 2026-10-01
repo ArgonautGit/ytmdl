@@ -1,6 +1,7 @@
 //! The music library: an SQLite index of downloaded tracks and of the download
-//! queue, plus playlists, listening history, saved A-B sections and a cache of
-//! resized cover art, and what the Home tab shows from them.
+//! queue, plus playlists, listening history, saved A-B sections (looped, or
+//! skipped) and a cache of resized cover art, and what the Home tab shows from
+//! them.
 //!
 //! The audio files stay the record. Each carries its source URL in the comment
 //! tag, so [`Library::scan`] can rebuild the index from the music folders, and it
@@ -56,8 +57,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Schema versions, applied in order and tracked in `PRAGMA user_version`.
 /// The player's process also reads `tracks`, `playlists`, `playlist_tracks`
-/// and the saved queue, for cars (app/android/Browse.kt), so columns there
-/// are only ever added.
+/// and the saved queue, for cars (app/android/Browse.kt), and the skipped
+/// sections (app/android/PlaybackService.kt), so columns there are only ever
+/// added.
 const MIGRATIONS: &[&str] = &[r#"
 CREATE TABLE tracks (
     id           INTEGER PRIMARY KEY,
@@ -183,6 +185,8 @@ CREATE TABLE playlist_progress (
 );
 "#, r#"
 ALTER TABLE playlist_progress ADD COLUMN played_at INTEGER; -- unix seconds, for Home's recent playlists
+"#, r#"
+ALTER TABLE sections ADD COLUMN skip INTEGER NOT NULL DEFAULT 0; -- left out when the song plays
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =

@@ -87,6 +87,7 @@ pub mod player {
     pub fn set_song_loop(_song: Option<(&str, i64, i64)>) {}
     pub fn set_queue_loop(_range: Option<(&str, &str)>) {}
     pub fn set_normalize(_on: bool) {}
+    pub fn reload_skips() {}
 }
 
 /// Nothing shares to a desktop build.
