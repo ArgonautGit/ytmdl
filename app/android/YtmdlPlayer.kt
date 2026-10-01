@@ -226,6 +226,12 @@ object YtmdlPlayer {
         c.sendCustomCommand(SessionCommand(PlaybackService.NORMALIZE, Bundle.EMPTY), args)
     }
 
+    /** Has the service read the skipped sections from the library again. */
+    @JvmStatic
+    fun reloadSkips() = command { c ->
+        c.sendCustomCommand(SessionCommand(PlaybackService.SKIPS, Bundle.EMPTY), Bundle.EMPTY)
+    }
+
     private fun publish() {
         val c = controller ?: return
         val ids = JSONArray()

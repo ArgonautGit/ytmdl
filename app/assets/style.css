@@ -748,6 +748,9 @@ button.icon-btn:active { background: var(--press); }
 .ab-range { position: absolute; top: 19px; height: 3px; border-radius: 2px; background: var(--accent); }
 .ab-mark { position: absolute; top: 4px; width: 2px; height: 18px; margin-left: -1px; border-radius: 1px; background: var(--accent); }
 .ab-note { overflow: hidden; color: var(--accent); white-space: nowrap; text-overflow: ellipsis; }
+/* Over the slider: skipped sections cut out of the bar. */
+.skip-track { position: absolute; left: 28px; right: 28px; top: 16px; height: 24px; z-index: 2; pointer-events: none; }
+.skip-range { position: absolute; top: 10px; height: 4px; border-radius: 2px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--dim); }
 
 /* Saved A-B sections, under the seek bar. */
 .chips.sections { position: relative; margin: 10px 0 0; padding: 0 28px; }
@@ -756,6 +759,7 @@ button.icon-btn:active { background: var(--press); }
 .chip.section.selected { background: var(--accent); color: #fff; }
 .chip.section.selected .times { color: rgba(255, 255, 255, 0.8); }
 .chip.section.save { background: transparent; box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+.chip.section.skipped { color: var(--muted); }
 .chip.section.edit { padding: 0 10px; background: transparent; color: var(--muted); }
 
 .ab-btn {

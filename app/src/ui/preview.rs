@@ -69,12 +69,13 @@ const SCREENS: &[Screen] = &[
     ("now-playing", "Now playing", now_playing),
     ("now-playing-loops", "Now playing, A-B loops on the song and the queue", now_playing_loops),
     ("now-playing-pick", "Now playing, picking the queue loop's B", now_playing_pick),
-    ("now-playing-sections", "Now playing, a saved section looping and the sleep timer on", now_playing_sections),
+    ("now-playing-sections", "Now playing, a saved section looping, one skipped and the sleep timer on", now_playing_sections),
     ("now-playing-lyrics", "Now playing, synced lyrics", now_playing_lyrics),
     ("now-playing-lyrics-plain", "Now playing, plain lyrics", now_playing_lyrics_plain),
     ("now-playing-lyrics-missing", "Now playing, no lyrics found", now_playing_lyrics_missing),
     ("sleep-menu", "Sleep timer", sleep_menu),
     ("section-name", "Saving a loop as a section", section_name),
+    ("section-menu", "A skipped section's menu", section_menu),
     ("library-search", "Library, searching", library_search),
     ("sort-menu", "Sorting the library", sort_menu),
     ("stats", "Listening stats, 30 days", stats),
@@ -653,10 +654,21 @@ fn now_playing_lyrics_missing() -> Element {
 }
 
 fn section_chips() -> Vec<SectionChip> {
-    [("Intro", "0:00–0:18", false), ("Chorus", "0:32–1:18", true), ("Bridge", "1:40–1:58", false)]
-        .iter()
-        .map(|(name, times, active)| SectionChip { name: name.to_string(), times: times.to_string(), active: *active })
-        .collect()
+    [
+        ("Intro", "0:00–0:18", 0.0, 18.0, false, true),
+        ("Chorus", "0:32–1:18", 32.0, 78.0, true, false),
+        ("Bridge", "1:40–1:58", 100.0, 118.0, false, false),
+    ]
+    .iter()
+    .map(|&(name, times, a, b, active, skipped)| SectionChip {
+        name: name.to_string(),
+        times: times.to_string(),
+        a,
+        b,
+        active,
+        skipped,
+    })
+    .collect()
 }
 
 fn now_playing_sections() -> Element {
@@ -670,6 +682,20 @@ fn sleep_menu() -> Element {
     let head = MenuHead { title: "Sleep timer".into(), sub: "Pausing in 23 min".into(), art: None, icon: Icon::Moon };
     rsx! {
         {now_playing_with(Some((32.0, Some(78.5))), &[], QueueLoopView::Off, Some("23 min"), section_chips(), false)}
+        MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} }
+    }
+}
+
+fn section_menu() -> Element {
+    let items = vec![
+        MenuItem::new(Icon::Repeat, "Loop it"),
+        MenuItem::new(Icon::Play, "Play it again"),
+        MenuItem::new(Icon::Pencil, "Rename"),
+        MenuItem { danger: true, ..MenuItem::new(Icon::Trash, "Delete") },
+    ];
+    let head = MenuHead { title: "Intro".into(), sub: "0:00–0:18 · Skipped".into(), art: None, icon: Icon::Next };
+    rsx! {
+        {now_playing_with(None, &[], QueueLoopView::Off, None, section_chips(), false)}
         MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} }
     }
 }

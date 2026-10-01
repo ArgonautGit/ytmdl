@@ -36,7 +36,9 @@ new APK.
   artist pages from YouTube Music, song radio, downloads, settings, listening
   stats, player with A-B loops over part of a
   song or a run of the queue, saved sections, a sleep timer, a reorderable
-  queue and lyrics that follow the song). Swiping a song sideways takes it
+  queue and lyrics that follow the song). A saved section can be skipped
+  instead: that part of the song (a long intro, a skit) is left out whenever
+  it plays, in the car too. Swiping a song sideways takes it
   out of the queue, or on a playlist plays it next. A playlist remembers where it was left: Resume carries on with
   the same song and place in it, in the same shuffled order, and shuffling it
   again plays the songs not heard in earlier shuffles first, so every song comes
