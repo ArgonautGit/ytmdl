@@ -34,4 +34,38 @@ impl Error {
     pub fn is_extractor(&self) -> bool {
         matches!(self, Error::Extractor(_))
     }
+
+    /// The video is gone, private or blocked for this viewer: trying again won't help.
+    pub fn is_unavailable(&self) -> bool {
+        matches!(self, Error::Extractor(msg) if is_unavailable_message(msg))
+    }
+}
+
+/// [`Error::is_unavailable`] for an error that was turned into text.
+pub fn is_unavailable_message(msg: &str) -> bool {
+    const SIGNS: [&str; 7] = [
+        "video unavailable",
+        "video is not available",
+        "private video",
+        "has been removed",
+        "account associated with this video has been terminated",
+        "not made this video available in your country",
+        "sign in to confirm your age",
+    ];
+    let msg = msg.to_lowercase();
+    SIGNS.iter().any(|s| msg.contains(s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tells_unavailable_videos_apart() {
+        let gone = Error::Extractor("[youtube] ZPiH8rU0o4s: Video unavailable".into());
+        assert!(gone.is_unavailable());
+        assert!(is_unavailable_message("[youtube] x: Private video. Sign in if you've been granted access"));
+        assert!(!Error::Extractor("unable to download video data: HTTP Error 403: Forbidden".into()).is_unavailable());
+        assert!(!Error::Python("Video unavailable".into()).is_unavailable());
+    }
 }

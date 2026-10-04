@@ -15,7 +15,7 @@ pub mod titles;
 
 use std::path::PathBuf;
 
-pub use error::{Error, Result};
+pub use error::{Error, Result, is_unavailable_message};
 pub use model::{
     ArtistPage, ArtistSection, CollectionKind, Downloaded, Entry, More, RadioSeed, Resolved, SectionKind, TrackMeta,
     art_url, artist_id, playlist_url, shared_link,

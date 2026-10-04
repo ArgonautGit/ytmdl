@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import urllib.request
 
 _log = None  # host callback: (level: str, message: str) -> None
@@ -32,7 +33,9 @@ class _Logger:
 
     def warning(self, msg):
         # The host rewrites DASH m4a itself (remux.rs), so this advice doesn't apply.
-        _emit("debug" if "writing DASH m4a" in msg else "warning", msg)
+        # The redirect is how every YouTube Music link is read.
+        quiet = "writing DASH m4a" in msg or "YouTube Music is not directly supported" in msg
+        _emit("debug" if quiet else "warning", msg)
 
     def error(self, msg):
         _emit("error", msg)
@@ -551,9 +554,18 @@ def music_browse(args_json, request_json):
     return json.dumps({"entries": entries[:limit]})
 
 
+_TRANSIENT = ("HTTP Error 403", "HTTP Error 500", "HTTP Error 502", "HTTP Error 503", "HTTP Error 504",
+              "timed out", "Connection reset")
+
+
+def _transient(msg):
+    """Whether a download error may go away on its own (not a missing video or no network)."""
+    return any(s in msg for s in _TRANSIENT)
+
+
 def download(args_json, url, on_progress):
     """Downloads `url`. `on_progress(json) -> bool`; returning False cancels."""
-    from yt_dlp.utils import DownloadCancelled
+    from yt_dlp.utils import DownloadCancelled, DownloadError
 
     def hook(d):
         payload = {
@@ -567,8 +579,17 @@ def download(args_json, url, on_progress):
         if not on_progress(json.dumps(payload)):
             raise DownloadCancelled("cancelled by host")
 
-    with _ydl(json.loads(args_json), {"progress_hooks": [hook]}) as ydl:
-        return _result(ydl, ydl.extract_info(url, download=True), url)
+    args = json.loads(args_json)
+    for attempt in (1, 2):
+        try:
+            with _ydl(args, {"progress_hooks": [hook]}) as ydl:
+                return _result(ydl, ydl.extract_info(url, download=True), url)
+        except DownloadError as e:
+            # yt-dlp doesn't retry these itself; a fresh extraction gets new stream URLs.
+            if attempt == 2 or not _transient(str(e)):
+                raise
+            _emit("info", f"retrying {url}: {e}")
+            time.sleep(1.5)
 
 
 def fetch(url, max_bytes, headers_json="{}", missing_ok=False):
