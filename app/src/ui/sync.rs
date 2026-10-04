@@ -6,6 +6,7 @@
 //! playlist, songs taken out of it) are kept and never sent to YouTube.
 
 use std::collections::HashSet;
+use std::net::ToSocketAddrs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
@@ -21,6 +22,11 @@ const STALE_SECS: i64 = 30 * 60;
 pub enum SyncState {
     Running,
     Failed(String),
+}
+
+/// Whether YouTube's host can be looked up, which fails at once without a network.
+async fn online() -> bool {
+    crate::blocking(|| ("www.youtube.com", 443).to_socket_addrs().is_ok()).await.unwrap_or(true)
 }
 
 pub fn unix_now() -> i64 {
@@ -73,6 +79,15 @@ impl Ctx {
         tracing::info!(target: "ytmdl", "syncing playlist {id} ({name:?}){}", if manual { ", asked for" } else { "" });
         // Not tied to the menu it may come from, which closes before this runs.
         dioxus::core::spawn_forever(async move {
+            // yt-dlp would spend a minute retrying before it said the same.
+            if !online().await {
+                tracing::info!(target: "ytmdl", "not syncing playlist {id}: offline");
+                syncs.write().remove(&id);
+                if manual {
+                    ctx.notify(format!("Couldn't sync {name}: you're offline"));
+                }
+                return;
+            }
             let result = match svc.dl.resolve_as(&url, Some(CollectionKind::Playlist)).await {
                 Ok(Resolved::Collection { entries, .. }) => ctx.apply_sync(id, entries, manual).await,
                 Ok(Resolved::Track(_)) => Err("the link no longer leads to a playlist".into()),

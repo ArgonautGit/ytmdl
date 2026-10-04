@@ -3,12 +3,12 @@
 //! crates/library/src/cache.rs) and played, and the songs after it in the list
 //! are fetched as it plays, a couple ahead of the one playing.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use dioxus::prelude::*;
-use ytmdl_core::{CancelToken, DownloadOptions, Entry};
+use ytmdl_core::{CancelToken, DownloadOptions, Entry, is_unavailable_message};
 use ytmdl_library::{Library, Track};
 
 use super::Ctx;
@@ -39,6 +39,9 @@ pub(super) struct Stream {
     /// A song of `pending` is being fetched.
     busy: Signal<bool>,
     failures: Signal<u32>,
+    /// Songs YouTube has no video for (not on the failure count; skipped when
+    /// they come up again).
+    unavailable: CopyValue<HashSet<String>>,
     /// The last queue entry the list added, and when. Once it has left the
     /// queue (another queue replaced it), the rest of the list is dropped.
     tail: Signal<Option<(String, Instant)>>,
@@ -60,6 +63,7 @@ impl Stream {
             pending: Signal::new(VecDeque::new()),
             busy: Signal::new(false),
             failures: Signal::new(0),
+            unavailable: CopyValue::new(HashSet::new()),
             tail: Signal::new(None),
             generation: Signal::new(0),
             cancel: CopyValue::new(CancelToken::new()),
@@ -104,6 +108,14 @@ impl Ctx {
                     let mut tail = s.tail;
                     tail.set(keys.last().map(|k| (k.clone(), Instant::now())));
                 }
+                Err(e) if is_unavailable_message(&e) && !pending.peek().is_empty() => {
+                    tracing::info!(target: "ytmdl", "skipping {}: {e}", first.url);
+                    let mut unavailable = ctx.stream.unavailable;
+                    unavailable.write().insert(first.id.clone());
+                    ctx.notify(format!("“{}” isn't available on YouTube, skipped", first.title));
+                    let rest = std::mem::take(&mut *pending.write());
+                    ctx.play_entries(rest.into(), 0);
+                }
                 Err(e) => {
                     pending.write().clear();
                     ctx.notify(format!("Couldn't play “{}”: {e}", first.title));
@@ -136,7 +148,13 @@ impl Ctx {
         let ctx = *self;
         let s = self.stream;
         let (mut pending, mut busy) = (s.pending, s.busy);
-        let Some(entry) = pending.write().pop_front() else { return };
+        let known = s.unavailable.read().clone();
+        let entry = loop {
+            let Some(next) = pending.write().pop_front() else { return };
+            if !known.contains(&next.id) {
+                break next;
+            }
+        };
         busy.set(true);
         let generation = *s.generation.peek();
         let cancel = s.cancel.read().clone();
@@ -159,6 +177,13 @@ impl Ctx {
                     failures.set(0);
                     let keys = ctx.player.add_to_queue(&[track]);
                     tail.set(keys.last().map(|k| (k.clone(), Instant::now())));
+                }
+                // Nothing is wrong with the app or the network: the song is just gone.
+                Err(e) if is_unavailable_message(&e) => {
+                    tracing::info!(target: "ytmdl", "skipping {}: {e}", entry.url);
+                    let mut unavailable = s.unavailable;
+                    unavailable.write().insert(entry.id.clone());
+                    ctx.notify(format!("“{}” isn't available on YouTube, skipped", entry.title));
                 }
                 Err(e) => {
                     tracing::warn!(target: "ytmdl", "fetching {}: {e}", entry.url);
