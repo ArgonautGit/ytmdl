@@ -187,6 +187,9 @@ CREATE TABLE playlist_progress (
 ALTER TABLE playlist_progress ADD COLUMN played_at INTEGER; -- unix seconds, for Home's recent playlists
 "#, r#"
 ALTER TABLE sections ADD COLUMN skip INTEGER NOT NULL DEFAULT 0; -- left out when the song plays
+"#, r#"
+ALTER TABLE playlist_tracks ADD COLUMN local INTEGER NOT NULL DEFAULT 0;  -- added here to a synced playlist: stays when YouTube doesn't list it
+ALTER TABLE playlist_remote ADD COLUMN removed INTEGER NOT NULL DEFAULT 0; -- taken out here: not put back or downloaded by a sync
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =

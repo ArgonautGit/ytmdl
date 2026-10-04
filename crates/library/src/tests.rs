@@ -193,7 +193,7 @@ fn synced_playlists_follow_youtube() {
     assert_eq!(titles(), ["B", "A"]);
     let p = lib.playlist(id).unwrap().unwrap();
     assert!(p.is_synced() && p.synced_at.is_some());
-    assert_eq!((p.tracks, p.wanted), (2, 3));
+    assert_eq!((p.tracks, p.pending), (2, 1));
 
     // C's download finishes and takes its place.
     add(&lib, &tmp.0, meta("ccccccccccc", "C", None, &["X"], None));
@@ -211,16 +211,65 @@ fn synced_playlists_follow_youtube() {
     lib.delete_track(b.id).unwrap();
     let missing = lib.sync_playlist(id, &ids(&["bbbbbbbbbbb", "ddddddddddd", "ccccccccccc"])).unwrap();
     assert_eq!(missing, ["ddddddddddd"]);
-    assert_eq!(lib.playlist(id).unwrap().unwrap().wanted, 2);
+    assert_eq!(lib.playlist(id).unwrap().unwrap().pending, 1);
     // ...unless it is downloaded again by hand.
     add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
     assert_eq!(titles(), ["B", "C"]);
-    assert_eq!(lib.playlist(id).unwrap().unwrap().wanted, 3);
+    assert_eq!(lib.playlist(id).unwrap().unwrap().pending, 1);
 
     lib.stop_syncing(id).unwrap();
     assert!(!lib.playlist(id).unwrap().unwrap().is_synced());
     assert_eq!(titles(), ["B", "C"]);
     assert_eq!(lib.synced_playlist(url).unwrap(), None);
+}
+
+#[test]
+fn synced_playlists_can_be_edited_here() {
+    let tmp = TempDir::new("synced-edit");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    let z = add(&lib, &tmp.0, meta("zzzzzzzzzzz", "Z", None, &["X"], None));
+    let id = lib.create_synced_playlist("Road trip", "https://music.youtube.com/playlist?list=PL1").unwrap();
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let titles = || lib.playlist_tracks(id).unwrap().into_iter().map(|e| e.track.title).collect::<Vec<_>>();
+    lib.sync_playlist(id, &ids(&["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"])).unwrap();
+
+    // A song added here follows YouTube's songs, even as the list grows.
+    assert_eq!(lib.add_to_playlist(id, &[z.id]).unwrap(), 1);
+    assert_eq!(titles(), ["A", "B", "Z"]);
+    let missing = lib.sync_playlist(id, &ids(&["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"])).unwrap();
+    assert_eq!(missing, ["ccccccccccc", "ddddddddddd"]);
+    assert_eq!(titles(), ["A", "B", "Z"]);
+    add(&lib, &tmp.0, meta("ddddddddddd", "D", None, &["X"], None));
+    assert_eq!(titles(), ["A", "B", "D", "Z"]);
+
+    // A song taken out stays out of syncs, and isn't downloaded if it's still to come.
+    let entry = |title: &str| lib.playlist_tracks(id).unwrap().into_iter().find(|e| e.track.title == title).unwrap().entry_id;
+    lib.remove_from_playlist(entry("A")).unwrap();
+    lib.remove_from_playlist(entry("Z")).unwrap();
+    let missing = lib.sync_playlist(id, &ids(&["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"])).unwrap();
+    assert_eq!(missing, ["ccccccccccc"]);
+    assert_eq!(titles(), ["B", "D"]);
+    assert!(lib.track(a.id).unwrap().is_some(), "taking a song out keeps its file");
+    assert_eq!(lib.playlist(id).unwrap().unwrap().pending, 1);
+    lib.remove_from_playlist(entry("D")).unwrap();
+    let c = add(&lib, &tmp.0, meta("ccccccccccc", "C", None, &["X"], None));
+    assert_eq!(titles(), ["B", "C"]);
+    lib.remove_from_playlist(entry("C")).unwrap();
+    add(&lib, &tmp.0, meta("ddddddddddd", "D", None, &["X"], None));
+    assert_eq!(titles(), ["B"], "a finished download doesn't go back into a playlist it was taken out of");
+
+    // Adding it again puts it back in its place in YouTube's list.
+    assert_eq!(lib.add_to_playlist(id, &[c.id, a.id]).unwrap(), 2);
+    assert_eq!(titles(), ["A", "B", "C"]);
+    lib.sync_playlist(id, &ids(&["bbbbbbbbbbb", "aaaaaaaaaaa", "ccccccccccc"])).unwrap();
+    assert_eq!(titles(), ["B", "A", "C"]);
+
+    // Songs YouTube drops leave, unless they were added here.
+    lib.add_to_playlist(id, &[z.id]).unwrap();
+    lib.sync_playlist(id, &ids(&["bbbbbbbbbbb"])).unwrap();
+    assert_eq!(titles(), ["B", "Z"]);
 }
 
 #[test]

@@ -328,8 +328,7 @@ enum From {
     Library,
     Album,
     Artist(String),
-    /// A synced playlist's songs follow YouTube, so they can't be removed.
-    Playlist { entry: i64, synced: bool },
+    Playlist { entry: i64 },
     /// The queue entry's key.
     Queue(String),
 }
@@ -1262,7 +1261,7 @@ fn PlaylistScreen(id: i64) -> Element {
         Some(SyncState::Failed(e)) => SyncView::Failed(e.clone()),
         None => SyncView::Synced {
             ago: p.synced_at.map_or_else(|| "never".into(), |t| sync::ago(sync::unix_now() - t)),
-            pending: p.wanted.saturating_sub(p.tracks),
+            pending: p.pending,
         },
     });
     rsx! {
@@ -1279,7 +1278,7 @@ fn PlaylistScreen(id: i64) -> Element {
             onmore: move |i| {
                 let entry: Option<PlaylistEntry> = entries.peek().get(i).cloned();
                 if let Some(e) = entry {
-                    let from = From::Playlist { entry: e.entry_id, synced };
+                    let from = From::Playlist { entry: e.entry_id };
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track), from }));
                 }
             },
@@ -1670,9 +1669,7 @@ fn SongMenu(track: Track, from: From) -> Element {
     }
     add(Icon::Radio, "Start radio", SongAction::Radio);
     match &from {
-        From::Playlist { entry, synced: false } => {
-            add(Icon::CircleMinus, "Remove from playlist", SongAction::RemoveFromPlaylist(*entry))
-        }
+        From::Playlist { entry } => add(Icon::CircleMinus, "Remove from playlist", SongAction::RemoveFromPlaylist(*entry)),
         From::Queue(key) => add(Icon::CircleMinus, "Remove from queue", SongAction::RemoveFromQueue(key.clone())),
         _ => {}
     }
@@ -1916,8 +1913,7 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
 #[component]
 fn AddToPlaylist(tracks: Vec<i64>) -> Element {
     let ctx = use_context::<Ctx>();
-    // A synced playlist's songs come from YouTube.
-    let playlists: Vec<Playlist> = ctx.library.get().playlists().unwrap_or_default().into_iter().filter(|p| !p.is_synced()).collect();
+    let playlists: Vec<Playlist> = ctx.library.get().playlists().unwrap_or_default();
     let items = std::iter::once(MenuItem::new(Icon::Plus, "New playlist"))
         .chain(playlists.iter().map(|p| MenuItem {
             sub: Some(plural(p.tracks as usize, "song", "songs")),
