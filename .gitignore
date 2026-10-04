@@ -1,5 +1,5 @@
 /target/
-/.deps/
+/.deps
 /.cuttlefish/
 /.direnv/
 result
