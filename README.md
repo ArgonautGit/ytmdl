@@ -46,7 +46,8 @@ new APK.
   when their lyrics are opened, and what is found is saved into the file; a
   switch in Settings turns the LRCLIB lookups off. Playlists downloaded from a link stay synced with YouTube: new songs
   there are downloaded, removed ones leave the playlist (the files stay), and
-  the order follows. They sync when the app starts or returns to the screen
+  the order follows. They can still be edited here: songs added to one stay,
+  and songs taken out of one stay out, with nothing sent back to YouTube. They sync when the app starts or returns to the screen
   (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
   for updates once a day (a switch in Settings turns that off); a new build
   loads on the next start. Settings also has the open-source licenses: ytmdl's

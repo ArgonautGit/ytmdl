@@ -2,7 +2,8 @@
 //! when the app starts or comes back to the screen (if the last sync is old;
 //! see `use_background_work`) and from the playlist's menu. Songs added on
 //! YouTube are downloaded, songs removed there leave the playlist (their files
-//! stay), and the order follows YouTube's.
+//! stay), and the order follows YouTube's. Edits made here (songs added to the
+//! playlist, songs taken out of it) are kept and never sent to YouTube.
 
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -103,7 +104,7 @@ impl Ctx {
     async fn apply_sync(&self, id: i64, entries: Vec<Entry>, retry: bool) -> Result<usize, String> {
         let library = self.library.get();
         // An empty answer is more likely a hiccup than an emptied playlist.
-        let had = library.playlist(id).ok().flatten().map_or(0, |p| p.wanted);
+        let had = library.playlist(id).ok().flatten().map_or(0, |p| p.tracks + p.pending);
         if entries.is_empty() && had > 0 {
             return Err("YouTube listed no songs".into());
         }
