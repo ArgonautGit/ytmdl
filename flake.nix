@@ -164,8 +164,14 @@
         extraEnv = {
           # For bindgen (1.4 GB of clang and LLVM).
           LIBCLANG_PATH = "${lib.getLib pkgs.llvmPackages.libclang}/lib";
+          # Native builds link with mold, and keep their debug info in .dwo files beside the
+          # binary instead of copying it in at every link. For this target alone, not in
+          # [profile.dev]: wasm32 refuses split-debuginfo.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold -C split-debuginfo=unpacked";
         };
         extraTools = [
+          pkgs.mold
+          pkgs.cargo-sweep # clears what old builds left in the target directories
           pkgs.cargo-ndk
           pkgs.wget
           pkgs.ffmpeg-headless # ffprobe, for checking downloaded files only
