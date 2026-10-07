@@ -37,6 +37,8 @@ object YtmdlPlayer {
     /** Commands sent before the controller connected. */
     private val waiting = ArrayList<(MediaController) -> Unit>()
     private var error: String? = null
+    /** Counts connections, so Rust can tell a restarted service from the one it had. */
+    private var connection = 0
 
     /** Registered by Rust before [connect]. */
     @JvmStatic
@@ -53,6 +55,19 @@ object YtmdlPlayer {
             val future = MediaController.Builder(app, token)
                 .setListener(object : MediaController.Listener {
                     override fun onExtrasChanged(controller: MediaController, extras: Bundle) = publish()
+
+                    /**
+                     * The service's process ended (Android kills it while frozen in
+                     * the background, or for memory): connect again, which starts a
+                     * new one, rather than leave every command ignored.
+                     */
+                    override fun onDisconnected(controller: MediaController) {
+                        Log.w(TAG, "player disconnected, connecting again")
+                        if (this@YtmdlPlayer.controller === controller) this@YtmdlPlayer.controller = null
+                        controller.release()
+                        connecting = false
+                        connect(app)
+                    }
                 })
                 .buildAsync()
             future.addListener({
@@ -61,9 +76,11 @@ object YtmdlPlayer {
                 } catch (e: Exception) {
                     Log.w(TAG, "connecting to the player", e)
                     connecting = false
+                    main.postDelayed({ connect(app) }, 5_000)
                     return@addListener
                 }
                 controller = c
+                connection++
                 c.addListener(object : Player.Listener {
                     override fun onPlayerError(e: PlaybackException) {
                         error = e.message ?: e.errorCodeName
@@ -247,6 +264,7 @@ object YtmdlPlayer {
             .put("repeat", c.repeatMode)
             .put("ids", ids)
             .put("error", error ?: JSONObject.NULL)
+            .put("connection", connection)
         val extras = c.sessionExtras
         extras.getString("songLoopId")?.let { id ->
             state.put(

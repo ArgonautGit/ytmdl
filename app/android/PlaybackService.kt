@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
@@ -22,6 +23,7 @@ import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
+import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
@@ -139,6 +141,7 @@ class PlaybackService : MediaLibraryService() {
         player.addListener(loopListener)
         player.addListener(listenListener)
         player.addListener(volumeListener)
+        player.addListener(logListener)
         this.player = player
         browse = Browse(this)
         normalize = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMALIZE, true)
@@ -154,6 +157,12 @@ class PlaybackService : MediaLibraryService() {
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, open, flags))
         }
         session = builder.build()
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                Log.w(TAG, "player: Android didn't let the service into the foreground")
+            }
+        })
+        Log.i(TAG, "player: service started")
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -162,11 +171,13 @@ class PlaybackService : MediaLibraryService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = session?.player
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
+            Log.i(TAG, "player: app swiped away while paused, stopping")
             stopSelf()
         }
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "player: service stopped")
         io.shutdown()
         finishListen()
         main.removeCallbacks(sleepTick)
@@ -509,6 +520,57 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         publish()
+    }
+
+    // ---- log ----
+
+    /** What the player does and why it stops, for the logs apkd collects. */
+    private val logListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val p = player ?: return
+            if (isPlaying) {
+                Log.i(TAG, "player: playing entry ${p.currentMediaItemIndex} of ${p.mediaItemCount}")
+            } else {
+                Log.i(
+                    TAG,
+                    "player: stopped (playWhenReady ${p.playWhenReady}, state ${state(p.playbackState)}, " +
+                        "suppressed ${p.playbackSuppressionReason})",
+                )
+            }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            val why = when (reason) {
+                Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> "asked"
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> "audio focus lost"
+                Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> "headphones unplugged"
+                Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE -> "remote"
+                Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM -> "end of song"
+                Player.PLAY_WHEN_READY_CHANGE_REASON_SUPPRESSED_TOO_LONG -> "suppressed too long"
+                else -> "reason $reason"
+            }
+            Log.i(TAG, "player: ${if (playWhenReady) "play" else "pause"} ($why)")
+        }
+
+        override fun onPlaybackSuppressionReasonChanged(reason: Int) {
+            Log.i(TAG, "player: suppression reason $reason")
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state != Player.STATE_READY) Log.d(TAG, "player: ${state(state)}")
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "player: ${error.errorCodeName} at ${player?.currentPosition} ms", error)
+        }
+
+        private fun state(state: Int) = when (state) {
+            Player.STATE_IDLE -> "idle"
+            Player.STATE_BUFFERING -> "buffering"
+            Player.STATE_READY -> "ready"
+            Player.STATE_ENDED -> "ended"
+            else -> "$state"
+        }
     }
 
     // ---- volume ----

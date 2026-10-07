@@ -45,6 +45,8 @@ pub struct Snapshot {
     pub sleep_at: Option<i64>,
     /// The sleep timer pauses at the end of the song.
     pub sleep_at_end: bool,
+    /// Counts connections to the service: a new one may be a restarted service.
+    pub connection: u32,
 }
 
 /// Seeks back to `a` on reaching `b` (ms) while entry `id` plays.
@@ -147,10 +149,13 @@ impl Player {
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         spawn(async move {
-            let mut first = true;
+            let mut connection = None;
             while let Some(json) = rx.recv().await {
                 match serde_json::from_str::<Snapshot>(&json) {
-                    Ok(s) => player.update(s, std::mem::take(&mut first)),
+                    Ok(s) => {
+                        let first = connection.replace(s.connection) != Some(s.connection);
+                        player.update(s, first)
+                    }
                     Err(e) => tracing::warn!(target: "ytmdl", "player state {json:?}: {e}"),
                 }
             }
@@ -162,7 +167,8 @@ impl Player {
 
     fn update(&self, s: Snapshot, first: bool) {
         let (mut snapshot, mut received, mut queue) = (self.snapshot, self.received, self.queue);
-        // A fresh service (not playing from before this start) gets the saved queue.
+        // A fresh service (not playing from before this start, or started again
+        // after Android ended its process) gets the saved queue.
         if first && s.ids.is_empty() {
             self.restore();
         } else if first {
