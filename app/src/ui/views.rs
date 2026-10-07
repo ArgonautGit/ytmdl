@@ -728,6 +728,9 @@ pub fn AlbumPage(
     tracks: AlbumTracks,
     #[props(default)] saved: Option<bool>,
     onback: EventHandler<()>,
+    /// An artist's name tapped (in the header or on a song).
+    #[props(default)]
+    onartist: Option<EventHandler<String>>,
     ondownload: EventHandler<Entry>,
     /// Downloads every song (and saves a playlist as a synced playlist).
     ondownloadall: EventHandler<()>,
@@ -741,7 +744,12 @@ pub fn AlbumPage(
     rsx! {
         div { class: "album",
             BackButton { onback }
-            Hero { cover: header.cover.as_deref().map(|u| art_url(u, 544)), title: header.title.clone(), meta: header.meta(),
+            Hero {
+                cover: header.cover.as_deref().map(|u| art_url(u, 544)),
+                title: header.title.clone(),
+                meta: header.meta(),
+                links: header.artists.clone(),
+                onlink: onartist,
                 match &tracks {
                     AlbumTracks::Loaded(rows) => rsx! {
                         AlbumSummary { rows: rows.clone(), saved, ondownloadall, onopensaved, onplay: move |_| onplay.call(0) }
@@ -771,7 +779,8 @@ pub fn AlbumPage(
                                 div { class: "meta",
                                     div { class: "title", "{entry.title}" }
                                     div { class: "sub",
-                                        {dotted([Some(entry.artists.join(", ")), entry.duration_secs.map(duration_text)])}
+                                        Links { names: entry.artists.clone(), onopen: onartist }
+                                        {entry.duration_secs.map(|d| format!("{}{}", if entry.artists.is_empty() { "" } else { " • " }, duration_text(d)))}
                                     }
                                 }
                                 TrackAction { state, ondownload: move |_| ondownload.call(entry.clone()) }
@@ -801,8 +810,14 @@ fn Hero(
     meta: String,
     #[props(default)] round: bool,
     #[props(default = Icon::Music)] icon: Icon,
+    /// Names within `meta` (joined with ", ") that open when tapped, if `onlink` is set.
+    #[props(default)]
+    links: Vec<String>,
+    #[props(default)] onlink: Option<EventHandler<String>>,
     children: Element,
 ) -> Element {
+    let joined = links.join(", ");
+    let split = onlink.filter(|_| !joined.is_empty()).and_then(|_| meta.split_once(&joined));
     rsx! {
         div { class: "album-head",
             div { class: "hero-wrap",
@@ -814,8 +829,43 @@ fn Hero(
             div { class: "hero",
                 Cover { url: cover, class: if round { "cover hero-cover round" } else { "cover hero-cover" }, icon }
                 h1 { "{title}" }
-                div { class: "sub", "{meta}" }
+                match split {
+                    Some((before, after)) => rsx! {
+                        div { class: "sub",
+                            "{before}"
+                            Links { names: links.clone(), onopen: onlink }
+                            "{after}"
+                        }
+                    },
+                    None => rsx! {
+                        div { class: "sub", "{meta}" }
+                    },
+                }
                 {children}
+            }
+        }
+    }
+}
+
+/// Artist names, each opening that artist when `onopen` is set.
+#[component]
+fn Links(names: Vec<String>, onopen: Option<EventHandler<String>>) -> Element {
+    rsx! {
+        for (i , name) in names.into_iter().enumerate() {
+            if i > 0 {
+                ", "
+            }
+            if let Some(onopen) = onopen {
+                span {
+                    class: "link",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        onopen.call(name.clone());
+                    },
+                    "{name}"
+                }
+            } else {
+                "{name}"
             }
         }
     }
@@ -1814,6 +1864,13 @@ pub fn NowPlayingPage(
     onmore: EventHandler<usize>,
     /// A queue row swiped away.
     onremove: EventHandler<usize>,
+    /// The rest of a list played without downloading it: not in the queue yet,
+    /// fetched as the player gets near.
+    #[props(default)]
+    upcoming: Vec<SongItem>,
+    /// An upcoming row tapped: plays the list from there.
+    #[props(default)]
+    onupcoming: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
     /// The sleep timer's time left ("23 min", "End of song") while it is set.
@@ -2035,6 +2092,15 @@ pub fn NowPlayingPage(
             }
             div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
                 SongList { songs: queue, onplay: onskip, onmore, handles: true, swipe: Swipe::Remove, onswipe: onremove }
+            }
+            if !upcoming.is_empty() {
+                h2 { class: "section",
+                    "Up next"
+                    span { class: "section-note", {plural(upcoming.len(), "song", "songs")} }
+                }
+                div { class: "upcoming",
+                    SongList { songs: upcoming, onplay: onupcoming }
+                }
             }
         }
     }
