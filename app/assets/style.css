@@ -417,6 +417,7 @@ button.icon-btn:active { background: var(--press); }
 .cover.hero-cover > .icon { width: 64px; height: 64px; }
 .hero h1 { font-size: 24px; font-weight: 700; line-height: 1.2; }
 .hero .sub { margin: 0; white-space: normal; }
+.hero .link { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; }
 .hero .primary { margin-top: 12px; }
 
 .tracks .row { min-height: 60px; padding-left: 4px; }

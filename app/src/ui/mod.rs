@@ -924,6 +924,20 @@ fn NowPlayingScreen() -> Element {
         (None, Some((a, b))) => QueueLoopView::Looping { first: a + 1, last: b + 1 },
         (None, None) => QueueLoopView::Off,
     };
+    let upcoming_entries: Vec<Entry> = ctx.stream.pending.read().iter().cloned().collect();
+    let upcoming: Vec<SongItem> = upcoming_entries
+        .iter()
+        .map(|e| SongItem {
+            key: e.id.clone(),
+            title: e.title.clone(),
+            artists: e.artists.join(", "),
+            album: e.album.clone(),
+            duration_secs: e.duration_secs,
+            art: e.thumbnail.clone(),
+            playing: false,
+            mark: None,
+        })
+        .collect();
     let secs = |ms: i64| ms as f64 / 1000.0;
     let entries = queue.clone();
     let menu_entries = queue.clone();
@@ -1007,6 +1021,11 @@ fn NowPlayingScreen() -> Element {
                 if let Some(e) = swiped_entries.get(i) {
                     player.remove_entry(&e.key);
                 }
+            },
+            upcoming,
+            onupcoming: move |i: usize| {
+                // The list from that song on; the songs in between are skipped.
+                ctx.play_entries(upcoming_entries.iter().skip(i).cloned().collect(), 0);
             },
             onqueueloop: move |_| {
                 if picking.peek().is_some() {
@@ -2252,6 +2271,7 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
             header: header(),
             saved: is_playlist.then(|| saved().is_some()),
             onback: move |_| ctx.nav.back(),
+            onartist: move |name: String| ctx.nav.push(Overlay::RemoteArtist(OpenArtist::named(&name))),
             ondownload: move |e| ctx.download_asked(album_track(e)),
             onopensaved: move |_| {
                 if let Some(id) = saved() {
