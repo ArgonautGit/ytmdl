@@ -273,6 +273,50 @@ fn synced_playlists_can_be_edited_here() {
 }
 
 #[test]
+fn songs_join_playlists_once_downloaded() {
+    let tmp = TempDir::new("wanted");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    let mix = lib.create_playlist("Mix").unwrap();
+    let other = lib.create_playlist("Other").unwrap();
+    lib.add_to_playlist(mix, &[a.id]).unwrap();
+    let titles = |id| lib.playlist_tracks(id).unwrap().into_iter().map(|e| e.track.title).collect::<Vec<_>>();
+    lib.add_when_downloaded(mix, "bbbbbbbbbbb").unwrap();
+    lib.add_when_downloaded(mix, "bbbbbbbbbbb").unwrap();
+    lib.add_when_downloaded(other, "bbbbbbbbbbb").unwrap();
+    assert_eq!(titles(mix), ["A"]);
+    add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    assert_eq!(titles(mix), ["A", "B"]);
+    assert_eq!(titles(other), ["B"]);
+    // Once: a later download of it doesn't add it again where it was taken out.
+    let entry = lib.playlist_tracks(other).unwrap()[0].entry_id;
+    lib.remove_from_playlist(entry).unwrap();
+    add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    assert!(titles(other).is_empty());
+
+    // A cached song kept into the library joins too.
+    let cache = tmp.0.join("cache");
+    fs::create_dir_all(&cache).unwrap();
+    let path = cache.join("ccccccccccc.m4a");
+    fs::write(&path, b"x").unwrap();
+    let c = lib.add_cached(&Downloaded { path, meta: meta("ccccccccccc", "C", None, &["X"], None), tagged: false }).unwrap();
+    lib.add_when_downloaded(other, "ccccccccccc").unwrap();
+    lib.keep_cached(c.id, &tmp.0.join("Music")).unwrap();
+    assert_eq!(titles(other), ["C"]);
+
+    // Wanted back in a synced playlist it was taken out of: its place there.
+    let synced = lib.create_synced_playlist("Road trip", "https://music.youtube.com/playlist?list=PL1").unwrap();
+    lib.sync_playlist(synced, &["aaaaaaaaaaa".into(), "ddddddddddd".into(), "bbbbbbbbbbb".into()]).unwrap();
+    let d = add(&lib, &tmp.0, meta("ddddddddddd", "D", None, &["X"], None));
+    let entry = lib.playlist_tracks(synced).unwrap().into_iter().find(|e| e.track.id == d.id).unwrap().entry_id;
+    lib.remove_from_playlist(entry).unwrap();
+    lib.delete_track(d.id).unwrap();
+    lib.add_when_downloaded(synced, "ddddddddddd").unwrap();
+    add(&lib, &tmp.0, meta("ddddddddddd", "D", None, &["X"], None));
+    assert_eq!(titles(synced), ["A", "D", "B"]);
+}
+
+#[test]
 fn saves_download_queue() {
     let tmp = TempDir::new("jobs");
     let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();

@@ -190,6 +190,15 @@ ALTER TABLE sections ADD COLUMN skip INTEGER NOT NULL DEFAULT 0; -- left out whe
 "#, r#"
 ALTER TABLE playlist_tracks ADD COLUMN local INTEGER NOT NULL DEFAULT 0;  -- added here to a synced playlist: stays when YouTube doesn't list it
 ALTER TABLE playlist_remote ADD COLUMN removed INTEGER NOT NULL DEFAULT 0; -- taken out here: not put back or downloaded by a sync
+"#, r#"
+-- Songs added to a playlist before they were in the library: they join it
+-- once downloaded (see playlists.rs).
+CREATE TABLE playlist_wanted (
+    playlist_id INTEGER NOT NULL REFERENCES playlists (id) ON DELETE CASCADE,
+    video_id    TEXT NOT NULL,
+    PRIMARY KEY (playlist_id, video_id)
+);
+CREATE INDEX playlist_wanted_video ON playlist_wanted (video_id);
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
@@ -395,7 +404,7 @@ impl Library {
             ],
             track_from_row,
         )?;
-        playlists::place_in_synced(&db, &track)?;
+        playlists::place_new_track(&db, &track)?;
         Ok(track)
     }
 

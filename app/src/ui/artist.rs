@@ -225,6 +225,7 @@ pub(super) fn RemoteArtistScreen(open: OpenArtist) -> Element {
                 ctx.nav.push(overlay);
             },
             onretry: move |_| load.call(()),
+            onmore: move |e| ctx.entry_menu(e),
         }
     }
 }
@@ -267,6 +268,7 @@ pub(super) fn RemoteListScreen(open: OpenList) -> Element {
             ondownload: move |e| ctx.download_asked(e),
             onplay: move |i: usize| ctx.play_entries(entries.peek().clone(), i),
             onopen: move |e| ctx.open_listed(e, &artist),
+            onmore: move |e| ctx.entry_menu(e),
             ondownloadall: move |_| {
                 let listed = entries.peek().clone();
                 if kind == SectionKind::Albums {

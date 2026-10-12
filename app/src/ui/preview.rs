@@ -82,6 +82,8 @@ const SCREENS: &[Screen] = &[
     ("stats-week", "Listening stats, 7 days", stats_week),
     ("stats-empty", "Listening stats, nothing played", stats_empty),
     ("song-menu", "Song menu", song_menu),
+    ("song-menu-cached", "Menu of a song played from the cache", song_menu_cached),
+    ("entry-menu", "Menu of a search result not downloaded", entry_menu),
     ("add-to-playlist", "Add to playlist", add_to_playlist),
     ("new-playlist", "New playlist", new_playlist),
     ("delete-song", "Delete a song", delete_song),
@@ -749,6 +751,46 @@ fn song_menu() -> Element {
     ];
     with_modal(
         library_page_body(LibraryView::Songs, song_items()),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+fn song_menu_cached() -> Element {
+    let song = &song_items()[2];
+    let head = MenuHead {
+        title: song.title.clone(),
+        sub: format!("{} • {}", song.artists, song.album.clone().unwrap_or_default()),
+        art: song.art.clone(),
+        icon: Icon::Music,
+    };
+    let items = vec![
+        MenuItem::new(Icon::ListPlus, "Add to playlist"),
+        MenuItem::new(Icon::Download, "Add to library"),
+        MenuItem::new(Icon::Radio, "Start radio"),
+        MenuItem::new(Icon::CircleMinus, "Remove from queue"),
+    ];
+    with_modal(
+        now_playing_cached(),
+        rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
+    )
+}
+
+fn entry_menu() -> Element {
+    let e = &sample().songs[5];
+    let head = MenuHead {
+        title: e.title.clone(),
+        sub: [e.artists.join(", "), e.album.clone().unwrap_or_default()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" • "),
+        art: e.thumbnail.clone(),
+        icon: Icon::Music,
+    };
+    let items = vec![
+        MenuItem::new(Icon::ListPlus, "Add to playlist"),
+        MenuItem::new(Icon::Radio, "Start radio"),
+        MenuItem::new(Icon::Person, "Go to artist"),
+    ];
+    let rows = states_for(&sample().songs);
+    with_modal(
+        search_page(SearchSource::MusicSongs, "kevin macleod", ResultsView::Songs(rows), true),
         rsx! { MenuSheet { head, items, onpick: |_| {}, onclose: |_| {} } },
     )
 }

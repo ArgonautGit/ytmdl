@@ -67,10 +67,17 @@ fn playlist_from_row(r: &rusqlite::Row) -> rusqlite::Result<Playlist> {
     })
 }
 
-/// Adds a track that was just recorded to the synced playlists that list it,
-/// in their order (and lets them download it again if it was deleted before),
-/// except the ones it was taken out of.
-pub(crate) fn place_in_synced(db: &Connection, track: &Track) -> rusqlite::Result<()> {
+/// Adds a track that was just recorded to the playlists it was wanted in (see
+/// [`Library::add_when_downloaded`]), and to the synced playlists that list
+/// it, in their order (and lets them download it again if it was deleted
+/// before), except the ones it was taken out of.
+pub(crate) fn place_new_track(db: &Connection, track: &Track) -> rusqlite::Result<()> {
+    // Wanted back in a synced playlist it was taken out of: its place there.
+    db.execute(
+        "UPDATE playlist_remote SET removed = 0 WHERE video_id = ?1 AND removed
+         AND playlist_id IN (SELECT playlist_id FROM playlist_wanted WHERE video_id = ?1)",
+        [&track.video_id],
+    )?;
     db.execute("UPDATE playlist_remote SET skipped = 0 WHERE video_id = ?1 AND skipped", [&track.video_id])?;
     db.execute(
         "INSERT INTO playlist_tracks (playlist_id, track_id, position)
@@ -80,6 +87,17 @@ pub(crate) fn place_in_synced(db: &Connection, track: &Track) -> rusqlite::Resul
          GROUP BY r.playlist_id",
         params![track.video_id, track.id],
     )?;
+    db.execute(
+        "INSERT INTO playlist_tracks (playlist_id, track_id, position, local)
+         SELECT w.playlist_id, ?2,
+                (SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_tracks WHERE playlist_id = w.playlist_id),
+                p.source_url IS NOT NULL
+         FROM playlist_wanted w JOIN playlists p ON p.id = w.playlist_id
+         WHERE w.video_id = ?1
+           AND NOT EXISTS (SELECT 1 FROM playlist_tracks pt WHERE pt.playlist_id = w.playlist_id AND pt.track_id = ?2)",
+        params![track.video_id, track.id],
+    )?;
+    db.execute("DELETE FROM playlist_wanted WHERE video_id = ?1", [&track.video_id])?;
     Ok(())
 }
 
@@ -183,6 +201,14 @@ impl Library {
         }
         tx.commit()?;
         Ok(added)
+    }
+
+    /// Puts a song that isn't in the library yet in the playlist once it is
+    /// (downloaded, or kept from the cache): at the end, as
+    /// [`Library::add_to_playlist`] would.
+    pub fn add_when_downloaded(&self, id: i64, video_id: &str) -> Result<()> {
+        self.db().execute("INSERT OR IGNORE INTO playlist_wanted (playlist_id, video_id) VALUES (?1, ?2)", params![id, video_id])?;
+        Ok(())
     }
 
     /// Takes an entry out of its playlist. A synced playlist keeps it out

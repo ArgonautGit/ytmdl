@@ -481,9 +481,16 @@ fn TrackAction(state: TrackState, ondownload: EventHandler<()>) -> Element {
     }
 }
 
-/// A song from YouTube Music; tapping it plays it (`onplay`).
+/// A song from YouTube Music; tapping it plays it (`onplay`), ⋮ or a long
+/// press opens its menu (`onmore`).
 #[component]
-pub fn SongRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, onplay: EventHandler<()>) -> Element {
+pub fn SongRow(
+    entry: Entry,
+    state: TrackState,
+    ondownload: EventHandler<()>,
+    onplay: EventHandler<()>,
+    onmore: EventHandler<()>,
+) -> Element {
     let album = entry.album.clone().filter(|a| *a != entry.title);
     let sub = dotted([Some(entry.artists.join(", ")), album, entry.duration_secs.map(duration_text)]);
     rsx! {
@@ -494,12 +501,19 @@ pub fn SongRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, on
                 div { class: "sub", "{sub}" }
             }
             TrackAction { state, ondownload }
+            MoreButton { onmore }
         }
     }
 }
 
 #[component]
-pub fn VideoRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, onplay: EventHandler<()>) -> Element {
+pub fn VideoRow(
+    entry: Entry,
+    state: TrackState,
+    ondownload: EventHandler<()>,
+    onplay: EventHandler<()>,
+    onmore: EventHandler<()>,
+) -> Element {
     let artists = entry.artists.join(", ");
     rsx! {
         li { class: "row tappable", onclick: move |_| onplay.call(()),
@@ -514,6 +528,7 @@ pub fn VideoRow(entry: Entry, state: TrackState, ondownload: EventHandler<()>, o
                 div { class: "sub", "{artists}" }
             }
             TrackAction { state, ondownload }
+            MoreButton { onmore }
         }
     }
 }
@@ -588,6 +603,9 @@ pub fn SearchPage(
     onopen: EventHandler<Entry>,
     onopenartist: EventHandler<Entry>,
     onallow: EventHandler<()>,
+    /// A song's menu.
+    #[props(default)]
+    onmore: EventHandler<Entry>,
 ) -> Element {
     let sources = [
         ("Songs", SearchSource::MusicSongs),
@@ -672,7 +690,11 @@ pub fn SearchPage(
                                 let entry = entry.clone();
                                 move |_| ondownload.call(entry.clone())
                             },
-                            onplay: move |_| onplay.call(entry.clone()),
+                            onplay: {
+                                let entry = entry.clone();
+                                move |_| onplay.call(entry.clone())
+                            },
+                            onmore: move |_| onmore.call(entry.clone()),
                         }
                     }
                 }
@@ -688,7 +710,11 @@ pub fn SearchPage(
                                 let entry = entry.clone();
                                 move |_| ondownload.call(entry.clone())
                             },
-                            onplay: move |_| onplay.call(entry.clone()),
+                            onplay: {
+                                let entry = entry.clone();
+                                move |_| onplay.call(entry.clone())
+                            },
+                            onmore: move |_| onmore.call(entry.clone()),
                         }
                     }
                 }
@@ -740,6 +766,9 @@ pub fn AlbumPage(
     onretry: EventHandler<()>,
     /// Plays the songs from this one (without downloading them).
     onplay: EventHandler<usize>,
+    /// A song's menu.
+    #[props(default)]
+    onmore: EventHandler<Entry>,
 ) -> Element {
     rsx! {
         div { class: "album",
@@ -783,7 +812,14 @@ pub fn AlbumPage(
                                         {entry.duration_secs.map(|d| format!("{}{}", if entry.artists.is_empty() { "" } else { " • " }, duration_text(d)))}
                                     }
                                 }
-                                TrackAction { state, ondownload: move |_| ondownload.call(entry.clone()) }
+                                TrackAction {
+                                    state,
+                                    ondownload: {
+                                        let entry = entry.clone();
+                                        move |_| ondownload.call(entry.clone())
+                                    },
+                                }
+                                MoreButton { onmore: move |_| onmore.call(entry.clone()) }
                             }
                         }
                     }
@@ -1140,7 +1176,8 @@ fn PlaylistRow(playlist: PlaylistItem, onopen: EventHandler<()>, onmore: EventHa
     }
 }
 
-/// ⋮, opening a row's menu without triggering the row.
+/// ⋮, opening a row's menu without triggering the row; a long press on the
+/// row clicks it too (assets/long-press.js).
 #[component]
 fn MoreButton(onmore: EventHandler<()>) -> Element {
     rsx! {
@@ -1541,6 +1578,9 @@ pub fn RemoteArtistPage(
     onretry: EventHandler<()>,
     /// Plays (shelf, song) and the shelf's songs after it.
     onplay: EventHandler<(usize, usize)>,
+    /// A song's menu.
+    #[props(default)]
+    onmore: EventHandler<Entry>,
 ) -> Element {
     let meta = dotted([Some("Artist".into()), audience]);
     rsx! {
@@ -1578,6 +1618,7 @@ pub fn RemoteArtistPage(
                             onopen,
                             onshowall: move |_| onshowall.call(i),
                             onplay: move |j| onplay.call((i, j)),
+                            onmore,
                         }
                     }
                     if let Some(about) = about {
@@ -1597,6 +1638,7 @@ fn ArtistShelfView(
     onopen: EventHandler<Entry>,
     onshowall: EventHandler<()>,
     onplay: EventHandler<usize>,
+    onmore: EventHandler<Entry>,
 ) -> Element {
     let rows = matches!(shelf.kind, SectionKind::Songs | SectionKind::Videos);
     // Albums always offer it: the whole list is where they all download.
@@ -1620,8 +1662,12 @@ fn ArtistShelfView(
                             key: "{entry.id}",
                             entry: entry.clone(),
                             state,
-                            ondownload: move |_| ondownload.call(entry.clone()),
+                            ondownload: {
+                                let entry = entry.clone();
+                                move |_| ondownload.call(entry.clone())
+                            },
                             onplay: move |_| onplay.call(i),
+                            onmore: move |_| onmore.call(entry.clone()),
                         }
                     }
                 }
@@ -1633,8 +1679,12 @@ fn ArtistShelfView(
                             key: "{entry.id}",
                             entry: entry.clone(),
                             state,
-                            ondownload: move |_| ondownload.call(entry.clone()),
+                            ondownload: {
+                                let entry = entry.clone();
+                                move |_| ondownload.call(entry.clone())
+                            },
                             onplay: move |_| onplay.call(i),
+                            onmore: move |_| onmore.call(entry.clone()),
                         }
                     }
                 }
@@ -1697,6 +1747,9 @@ pub fn RemoteListPage(
     ondownloadall: EventHandler<()>,
     /// Plays the songs from this one.
     onplay: EventHandler<usize>,
+    /// A song's menu.
+    #[props(default)]
+    onmore: EventHandler<Entry>,
 ) -> Element {
     let downloadable = match kind {
         SectionKind::Songs | SectionKind::Videos => entries.iter().filter(|(_, s)| s.wants_download()).count(),
@@ -1740,8 +1793,12 @@ pub fn RemoteListPage(
                                 key: "{entry.id}",
                                 entry: entry.clone(),
                                 state,
-                                ondownload: move |_| ondownload.call(entry.clone()),
+                                ondownload: {
+                                    let entry = entry.clone();
+                                    move |_| ondownload.call(entry.clone())
+                                },
                                 onplay: move |_| onplay.call(i),
+                                onmore: move |_| onmore.call(entry.clone()),
                             }
                         },
                         SectionKind::Videos => rsx! {
@@ -1749,8 +1806,12 @@ pub fn RemoteListPage(
                                 key: "{entry.id}",
                                 entry: entry.clone(),
                                 state,
-                                ondownload: move |_| ondownload.call(entry.clone()),
+                                ondownload: {
+                                    let entry = entry.clone();
+                                    move |_| ondownload.call(entry.clone())
+                                },
                                 onplay: move |_| onplay.call(i),
+                                onmore: move |_| onmore.call(entry.clone()),
                             }
                         },
                         SectionKind::Artists => rsx! {
@@ -1871,6 +1932,9 @@ pub fn NowPlayingPage(
     /// An upcoming row tapped: plays the list from there.
     #[props(default)]
     onupcoming: EventHandler<usize>,
+    /// An upcoming row's menu.
+    #[props(default)]
+    onupcomingmore: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
     /// The sleep timer's time left ("23 min", "End of song") while it is set.
@@ -2099,7 +2163,7 @@ pub fn NowPlayingPage(
                     span { class: "section-note", {plural(upcoming.len(), "song", "songs")} }
                 }
                 div { class: "upcoming",
-                    SongList { songs: upcoming, onplay: onupcoming }
+                    SongList { songs: upcoming, onplay: onupcoming, onmore: onupcomingmore }
                 }
             }
         }
@@ -2498,7 +2562,12 @@ pub fn HomePage(
                     h2 { class: "section", "Played recently" }
                     ul { class: "grid shelf",
                         for (i , song) in home.recent.into_iter().enumerate() {
-                            SongTile { key: "{song.key}", song, onopen: move |_| onplay.call((HomeList::Recent, i)) }
+                            SongTile {
+                                key: "{song.key}",
+                                song,
+                                onopen: move |_| onplay.call((HomeList::Recent, i)),
+                                onmore: move |_| onmore.call((HomeList::Recent, i)),
+                            }
                         }
                     }
                 }
@@ -2552,9 +2621,15 @@ fn HomeSongs(
     }
 }
 
-/// A song as a shelf tile; `radio` makes it the song's radio.
+/// A song as a shelf tile; `radio` makes it the song's radio. `onmore` is its
+/// menu, opened by a long press (assets/long-press.js).
 #[component]
-fn SongTile(song: SongItem, #[props(default)] radio: bool, onopen: EventHandler<()>) -> Element {
+fn SongTile(
+    song: SongItem,
+    #[props(default)] radio: bool,
+    onopen: EventHandler<()>,
+    #[props(default)] onmore: Option<EventHandler<()>>,
+) -> Element {
     let sub = if radio { dotted([Some("Radio".into()), Some(song.artists.clone())]) } else { song.artists.clone() };
     rsx! {
         li { class: "tile", onclick: move |_| onopen.call(()),
@@ -2568,6 +2643,18 @@ fn SongTile(song: SongItem, #[props(default)] radio: bool, onopen: EventHandler<
             }
             div { class: "title", "{song.title}" }
             div { class: "sub", "{sub}" }
+            if let Some(onmore) = onmore {
+                button {
+                    class: "more",
+                    hidden: true,
+                    tabindex: "-1",
+                    "aria-hidden": "true",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        onmore.call(());
+                    },
+                }
+            }
         }
     }
 }

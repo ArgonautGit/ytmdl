@@ -128,7 +128,7 @@ impl Ctx {
         }
         // Played already: the cached file goes into the library.
         if let Ok(Some(cached)) = self.library.get().cached(&entry.id) {
-            self.keep_cached(cached);
+            self.keep_cached(cached, None);
             return true;
         }
         let previous = self.queue.jobs().peek().iter().rev().find(|j| j.entry.id == entry.id).map(|j| (j.id, j.state.clone()));
@@ -213,6 +213,70 @@ impl Ctx {
         self.notify(if tracks.len() == 1 { "Added to queue".into() } else { format!("Added {} to queue", plural(tracks.len(), "song", "songs")) });
     }
 
+    /// The menu of a song from YouTube Music: the library's (or the cache's)
+    /// song menu if it has it.
+    fn entry_menu(&self, entry: Entry) {
+        let library = self.library.get();
+        let track = library.track_by_video(&entry.id).ok().flatten().or_else(|| library.cached(&entry.id).ok().flatten());
+        let sheet = match track {
+            Some(t) => Sheet::Song { track: Box::new(t), from: From::Library },
+            None => Sheet::Entry(Box::new(entry)),
+        };
+        self.nav.push(Overlay::Sheet(sheet));
+    }
+
+    /// Adds `songs` to playlist `id` and says so; `created`: it was just made.
+    /// A song the library has from another upload joins as that one; others
+    /// it doesn't have are kept from the cache or downloaded, and join then.
+    fn add_to_playlist(&self, id: i64, name: &str, songs: &Songs, created: bool) {
+        let library = self.library.get();
+        let mut tracks = songs.tracks.clone();
+        let (mut kept, mut fetched) = (Vec::new(), Vec::new());
+        for e in &songs.entries {
+            if let Some(t) = library.track_by_video(&e.id).ok().flatten().or_else(|| self.similar_to(e)) {
+                tracks.push(t.id);
+            } else if let Ok(Some(t)) = library.cached(&e.id) {
+                kept.push(t);
+            } else {
+                fetched.push(e.clone());
+            }
+        }
+        if (!kept.is_empty() || !fetched.is_empty()) && !self.online() {
+            return;
+        }
+        let wanted = kept.iter().map(|t| &t.video_id).chain(fetched.iter().map(|e| &e.id));
+        let result = library.add_to_playlist(id, &tracks).and_then(|added| {
+            for video_id in wanted {
+                library.add_when_downloaded(id, video_id)?;
+            }
+            Ok(added)
+        });
+        let added = match result {
+            Ok(added) => added,
+            Err(e) => return self.notify(format!("Couldn't add to {name}: {e}")),
+        };
+        if added > 0 || created {
+            self.library.changed();
+        }
+        let message = match fetched.as_slice() {
+            [e] => format!("“{}” goes in {name} once it's downloaded", e.title),
+            [_, ..] => format!("{} go in {name} once downloaded", plural(fetched.len(), "song", "songs")),
+            [] if !kept.is_empty() => String::new(),
+            [] if added > 0 => format!("Added to {name}"),
+            [] if created => format!("Created {name}"),
+            [] => format!("Already in {name}"),
+        };
+        if !message.is_empty() {
+            self.notify(message);
+        }
+        for e in fetched {
+            self.download(e);
+        }
+        for t in kept {
+            self.keep_cached(t, Some(name.to_owned()));
+        }
+    }
+
     fn playlist_tracks(&self, id: i64) -> Vec<Track> {
         let entries = self.library.get().playlist_tracks(id).unwrap_or_default();
         entries.into_iter().map(|e| e.track).collect()
@@ -259,6 +323,22 @@ fn radio_page(t: &Track) -> Overlay {
     })
 }
 
+/// YouTube Music's radio of a song it lists.
+fn entry_radio_page(e: &Entry) -> Overlay {
+    Overlay::RemoteAlbum(OpenAlbum {
+        url: e.url.clone(),
+        header: AlbumHeader {
+            title: e.title.clone(),
+            artists: e.artists.clone(),
+            year: None,
+            kind: Some("radio".into()),
+            cover: e.thumbnail.clone(),
+        },
+        tracks: None,
+        radio: Some(RadioSeed::Song(e.id.clone())),
+    })
+}
+
 /// Pages opened over the tabs (albums, artists) and menus. Each is a browser
 /// history entry, so Android's back gesture closes the top one.
 #[derive(Clone, Copy)]
@@ -301,10 +381,12 @@ enum Sheet {
     Artist(String),
     /// `open`: from the playlist's own page (closed when it is deleted).
     Playlist { id: i64, open: bool },
+    /// A song from YouTube Music that isn't in the library or the cache.
+    Entry(Box<Entry>),
     /// Picks a playlist for the songs.
-    AddTo { tracks: Vec<i64> },
-    /// Names a new playlist (holding `tracks`), or renames playlist `id`.
-    Name { id: Option<i64>, name: String, tracks: Vec<i64> },
+    AddTo(Songs),
+    /// Names a new playlist (holding `songs`), or renames playlist `id`.
+    Name { id: Option<i64>, name: String, songs: Songs },
     /// `leave`: the page the songs were on goes too (a whole album).
     DeleteSongs { ids: Vec<i64>, what: String, leave: bool },
     DeletePlaylist { id: i64, name: String, open: bool },
@@ -320,6 +402,44 @@ enum Sheet {
     Duplicate { entry: Box<Entry>, existing: Box<Track> },
     /// The song cache's size.
     Cache,
+}
+
+/// Songs for a playlist: library tracks, and songs it doesn't have yet, which
+/// join the playlist once downloaded (or kept from the cache).
+#[derive(Clone, PartialEq, Default)]
+struct Songs {
+    tracks: Vec<i64>,
+    entries: Vec<Entry>,
+}
+
+impl Songs {
+    fn tracks(tracks: Vec<i64>) -> Self {
+        Songs { tracks, entries: Vec::new() }
+    }
+
+    /// A library or cached song.
+    fn track(t: &Track) -> Self {
+        if t.id >= 0 {
+            return Songs::tracks(vec![t.id]);
+        }
+        let entry = Entry {
+            id: t.video_id.clone(),
+            url: t.url.clone(),
+            title: t.title.clone(),
+            artists: t.artists.clone(),
+            album: t.album.clone(),
+            duration_secs: t.duration_secs,
+            thumbnail: None,
+            kind: Some("song".into()),
+            year: t.year,
+            track_number: t.track_number,
+        };
+        Songs { tracks: Vec::new(), entries: vec![entry] }
+    }
+
+    fn len(&self) -> usize {
+        self.tracks.len() + self.entries.len()
+    }
 }
 
 /// Where a song's menu was opened, which decides its items.
@@ -580,9 +700,11 @@ fn Shell(setup: Setup) -> Element {
     use_background_work(ctx);
     use_stream(ctx);
     use_shared_links(ctx);
-    // Installs itself once; the lists that allow swiping say so.
+    // Install themselves once; the lists that allow swiping say so, and rows
+    // with a menu open it on a long press.
     use_hook(|| {
         let _ = document::eval(SWIPE_JS);
+        let _ = document::eval(LONG_PRESS_JS);
     });
     version::use_updated_notice(ctx);
 
@@ -837,6 +959,8 @@ type Picking = Option<Option<String>>;
 const QUEUE_DRAG_JS: &str = include_str!("../../assets/queue-drag.js");
 /// Swipe song rows sideways (the queue, playlists): see `Swipe` in views.
 const SWIPE_JS: &str = include_str!("../../assets/swipe.js");
+/// A long press on a song opens its menu.
+const LONG_PRESS_JS: &str = include_str!("../../assets/long-press.js");
 
 #[component]
 fn NowPlayingScreen() -> Element {
@@ -925,6 +1049,7 @@ fn NowPlayingScreen() -> Element {
         (None, None) => QueueLoopView::Off,
     };
     let upcoming_entries: Vec<Entry> = ctx.stream.pending.read().iter().cloned().collect();
+    let upcoming_menu = upcoming_entries.clone();
     let upcoming: Vec<SongItem> = upcoming_entries
         .iter()
         .map(|e| SongItem {
@@ -1027,6 +1152,11 @@ fn NowPlayingScreen() -> Element {
                 // The list from that song on; the songs in between are skipped.
                 ctx.play_entries(upcoming_entries.iter().skip(i).cloned().collect(), 0);
             },
+            onupcomingmore: move |i: usize| {
+                if let Some(e) = upcoming_menu.get(i) {
+                    ctx.entry_menu(e.clone());
+                }
+            },
             onqueueloop: move |_| {
                 if picking.peek().is_some() {
                     picking.set(None);
@@ -1072,7 +1202,7 @@ fn NowPlayingScreen() -> Element {
             },
             onlyricssearch: move |_| ctx.search_lyrics(search_track.clone()),
             cached,
-            onkeep: move |_| ctx.keep_cached(keep_track.clone()),
+            onkeep: move |_| ctx.keep_cached(keep_track.clone(), None),
         }
     }
 }
@@ -1187,7 +1317,7 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
                 }
             },
             onnewplaylist: move |_| {
-                ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), tracks: Vec::new() }))
+                ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: Songs::default() }))
             },
             onsearch,
             onfind: move |_| query.set(Some(String::new())),
@@ -1377,8 +1507,9 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::Album { title, artist } => rsx! { AlbumMenu { title, artist } },
         Sheet::Artist(name) => rsx! { ArtistMenu { name } },
         Sheet::Playlist { id, open } => rsx! { PlaylistMenu { id, open } },
-        Sheet::AddTo { tracks } => rsx! { AddToPlaylist { tracks } },
-        Sheet::Name { id, name, tracks } => rsx! { NameDialog { id, name, tracks } },
+        Sheet::Entry(entry) => rsx! { EntryMenu { entry: *entry } },
+        Sheet::AddTo(songs) => rsx! { AddToPlaylist { songs } },
+        Sheet::Name { id, name, songs } => rsx! { NameDialog { id, name, songs } },
         Sheet::DeleteSongs { ids, what, leave } => rsx! { DeleteSongsDialog { ids, what, leave } },
         Sheet::DeletePlaylist { id, name, open } => rsx! { DeletePlaylistDialog { id, name, open } },
         Sheet::Sort(view) => rsx! { SortMenu { view } },
@@ -1673,6 +1804,8 @@ enum SongAction {
 #[component]
 fn SongMenu(track: Track, from: From) -> Element {
     let ctx = use_context::<Ctx>();
+    // A cached song since added to the library: the library's.
+    let track = if track.id < 0 { ctx.library.get().track_by_video(&track.video_id).ok().flatten().unwrap_or(track) } else { track };
     let mut items = Vec::new();
     let mut add = |icon, label: &str, action| items.push((MenuItem::new(icon, label), action));
     if !matches!(from, From::Queue(_)) {
@@ -1681,10 +1814,9 @@ fn SongMenu(track: Track, from: From) -> Element {
     }
     // Played from the cache: not in the library (until added).
     let cached = track.id < 0;
+    add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
     if cached {
         add(Icon::Download, "Add to library", SongAction::Keep);
-    } else {
-        add(Icon::ListPlus, "Add to playlist", SongAction::AddToPlaylist);
     }
     add(Icon::Radio, "Start radio", SongAction::Radio);
     match &from {
@@ -1727,7 +1859,7 @@ fn SongMenu(track: Track, from: From) -> Element {
                         ctx.nav.back();
                         ctx.add_to_queue(&[t]);
                     }
-                    SongAction::AddToPlaylist => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo { tracks: vec![t.id] })),
+                    SongAction::AddToPlaylist => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo(Songs::track(&t)))),
                     SongAction::Radio => ctx.song_radio(&t),
                     SongAction::RemoveFromPlaylist(entry) => {
                         ctx.nav.back();
@@ -1754,7 +1886,7 @@ fn SongMenu(track: Track, from: From) -> Element {
                     }
                     SongAction::Keep => {
                         ctx.nav.back();
-                        ctx.keep_cached(t);
+                        ctx.keep_cached(t, None);
                     }
                 }
             },
@@ -1765,6 +1897,36 @@ fn SongMenu(track: Track, from: From) -> Element {
 /// "a • b", skipping empty parts.
 fn dotted_text(parts: &[String]) -> String {
     parts.iter().filter(|p| !p.is_empty()).cloned().collect::<Vec<_>>().join(" • ")
+}
+
+/// A song from YouTube Music the library doesn't have.
+#[component]
+fn EntryMenu(entry: Entry) -> Element {
+    let ctx = use_context::<Ctx>();
+    let artist = entry.artists.first().cloned();
+    let mut items = vec![MenuItem::new(Icon::ListPlus, "Add to playlist"), MenuItem::new(Icon::Radio, "Start radio")];
+    if artist.is_some() {
+        items.push(MenuItem::new(Icon::Person, "Go to artist"));
+    }
+    let head = MenuHead {
+        title: entry.title.clone(),
+        sub: dotted_text(&[entry.artists.join(", "), entry.album.clone().unwrap_or_default()]),
+        art: entry.thumbnail.clone(),
+        icon: Icon::Music,
+    };
+    rsx! {
+        MenuSheet {
+            head,
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| match i {
+                0 => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo(Songs { tracks: Vec::new(), entries: vec![entry.clone()] }))),
+                1 if ctx.online() => ctx.nav.replace(entry_radio_page(&entry)),
+                2 if ctx.online() => ctx.nav.replace(Overlay::RemoteArtist(OpenArtist::named(artist.as_deref().unwrap_or_default()))),
+                _ => ctx.nav.back(),
+            },
+        }
+    }
 }
 
 #[component]
@@ -1799,7 +1961,7 @@ fn AlbumMenu(title: String, artist: String) -> Element {
                         ctx.nav.back();
                         ctx.add_to_queue(&tracks);
                     }
-                    2 => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo { tracks: ids })),
+                    2 => ctx.nav.replace(Overlay::Sheet(Sheet::AddTo(Songs::tracks(ids)))),
                     _ => {
                         let what = format!("“{title}” ({})", plural(tracks.len(), "song", "songs"));
                         ctx.nav.replace(Overlay::Sheet(Sheet::DeleteSongs { ids, what, leave: true }))
@@ -1906,7 +2068,7 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
                     ctx.sync_playlist(id, true);
                 }
                 Some(PlaylistAction::Rename) => {
-                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), tracks: Vec::new() }))
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), songs: Songs::default() }))
                 }
                 Some(PlaylistAction::StopSyncing) => {
                     ctx.nav.back();
@@ -1930,7 +2092,7 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
 }
 
 #[component]
-fn AddToPlaylist(tracks: Vec<i64>) -> Element {
+fn AddToPlaylist(songs: Songs) -> Element {
     let ctx = use_context::<Ctx>();
     let playlists: Vec<Playlist> = ctx.library.get().playlists().unwrap_or_default();
     let items = std::iter::once(MenuItem::new(Icon::Plus, "New playlist"))
@@ -1943,7 +2105,7 @@ fn AddToPlaylist(tracks: Vec<i64>) -> Element {
         MenuSheet {
             head: MenuHead {
                 title: "Add to playlist".into(),
-                sub: plural(tracks.len(), "song", "songs"),
+                sub: plural(songs.len(), "song", "songs"),
                 art: None,
                 icon: Icon::ListPlus,
             },
@@ -1951,18 +2113,11 @@ fn AddToPlaylist(tracks: Vec<i64>) -> Element {
             onclose: move |_| ctx.nav.back(),
             onpick: move |i: usize| {
                 let Some(p) = i.checked_sub(1).and_then(|i| playlists.get(i)) else {
-                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), tracks: tracks.clone() }));
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: songs.clone() }));
                     return;
                 };
                 ctx.nav.back();
-                match ctx.library.get().add_to_playlist(p.id, &tracks) {
-                    Ok(0) => ctx.notify(format!("Already in {}", p.name)),
-                    Ok(_) => {
-                        ctx.library.changed();
-                        ctx.notify(format!("Added to {}", p.name));
-                    }
-                    Err(e) => ctx.notify(format!("Couldn't add to {}: {e}", p.name)),
-                }
+                ctx.add_to_playlist(p.id, &p.name, &songs, false);
             },
         }
     }
@@ -1970,7 +2125,7 @@ fn AddToPlaylist(tracks: Vec<i64>) -> Element {
 
 /// Names a new playlist, or renames one.
 #[component]
-fn NameDialog(id: Option<i64>, name: String, tracks: Vec<i64>) -> Element {
+fn NameDialog(id: Option<i64>, name: String, songs: Songs) -> Element {
     let ctx = use_context::<Ctx>();
     let mut value = use_signal(|| name.clone());
     rsx! {
@@ -1986,20 +2141,11 @@ fn NameDialog(id: Option<i64>, name: String, tracks: Vec<i64>) -> Element {
                 let library = ctx.library.get();
                 ctx.nav.back();
                 let result = match id {
-                    Some(id) => library.rename_playlist(id, &name).map(|_| None),
-                    None => library
-                        .create_playlist(&name)
-                        .and_then(|id| library.add_to_playlist(id, &tracks))
-                        .map(|added| Some(if added > 0 { format!("Added to {name}") } else { format!("Created {name}") })),
+                    Some(id) => library.rename_playlist(id, &name).map(|_| ctx.library.changed()),
+                    None => library.create_playlist(&name).map(|id| ctx.add_to_playlist(id, &name, &songs, true)),
                 };
-                match result {
-                    Ok(message) => {
-                        ctx.library.changed();
-                        if let Some(message) = message {
-                            ctx.notify(message);
-                        }
-                    }
-                    Err(e) => ctx.notify(format!("Couldn't save the playlist: {e}")),
+                if let Err(e) = result {
+                    ctx.notify(format!("Couldn't save the playlist: {e}"));
                 }
             },
         }
@@ -2195,6 +2341,7 @@ fn SearchScreen() -> Element {
             },
             onopenartist: move |e: Entry| ctx.nav.push(Overlay::RemoteArtist(OpenArtist::from_entry(&e))),
             onallow: move |_| platform::request_storage_access(),
+            onmore: move |e| ctx.entry_menu(e),
         }
     }
 }
@@ -2302,6 +2449,7 @@ fn RemoteAlbumScreen(open: OpenAlbum) -> Element {
                 let Some(Ok(entries)) = tracks.peek().clone() else { return };
                 ctx.play_entries(entries.into_iter().map(album_track).collect(), i);
             },
+            onmore: move |e| ctx.entry_menu(album_track(e)),
         }
     }
 }

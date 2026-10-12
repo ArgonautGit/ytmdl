@@ -272,8 +272,9 @@ impl Ctx {
         self.trim_cache(Some(0));
     }
 
-    /// Adds a cached song to the library (its file is copied to the music folder).
-    pub(super) fn keep_cached(&self, track: Track) {
+    /// Adds a cached song to the library (its file is copied to the music
+    /// folder), and so to `playlist` if it was wanted there.
+    pub(super) fn keep_cached(&self, track: Track, playlist: Option<String>) {
         let ctx = *self;
         let Some(svc) = self.services() else {
             self.notify("The downloader is still starting".into());
@@ -286,7 +287,10 @@ impl Ctx {
                 Ok(Ok(t)) => {
                     platform::media_scan(&t.path);
                     ctx.library.changed();
-                    ctx.notify(format!("Added “{}” to your library", t.title));
+                    ctx.notify(match playlist {
+                        Some(name) => format!("Added “{}” to your library and {name}", t.title),
+                        None => format!("Added “{}” to your library", t.title),
+                    });
                 }
                 Ok(Err(e)) => ctx.notify(format!("Couldn't add it to your library: {e}")),
                 Err(e) => ctx.notify(format!("Couldn't add it to your library: {e:#}")),

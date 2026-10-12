@@ -59,6 +59,11 @@
         const dx = e.clientX - s.x0;
         const dy = e.clientY - s.y0;
         if (!s.active) {
+            // Held long enough to open its menu (assets/long-press.js).
+            if ('held' in s.row.dataset) {
+                swipe = null;
+                return;
+            }
             if (Math.abs(dy) > SLOP && Math.abs(dy) >= Math.abs(dx)) {
                 swipe = null; // a scroll
                 return;
