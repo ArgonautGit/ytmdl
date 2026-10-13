@@ -1828,7 +1828,7 @@ fn SongMenu(track: Track, from: From) -> Element {
         add(Icon::Disc, "Go to album", SongAction::Album);
     }
     let artist = track.artists.first().cloned();
-    if artist.is_some() && !matches!(&from, From::Artist(a) if Some(a) == artist.as_ref()) && !cached {
+    if artist.is_some() && !matches!(&from, From::Artist(a) if Some(a) == artist.as_ref()) && (ctx.online() || !cached) {
         add(Icon::Person, "Go to artist", SongAction::Artist);
     }
     if !cached {
@@ -1877,8 +1877,10 @@ fn SongMenu(track: Track, from: From) -> Element {
                         ctx.nav.replace(Overlay::Album { title, artist: t.album_artist });
                     }
                     SongAction::Artist => {
+                        // Their YouTube Music page, as in Search; the library's offline.
                         if let Some(name) = t.artists.into_iter().next() {
-                            ctx.nav.replace(Overlay::Artist(name));
+                            let page = if ctx.online() { Overlay::RemoteArtist(OpenArtist::named(&name)) } else { Overlay::Artist(name) };
+                            ctx.nav.replace(page);
                         }
                     }
                     SongAction::Delete => {
