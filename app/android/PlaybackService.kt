@@ -88,6 +88,8 @@ class PlaybackService : MediaLibraryService() {
          */
         private const val PREAMP_DB = 4.0
         private const val PREFS = "player"
+        /** The repeat mode (Media3's int), kept across restarts. */
+        private const val REPEAT = "repeat"
     }
 
     private data class SongLoop(val id: String, val a: Long, val b: Long)
@@ -138,13 +140,17 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Before the listeners: restoring the mode isn't a change to save.
+        player.repeatMode = prefs.getInt(REPEAT, Player.REPEAT_MODE_OFF)
         player.addListener(loopListener)
         player.addListener(listenListener)
         player.addListener(volumeListener)
         player.addListener(logListener)
+        player.addListener(repeatListener)
         this.player = player
         browse = Browse(this)
-        normalize = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMALIZE, true)
+        normalize = prefs.getBoolean(NORMALIZE, true)
         loadSkips()
 
         setMediaNotificationProvider(
@@ -520,6 +526,15 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         publish()
+    }
+
+    // ---- repeat ----
+
+    /** Saved whoever changes it (the app, a car's controls), so it holds across restarts. */
+    private val repeatListener = object : Player.Listener {
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(REPEAT, repeatMode).apply()
+        }
     }
 
     // ---- log ----
