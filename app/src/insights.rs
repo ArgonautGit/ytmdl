@@ -15,8 +15,9 @@ const API: &str = "https://api.anthropic.com/v1";
 /// Requests may think for minutes at high effort.
 const TIMEOUT_SECS: u64 = 600;
 const MAX_TOKENS: u32 = 32_000;
-/// Model turns in one run (each may run queries) before it is given up.
-const MAX_TURNS: usize = 16;
+/// Model turns in one run that may run queries; the turn after them answers
+/// with what was found, its tools off.
+const MAX_TURNS: usize = 24;
 
 /// Settings keys.
 const SETTINGS: &str = "insights";
@@ -393,8 +394,13 @@ impl Claude {
         usage: &mut Usage,
         on_step: &mut dyn FnMut(Step),
     ) -> anyhow::Result<()> {
-        for _ in 0..MAX_TURNS {
-            let answer = self.send(self.params(system, messages, tools, format)).await?;
+        for turn in 0..=MAX_TURNS {
+            let mut params = self.params(system, messages, tools, format);
+            if turn == MAX_TURNS {
+                tracing::info!(target: "ytmdl", "insights: {MAX_TURNS} turns of queries; asking for the answer");
+                params["tool_choice"] = json!({ "type": "none" });
+            }
+            let answer = self.send(params).await?;
             usage.add(&answer["usage"]);
             check_stop(&answer)?;
             let calls: Vec<Value> = answer["content"]
@@ -428,9 +434,12 @@ impl Claude {
                     "is_error": is_error,
                 }));
             }
+            if turn + 1 == MAX_TURNS {
+                results.push(json!({ "type": "text", "text": "That is enough queries: answer now with what you have found." }));
+            }
             messages.push(json!({ "role": "user", "content": results }));
         }
-        anyhow::bail!("Claude took too many steps without finishing.")
+        anyhow::bail!("Claude didn't finish its answer.")
     }
 
     /// The first message of a report: the history's summary, and what the

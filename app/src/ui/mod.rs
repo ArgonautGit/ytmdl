@@ -2766,13 +2766,22 @@ fn SettingsScreen() -> Element {
             auto_update: updates.auto,
             auto_note: updates.note(),
             onupdate: move |channel: Channel| ctx.check_ytdlp(channel, true),
-            ontoggleauto: move |_| ctx.set_auto_update(!ctx.updates.peek().auto),
+            ontoggleauto: move |_| {
+                let on = ctx.updates.peek().auto;
+                ctx.set_auto_update(!on)
+            },
             onallow: move |_| platform::request_storage_access(),
             onlicenses: move |_| ctx.nav.push(Overlay::Licenses),
             normalize: (ctx.normalize)(),
-            ontogglenormalize: move |_| ctx.set_normalize(!*ctx.normalize.peek()),
+            ontogglenormalize: move |_| {
+                let on = *ctx.normalize.peek();
+                ctx.set_normalize(!on)
+            },
             lyrics_lookup: (ctx.lyrics_lookup)(),
-            ontogglelyrics: move |_| ctx.set_lyrics_lookup(!*ctx.lyrics_lookup.peek()),
+            ontogglelyrics: move |_| {
+                let on = *ctx.lyrics_lookup.peek();
+                ctx.set_lyrics_lookup(!on)
+            },
             untidy: counts.map(|c| c.0),
             duplicates: counts.map(|c| c.1),
             ontitles: move |_| ctx.nav.push(Overlay::Titles),
@@ -2784,7 +2793,10 @@ fn SettingsScreen() -> Element {
             secondary: ctx.membership.read().name(Role::Secondary),
             new_to_secondary: (ctx.new_to_secondary)(),
             onrole: move |role| ctx.nav.push(Overlay::Sheet(Sheet::Role(role))),
-            ontogglenew: move |_| ctx.set_new_to_secondary(!*ctx.new_to_secondary.peek()),
+            ontogglenew: move |_| {
+                let on = *ctx.new_to_secondary.peek();
+                ctx.set_new_to_secondary(!on)
+            },
             InsightsSettings {}
         }
     }
