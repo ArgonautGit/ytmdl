@@ -44,7 +44,7 @@ pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
 use retitle::TitlesScreen;
 use sort::Sorts;
 use stats::StatsScreen;
-use stream::{LIMITS_MB, Stream, use_stream};
+use stream::{LIMITS_MB, Row, Stream, use_stream};
 use sync::SyncState;
 use update::Updates;
 use views::*;
@@ -1127,7 +1127,7 @@ fn NowPlayingScreen() -> Element {
             let script = [QUEUE_DRAG_JS, "window.ytmdlQueueMoved = (from, to) => dioxus.send([from, to]); await new Promise(() => {});"];
             let mut moves = document::eval(&script.join("\n"));
             while let Ok((from, to)) = moves.recv::<(usize, usize)>().await {
-                player.move_entry(from, to);
+                ctx.move_row(from, to);
             }
         })
     });
@@ -1184,10 +1184,29 @@ fn NowPlayingScreen() -> Element {
         (None, Some(l)) => position(&l.first).zip(position(&l.last)),
         (None, None) => None,
     };
-    let songs = queue
+    let rows = ctx.queue_rows();
+    let entry_row = |e: &Entry| SongItem {
+        key: e.id.clone(),
+        title: e.title.clone(),
+        artists: e.artists.join(", "),
+        album: e.album.clone(),
+        duration_secs: e.duration_secs,
+        art: e.thumbnail.clone(),
+        playing: false,
+        mark: None,
+        marks: None,
+    };
+    let mut queued = 0;
+    let songs = rows
         .iter()
-        .enumerate()
-        .map(|(i, e)| {
+        .map(|row| {
+            let e = match row {
+                Row::Queued(e) => e,
+                Row::Placing(e) => return SongItem { key: format!("placing-{}", e.id), ..entry_row(e) },
+                Row::Pending(n, e) => return SongItem { key: format!("pending-{n}-{}", e.id), ..entry_row(e) },
+            };
+            let i = queued;
+            queued += 1;
             let mut item = song_item(&e.track, e.index == snapshot.index);
             item.key = e.key.clone();
             item.mark = match range {
@@ -1206,26 +1225,8 @@ fn NowPlayingScreen() -> Element {
         (None, Some((a, b))) => QueueLoopView::Looping { first: a + 1, last: b + 1 },
         (None, None) => QueueLoopView::Off,
     };
-    let upcoming_entries: Vec<Entry> = ctx.stream.pending.read().iter().cloned().collect();
-    let upcoming_menu = upcoming_entries.clone();
-    let upcoming: Vec<SongItem> = upcoming_entries
-        .iter()
-        .map(|e| SongItem {
-            key: e.id.clone(),
-            title: e.title.clone(),
-            artists: e.artists.join(", "),
-            album: e.album.clone(),
-            duration_secs: e.duration_secs,
-            art: e.thumbnail.clone(),
-            playing: false,
-            mark: None,
-            marks: None,
-        })
-        .collect();
     let secs = |ms: i64| ms as f64 / 1000.0;
-    let entries = queue.clone();
-    let menu_entries = queue.clone();
-    let swiped_entries = queue.clone();
+    let (menu_rows, swiped_rows) = (rows.clone(), rows.clone());
 
     // The loop, if it is one of the song's saved sections.
     let song_loop = player.song_loop();
@@ -1285,38 +1286,34 @@ fn NowPlayingScreen() -> Element {
             onrepeat: move |_| player.cycle_repeat(),
             onab: move |_| player.song_loop_step(),
             onskip: move |i: usize| {
-                let Some(entry) = entries.get(i) else { return };
                 let pick = picking.peek().clone();
-                match pick {
-                    None => player.skip_to(entry.index),
-                    Some(None) => picking.set(Some(Some(entry.key.clone()))),
-                    Some(Some(first)) => {
+                match (rows.get(i), pick) {
+                    (Some(Row::Queued(entry)), None) => player.skip_to(entry.index),
+                    (Some(Row::Queued(entry)), Some(None)) => picking.set(Some(Some(entry.key.clone()))),
+                    (Some(Row::Queued(entry)), Some(Some(first))) => {
                         picking.set(None);
                         player.set_queue_loop(&first, &entry.key);
                     }
+                    // The list from that song on; the songs in between are skipped.
+                    (Some(Row::Pending(n, _)), None) => {
+                        let rest = ctx.stream.pending.peek().iter().skip(*n).cloned().collect();
+                        ctx.play_entries(rest, 0);
+                    }
+                    _ => {}
                 }
             },
-            onmore: move |i: usize| {
-                if let Some(e) = menu_entries.get(i) {
+            onmore: move |i: usize| match menu_rows.get(i) {
+                Some(Row::Queued(e)) => {
                     ctx.nav.push(Overlay::Sheet(Sheet::Song { track: Box::new(e.track.clone()), from: From::Queue(e.key.clone()) }));
                 }
+                Some(Row::Placing(e) | Row::Pending(_, e)) => ctx.entry_menu(e.clone()),
+                None => {}
             },
-            onremove: move |i: usize| {
-                if let Some(e) = swiped_entries.get(i) {
-                    player.remove_entry(&e.key);
-                }
+            onremove: move |i: usize| match swiped_rows.get(i) {
+                Some(Row::Queued(e)) => player.remove_entry(&e.key),
+                Some(Row::Pending(n, _)) => ctx.drop_pending(*n),
+                _ => {}
             },
-            upcoming,
-            onupcoming: move |i: usize| {
-                // The list from that song on; the songs in between are skipped.
-                ctx.play_entries(upcoming_entries.iter().skip(i).cloned().collect(), 0);
-            },
-            onupcomingmore: move |i: usize| {
-                if let Some(e) = upcoming_menu.get(i) {
-                    ctx.entry_menu(e.clone());
-                }
-            },
-            onupcomingremove: move |i: usize| ctx.drop_pending(i),
             onqueueloop: move |_| {
                 if picking.peek().is_some() {
                     picking.set(None);

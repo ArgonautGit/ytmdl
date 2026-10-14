@@ -13,6 +13,7 @@ use ytmdl_library::{Library, Track};
 
 use super::Ctx;
 use crate::platform;
+use crate::player::Entry as QueueEntry;
 
 /// How yt-dlp names the files in the cache folder.
 const TEMPLATE: &str = "%(id)s.%(ext)s";
@@ -36,6 +37,9 @@ pub(super) struct Stream {
     pub(super) starting: Signal<Option<Entry>>,
     /// The rest of the list being played, not queued yet.
     pub(super) pending: Signal<VecDeque<Entry>>,
+    /// Songs of the list dragged up among the queue's, being fetched to go
+    /// there.
+    pub(super) placing: Signal<Vec<Placing>>,
     /// A song of `pending` is being fetched.
     busy: Signal<bool>,
     failures: Signal<u32>,
@@ -61,6 +65,7 @@ impl Stream {
             limit_mb: Signal::new(limit_mb),
             starting: Signal::new(None),
             pending: Signal::new(VecDeque::new()),
+            placing: Signal::new(Vec::new()),
             busy: Signal::new(false),
             failures: Signal::new(0),
             unavailable: CopyValue::new(HashSet::new()),
@@ -77,7 +82,146 @@ impl Stream {
     }
 }
 
+/// A song of the list on its way into the queue.
+#[derive(Clone, PartialEq)]
+pub(super) struct Placing {
+    pub(super) entry: Entry,
+    /// The queue entry it goes after; first if `None`.
+    after: Option<String>,
+    /// Its queue entry, once added (it moves into place when the queue shows it).
+    key: Option<String>,
+}
+
+/// A row of the queue on Now Playing: the queue's songs, then the rest of the
+/// list being played.
+#[derive(Clone, PartialEq)]
+pub(super) enum Row {
+    Queued(QueueEntry),
+    /// Fetched to go here.
+    Placing(Entry),
+    /// The `n`th of the list's rest.
+    Pending(usize, Entry),
+}
+
+/// The rows of `queue`, with the songs being placed in it and the list's rest.
+pub(super) fn rows(queue: Vec<QueueEntry>, placing: &[Placing], pending: &VecDeque<Entry>) -> Vec<Row> {
+    let queued = |key: &String| queue.iter().any(|e| e.key == *key);
+    let shown: Vec<&Placing> = placing.iter().filter(|p| !p.key.as_ref().is_some_and(queued)).collect();
+    let placed = |after: Option<&String>| -> Vec<Row> {
+        shown.iter().filter(|p| p.after.as_ref() == after).map(|p| Row::Placing(p.entry.clone())).collect()
+    };
+    let mut rows = placed(None);
+    for e in &queue {
+        rows.push(Row::Queued(e.clone()));
+        rows.extend(placed(Some(&e.key)));
+    }
+    // Their place left the queue meanwhile.
+    rows.extend(shown.iter().filter(|p| p.after.as_ref().is_some_and(|a| !queued(a))).map(|p| Row::Placing(p.entry.clone())));
+    rows.extend(pending.iter().cloned().enumerate().map(|(i, e)| Row::Pending(i, e)));
+    rows
+}
+
+/// What the list knows of a song of the queue, to fetch it again later.
+fn entry_of(t: &Track) -> Entry {
+    Entry {
+        id: t.video_id.clone(),
+        url: t.url.clone(),
+        title: t.title.clone(),
+        artists: t.artists.clone(),
+        album: t.album.clone(),
+        duration_secs: t.duration_secs,
+        thumbnail: t.art.as_deref().map(|k| format!("/art/{}", Library::art_name(k, ytmdl_library::ART_SMALL))),
+        kind: Some("song".into()),
+        year: t.year,
+        track_number: t.track_number,
+    }
+}
+
 impl Ctx {
+    /// The rows of the queue on Now Playing.
+    pub(super) fn queue_rows(&self) -> Vec<Row> {
+        rows(self.player.queue(), &self.stream.placing.read(), &self.stream.pending.read())
+    }
+
+    /// Moves the row at `from` to `to` (positions in [`Ctx::queue_rows`]). A
+    /// song dropped among the queue's goes there, fetched first if it is
+    /// still to come; one dropped among the songs to come goes back to them.
+    pub(super) fn move_row(&self, from: usize, to: usize) {
+        let s = self.stream;
+        let mut rows = rows(self.player.queue_peek(), &s.placing.peek(), &s.pending.peek());
+        if from >= rows.len() || to >= rows.len() || from == to {
+            return;
+        }
+        let row = rows.remove(from);
+        // It lands after the row it passed going down, before it going up.
+        let pending = if to > from { matches!(rows[to - 1], Row::Pending(..)) } else { matches!(rows[to], Row::Pending(..)) };
+        let before = &rows[..to];
+        let queued_before = before.iter().filter(|r| matches!(r, Row::Queued(_))).count();
+        let pending_before = before.iter().filter(|r| matches!(r, Row::Pending(..))).count();
+        let player = self.player;
+        match row {
+            Row::Placing(_) => {}
+            Row::Queued(e) => {
+                let at = player.queue_peek().iter().position(|q| q.key == e.key);
+                let Some(at) = at else { return };
+                let playing = player.current_key_peek().as_deref() == Some(e.key.as_str());
+                if !pending || playing || e.track.video_id.is_empty() {
+                    player.move_entry(at, queued_before.min(player.queue_peek().len() - 1));
+                    return;
+                }
+                let mut tail = s.tail;
+                if tail.peek().as_ref().is_some_and(|(k, _)| *k == e.key) {
+                    let last = player.queue_peek().into_iter().rev().find(|q| q.key != e.key).map(|q| q.key);
+                    tail.set(last.map(|k| (k, Instant::now())));
+                }
+                let mut list = s.pending;
+                list.write().insert(pending_before, entry_of(&e.track));
+                player.remove_entry(&e.key);
+            }
+            Row::Pending(i, entry) => {
+                let mut list = s.pending;
+                list.write().remove(i);
+                if pending {
+                    list.write().insert(pending_before, entry);
+                    return;
+                }
+                let after = before.iter().rev().find_map(|r| match r {
+                    Row::Queued(q) => Some(q.key.clone()),
+                    _ => None,
+                });
+                self.place(entry, after);
+            }
+        }
+    }
+
+    /// Fetches a song of the list to go in the queue after `after`.
+    fn place(&self, entry: Entry, after: Option<String>) {
+        let ctx = *self;
+        let s = self.stream;
+        let mut placing = s.placing;
+        placing.write().push(Placing { entry: entry.clone(), after, key: None });
+        let generation = *s.generation.peek();
+        let cancel = s.cancel.read().clone();
+        dioxus::core::spawn_forever(async move {
+            let result = ctx.ready(entry.clone(), true, cancel).await;
+            if *s.generation.peek() != generation {
+                return;
+            }
+            let at = placing.peek().iter().position(|p| p.entry.id == entry.id && p.key.is_none());
+            let Some(at) = at else { return };
+            match result {
+                Ok(track) => {
+                    let key = ctx.player.add_from_list(&[track]).pop();
+                    placing.write()[at].key = key;
+                }
+                Err(e) => {
+                    placing.write().remove(at);
+                    ctx.notify(format!("Couldn't get “{}”: {e}", entry.title));
+                }
+            }
+        });
+    }
+
     /// Plays `entries` from `start`, fetching the songs the library doesn't
     /// have into the cache as they come up.
     pub(super) fn play_entries(&self, entries: Vec<Entry>, start: usize) {
@@ -137,6 +281,8 @@ impl Ctx {
         generation.set(next);
         starting.set(None);
         pending.write().clear();
+        let mut placing = s.placing;
+        placing.write().clear();
         busy.set(false);
         failures.set(0);
         tail.set(None);
@@ -319,6 +465,34 @@ pub(super) fn use_stream(ctx: Ctx) {
                 tracing::info!(target: "ytmdl", "removed {n} unfinished files from the cache");
             }
         });
+    });
+    // A song fetched to go among the queue's moves there once the queue shows it.
+    use_effect(move || {
+        let queue = ctx.player.queue();
+        let mut placing = ctx.stream.placing;
+        let arrived: Vec<Placing> = placing
+            .peek()
+            .iter()
+            .filter(|p| p.key.as_ref().is_some_and(|k| queue.iter().any(|e| e.key == *k)))
+            .cloned()
+            .collect();
+        if arrived.is_empty() {
+            return;
+        }
+        placing.write().retain(|p| !arrived.contains(p));
+        for p in arrived {
+            let queue = ctx.player.queue_peek();
+            let Some(at) = queue.iter().position(|e| Some(&e.key) == p.key.as_ref()) else { continue };
+            let to = match &p.after {
+                None => 0,
+                Some(a) => match queue.iter().position(|e| e.key == *a) {
+                    Some(b) if b < at => b + 1,
+                    Some(b) => b,
+                    None => continue,
+                },
+            };
+            ctx.player.move_entry(at, to);
+        }
     });
     use_effect(move || {
         let s = ctx.stream;

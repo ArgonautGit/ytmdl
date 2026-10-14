@@ -484,8 +484,8 @@ fn stream_loading() -> Element {
 }
 
 fn now_playing_cached() -> Element {
-    let queue: Vec<SongItem> = song_items().into_iter().take(3).collect();
-    let upcoming: Vec<SongItem> = song_items().into_iter().skip(3).map(|s| SongItem { playing: false, ..s }).collect();
+    let queue: Vec<SongItem> =
+        song_items().into_iter().enumerate().map(|(i, s)| SongItem { playing: s.playing && i < 3, ..s }).collect();
     rsx! {
         div { class: "app has-mini",
             div { class: "overlay sheet",
@@ -498,8 +498,6 @@ fn now_playing_cached() -> Element {
                     repeat: RepeatMode::Off,
                     song_loop: None,
                     queue,
-                    upcoming,
-                    onupcoming: |_| {},
                     queue_loop: QueueLoopView::Off,
                     onclose: |_| {},
                     ontoggle: |_| {},

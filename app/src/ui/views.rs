@@ -1331,8 +1331,6 @@ pub fn SongList(
     #[props(default)] onmore: Option<EventHandler<usize>>,
     #[props(default)] numbered: bool,
     #[props(default)] handles: bool,
-    /// The handles' room left empty, to line up with a list above that has them.
-    #[props(default)] handle_room: bool,
     #[props(default)] swipe: Option<Swipe>,
     #[props(default)] onswipe: Option<EventHandler<usize>>,
 ) -> Element {
@@ -1345,7 +1343,6 @@ pub fn SongList(
                     song,
                     index: numbered.then_some(i + 1),
                     handle: handles,
-                    handle_room,
                     onplay: move |_| onplay.call(i),
                     onmore: onmore.map(|m| EventHandler::new(move |_| m.call(i))),
                     onswipe: onswipe.map(|m| EventHandler::new(move |_| m.call(i))),
@@ -1360,7 +1357,6 @@ fn SongItemRow(
     song: SongItem,
     index: Option<usize>,
     handle: bool,
-    handle_room: bool,
     onplay: EventHandler<()>,
     onmore: Option<EventHandler<()>>,
     onswipe: Option<EventHandler<()>>,
@@ -1426,9 +1422,6 @@ fn SongItemRow(
                     onclick: move |e| e.stop_propagation(),
                     Svg { icon: Icon::Grip, size: 20 }
                 }
-            }
-            if handle_room {
-                span { class: "icon-btn handle-room" }
             }
             if let Some(onswipe) = onswipe {
                 // assets/swipe.js clicks it when the row is swiped; the ⋮ menu
@@ -2029,7 +2022,8 @@ pub fn NowPlayingPage(
     repeat: RepeatMode,
     /// The song's A-B loop in seconds: A, and B once it is set.
     song_loop: Option<(f64, Option<f64>)>,
-    /// The whole queue; the current song is marked playing.
+    /// The whole queue (the current song marked playing), then the rest of a
+    /// list played without downloading it, fetched as the player gets near.
     queue: Vec<SongItem>,
     queue_loop: QueueLoopView,
     onclose: EventHandler<()>,
@@ -2049,19 +2043,6 @@ pub fn NowPlayingPage(
     onmore: EventHandler<usize>,
     /// A queue row swiped away.
     onremove: EventHandler<usize>,
-    /// The rest of a list played without downloading it: not in the queue yet,
-    /// fetched as the player gets near. Listed after the queue's songs.
-    #[props(default)]
-    upcoming: Vec<SongItem>,
-    /// An upcoming row tapped: plays the list from there.
-    #[props(default)]
-    onupcoming: EventHandler<usize>,
-    /// An upcoming row's menu.
-    #[props(default)]
-    onupcomingmore: EventHandler<usize>,
-    /// An upcoming row swiped away.
-    #[props(default)]
-    onupcomingremove: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
     /// The sleep timer's time left ("23 min", "End of song") while it is set.
@@ -2277,7 +2258,7 @@ pub fn NowPlayingPage(
                 "Queue"
                 span { class: "section-note",
                     match queue_loop {
-                        QueueLoopView::Off => plural(queue.len() + upcoming.len(), "song", "songs"),
+                        QueueLoopView::Off => plural(queue.len(), "song", "songs"),
                         QueueLoopView::PickA => "Tap the song to loop back to (A)".into(),
                         QueueLoopView::PickB => "Tap the last song of the loop (B)".into(),
                         QueueLoopView::Looping { first, last } if first == last => format!("Looping song {first}"),
@@ -2294,17 +2275,6 @@ pub fn NowPlayingPage(
             }
             div { class: if picking { "queue picking" } else { "queue" },
                 SongList { songs: queue, onplay: onskip, onmore, handles: true, swipe: Swipe::Remove, onswipe: onremove }
-                if !upcoming.is_empty() {
-                    // Not fetched yet, so they can't be dragged in among the songs above.
-                    SongList {
-                        songs: upcoming,
-                        onplay: move |i| if !picking { onupcoming.call(i) },
-                        onmore: onupcomingmore,
-                        handle_room: true,
-                        swipe: Swipe::Remove,
-                        onswipe: onupcomingremove,
-                    }
-                }
             }
         }
     }

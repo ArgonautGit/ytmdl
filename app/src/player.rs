@@ -620,6 +620,11 @@ impl Player {
         self.queue.read().clone()
     }
 
+    /// [`Player::queue`] without subscribing.
+    pub fn queue_peek(&self) -> Vec<Entry> {
+        self.queue.peek().clone()
+    }
+
     pub fn current(&self) -> Option<Track> {
         let index = self.snapshot.read().index;
         self.queue.read().iter().find(|e| e.index == index).map(|e| e.track.clone())
@@ -636,7 +641,7 @@ impl Player {
         s.ids.get(s.index).cloned()
     }
 
-    fn current_key_peek(&self) -> Option<String> {
+    pub fn current_key_peek(&self) -> Option<String> {
         let s = self.snapshot.peek();
         s.ids.get(s.index).cloned()
     }
