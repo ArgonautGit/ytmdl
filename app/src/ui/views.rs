@@ -2406,6 +2406,10 @@ pub fn Dialog(
     /// The text field's contents; no field when `None`.
     #[props(default)] value: Option<String>,
     #[props(default)] placeholder: String,
+    /// The most characters the field takes.
+    #[props(default = 100)] max_length: usize,
+    /// A code rather than words: no capitals or corrections from the keyboard.
+    #[props(default)] code: bool,
     confirm: String,
     #[props(default)] danger: bool,
     #[props(default)] oninput: Option<EventHandler<String>>,
@@ -2435,7 +2439,10 @@ pub fn Dialog(
                         "enterkeyhint": "done",
                         placeholder: "{placeholder}",
                         value: "{value}",
-                        maxlength: "100",
+                        maxlength: "{max_length}",
+                        autocapitalize: if code { "off" },
+                        autocorrect: if code { "off" },
+                        spellcheck: if code { "false" },
                         oninput: move |e| {
                             if let Some(h) = oninput {
                                 h.call(e.value());

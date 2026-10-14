@@ -451,6 +451,8 @@ pub(super) fn ApiKeyDialog() -> Element {
             },
             value: value(),
             placeholder: "sk-ant-…",
+            max_length: 500,
+            code: true,
             confirm: "Save",
             oninput: move |v| value.set(v),
             oncancel: move |_| ctx.nav.back(),
