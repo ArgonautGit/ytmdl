@@ -1143,18 +1143,29 @@ fn NowPlayingScreen() -> Element {
         let position_ms = (player.position_secs() * 1000.0) as i64;
         Some(ctx.lyrics.read().get(&track.id).map_or(LyricsView::Loading, |s| s.view(position_ms)))
     });
-    // Keep the line being sung in the middle of the lyrics box.
+    // Keep the line being sung in the middle of the lyrics box while it is in
+    // view: scrolled away to read, the lyrics stay put until it is scrolled
+    // back to, or the song or the place in it changes.
     let lyrics_line = use_memo(move || match lyrics_view() {
-        Some(LyricsView::Synced { current, .. }) => current,
+        Some(LyricsView::Synced { current, .. }) => current.map(|line| (lyrics_track().map(|t| t.id), line)),
         _ => None,
     });
+    let followed = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(None::<(Option<i64>, usize)>)));
     use_effect(move || {
-        if lyrics_line().is_some() {
-            document::eval(
+        let line = lyrics_line();
+        let next = followed.replace(line).is_some_and(|(track, at)| line == Some((track, at + 1)));
+        if line.is_some() {
+            document::eval(&format!(
                 "const box = document.querySelector('.lyrics'); \
                  const line = box && box.querySelector('.line.current'); \
-                 if (line) box.scrollTo({ top: line.offsetTop - (box.clientHeight - line.offsetHeight) / 2, behavior: 'smooth' });",
-            );
+                 if (line && !box.ytmdlWatched) {{ \
+                   box.ytmdlWatched = true; \
+                   for (const e of ['touchstart', 'touchmove', 'wheel']) box.addEventListener(e, () => box.ytmdlTouched = Date.now(), {{ passive: true }}); \
+                 }} \
+                 const seen = line && line.offsetTop + line.offsetHeight > box.scrollTop && line.offsetTop < box.scrollTop + box.clientHeight; \
+                 const held = Date.now() - (box && box.ytmdlTouched || 0) < 1500; \
+                 if (line && (!{next} || (seen && !held))) box.scrollTo({{ top: line.offsetTop - (box.clientHeight - line.offsetHeight) / 2, behavior: 'smooth' }});",
+            ));
         }
     });
     let Some(track) = player.current() else {

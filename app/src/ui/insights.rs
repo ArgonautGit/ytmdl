@@ -882,7 +882,7 @@ fn PastReport(report: Report) -> Element {
         Some(cost_text(report.cost)),
     ]);
     rsx! {
-        div { class: "past tappable", role: "button", onclick: move |_| ctx.nav.push(Overlay::InsightsReport(id)),
+        div { class: "past-report tappable", role: "button", onclick: move |_| ctx.nav.push(Overlay::InsightsReport(id)),
             div { class: "p-date", {insights::day_text(report.made_at)} }
             div { class: "p-head", "{report.headline}" }
             div { class: "sub", "{meta}" }

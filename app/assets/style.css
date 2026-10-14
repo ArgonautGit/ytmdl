@@ -1237,11 +1237,11 @@ span.thread { padding-right: 10px; }
 .trend circle.report { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
 .trend text { fill: var(--dim); font-size: 10px; }
 .month-h { margin: 6px 20px 8px; color: var(--muted); font-size: 13px; font-weight: 500; }
-.past { margin: 0 16px 10px; padding: 12px 14px; border-radius: 12px; background: var(--surface); }
-.past:active { background: var(--surface-2); }
+.past-report { margin: 0 16px 10px; padding: 12px 14px; border-radius: 12px; background: var(--surface); }
+.past-report:active { background: var(--surface-2); }
 .p-date { color: #ff8099; font-size: 12px; font-weight: 500; }
 .p-head { margin: 4px 0 6px; font-size: 15px; line-height: 1.4; }
-.past .sub { font-size: 12px; white-space: normal; }
+.past-report .sub { font-size: 12px; white-space: normal; }
 .timeline { margin: 0 4px 0 10px; padding-left: 18px; border-left: 2px solid var(--surface-2); }
 .step { position: relative; padding: 0 0 18px; }
 .step:active { opacity: 0.8; }
