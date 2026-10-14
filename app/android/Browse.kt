@@ -49,7 +49,7 @@ class Browse(private val context: Context) {
 
         private const val TRACK_COLUMNS =
             "t.id, t.path, t.title, t.artists, t.album, t.album_artist, t.disc_number, t.track_number, " +
-                "t.duration, t.art, t.added_at, t.gain, t.peak"
+                "t.duration, t.art, t.added_at, t.gain, t.peak, t.video_id"
 
         /** A queue entry, as the app and the car both make them. */
         fun queueItem(
@@ -63,8 +63,10 @@ class Browse(private val context: Context) {
             peak: Double?,
             from: String?,
             shuffled: Boolean,
+            videoId: String?,
         ): MediaItem {
             val extras = Bundle()
+            if (!videoId.isNullOrEmpty()) extras.putString(PlaybackService.VIDEO_ID, videoId)
             if (!from.isNullOrEmpty()) extras.putString(PlaybackService.FROM, from)
             if (shuffled) extras.putBoolean(PlaybackService.SHUFFLED, true)
             if (gain != null) {
@@ -113,6 +115,7 @@ class Browse(private val context: Context) {
         val addedAt: Long,
         val gain: Double?,
         val peak: Double?,
+        val videoId: String?,
     )
 
     private class Playlist(val id: Long, val name: String, val count: Int, val art: String?)
@@ -154,6 +157,7 @@ class Browse(private val context: Context) {
             addedAt = getLong(10),
             gain = double(11),
             peak = double(12),
+            videoId = if (isNull(13)) null else getString(13),
         )
     }
 
@@ -315,7 +319,7 @@ class Browse(private val context: Context) {
     /** [from]: what it was played from, for the listening log. */
     private fun queueItem(t: Track, n: Long, from: String, shuffled: Boolean = false): MediaItem = queueItem(
         "${t.id}.$n", t.path, t.title, t.artists.joinToString(", "), t.album, art(t.art, ART_LARGE), t.gain, t.peak,
-        from, shuffled,
+        from, shuffled, t.videoId,
     )
 
     /** What a pick in the car (or another browser) plays from: "car: playlists". */

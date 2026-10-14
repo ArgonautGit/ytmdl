@@ -84,6 +84,7 @@ class PlaybackService : MediaLibraryService() {
          * its queue was shuffled, in its metadata extras, for the listening log. */
         const val FROM = "from"
         const val SHUFFLED = "shuffled"
+        const val VIDEO_ID = "video_id"
 
         private const val TAG = "ytmdl"
         /** The sleep timer fades the music out over its last seconds. */
@@ -723,7 +724,7 @@ class PlaybackService : MediaLibraryService() {
     /**
      * Logs the song being listened to, if it played at all: `<started, unix s>
      * \t<track id>\t<ms>\t<ended>\t<position ms>\t<from>\t<shuffled>\t<output>
-     * \t<title>\t<artist>\t<album>`.
+     * \t<title>\t<artist>\t<album>\t<video id>`.
      */
     private fun finishListen(ended: String) {
         countListen()
@@ -748,6 +749,7 @@ class PlaybackService : MediaLibraryService() {
             field(meta.title),
             field(meta.artist),
             field(meta.albumTitle),
+            field(meta.extras?.getString(VIDEO_ID)),
         )
         try {
             FileOutputStream(File(filesDir, "listens.log"), true).use { it.write((fields.joinToString("\t") + "\n").toByteArray()) }

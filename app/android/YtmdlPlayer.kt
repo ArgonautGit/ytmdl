@@ -134,6 +134,7 @@ object YtmdlPlayer {
                 o.optDouble("peak", 1.0),
                 o.optString("from"),
                 o.optBoolean("shuffled"),
+                o.optString("video_id"),
             )
         }
     }

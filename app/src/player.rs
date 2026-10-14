@@ -318,6 +318,7 @@ impl Player {
                     "peak": t.gain.map(|g| g.peak),
                     "from": from,
                     "shuffled": shuffled,
+                    "video_id": t.video_id,
                 })
             })
             .collect();

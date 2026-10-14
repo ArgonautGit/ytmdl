@@ -39,12 +39,12 @@ WITH RECURSIVE
     SELECT date(m, '+1 month') FROM months WHERE date(m, '+1 month') <= date('now', 'localtime', 'start of month')
   ),
   h AS (
-    SELECT h.*, date(h.started_local, 'start of month') AS m, COALESCE(h.video_id, h.title, '') AS k FROM history h
+    SELECT h.*, date(h.started_local, 'start of month') AS m, COALESCE(h.video_id, h.title) AS k FROM history h
   ),
-  firsts AS (SELECT k, MIN(m) AS first FROM h GROUP BY k),
+  firsts AS (SELECT k, MIN(m) AS first FROM h WHERE k IS NOT NULL GROUP BY k),
   top AS (
     SELECT m, SUM(p) AS plays FROM (
-      SELECT m, SUM(play) AS p, ROW_NUMBER() OVER (PARTITION BY m ORDER BY SUM(play) DESC) AS n FROM h GROUP BY m, k
+      SELECT m, SUM(play) AS p, ROW_NUMBER() OVER (PARTITION BY m ORDER BY SUM(play) DESC) AS n FROM h WHERE k IS NOT NULL GROUP BY m, k
     ) WHERE n <= 10 GROUP BY m
   )
 SELECT months.m,

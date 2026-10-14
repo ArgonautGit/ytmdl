@@ -234,6 +234,25 @@ INSERT INTO insight_reports (made_at, report)
 SELECT json_extract(value, '$.made_at'), value FROM settings
 WHERE key = 'insights_report' AND json_valid(value) AND json_extract(value, '$.made_at') IS NOT NULL;
 DELETE FROM settings WHERE key = 'insights_report';
+"#, r#"
+-- Listens read after their song was deleted had no title; those of a song
+-- known by its video id (in the library, cached, or another listen) get it.
+UPDATE listens SET title = t.title, artists = t.artists, album = t.album,
+                   duration_ms = COALESCE(listens.duration_ms, CAST(t.duration * 1000 AS INTEGER))
+FROM tracks t WHERE t.video_id = listens.video_id AND listens.title IS NULL;
+UPDATE listens SET title = c.title, artists = c.artists, album = c.album,
+                   duration_ms = COALESCE(listens.duration_ms, CAST(c.duration * 1000 AS INTEGER))
+FROM cached c WHERE c.video_id = listens.video_id AND listens.title IS NULL;
+UPDATE listens SET title = o.title, artists = o.artists, album = o.album,
+                   duration_ms = COALESCE(listens.duration_ms, o.duration_ms)
+FROM (SELECT video_id, MAX(id), title, artists, album, duration_ms FROM listens
+      WHERE video_id IS NOT NULL AND title IS NOT NULL GROUP BY video_id) o
+WHERE o.video_id = listens.video_id AND listens.title IS NULL;
+-- And those with a title but no video id get the library's, when only one
+-- song there has that title and those artists.
+UPDATE listens SET video_id = t.video_id
+FROM (SELECT title, artists, MIN(video_id) AS video_id FROM tracks GROUP BY title, artists HAVING COUNT(*) = 1) t
+WHERE listens.video_id IS NULL AND t.title = listens.title AND t.artists = listens.artists;
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =

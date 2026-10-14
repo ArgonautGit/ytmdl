@@ -5,8 +5,10 @@
 //! instead, and [`Library::import_listens`] moves the lines into the database.
 //! A line is `<started, unix s>\t<track id>\t<ms played>`, then (since
 //! listening insights) `\t<how it ended>\t<position, ms>\t<source>\t<shuffled
-//! 0|1>\t<output>\t<title>\t<artist>\t<album>`; the tags are for a song deleted
-//! before its listen is read, as the library's are copied in otherwise.
+//! 0|1>\t<output>\t<title>\t<artist>\t<album>`, then `\t<video id>`; these
+//! are for a song deleted (or a cached one added to the library, which gives it
+//! a new id) before its listen is read, as the library's are copied in
+//! otherwise.
 //!
 //! Every listen is kept with the time actually played, skips too; one counts as
 //! a play once it reaches 30 seconds, or half of a song shorter than a minute.
@@ -130,7 +132,8 @@ impl Library {
         let mut imported = 0;
         {
             // Negative ids are cached songs (see cache.rs). The song's tags
-            // are copied from the library, or the log for a song gone from it.
+            // are copied from the library; for a song gone from it, from the
+            // log, else by its video id from the library or an earlier listen.
             let mut insert = tx.prepare(
                 "WITH song AS (
                      SELECT video_id, title, artists, album, CAST(duration * 1000 AS INTEGER) AS duration_ms
@@ -138,12 +141,23 @@ impl Library {
                      UNION ALL
                      SELECT video_id, title, artists, album, CAST(duration * 1000 AS INTEGER)
                      FROM cached WHERE id = -?1 AND ?1 < 0
+                 ), known AS (
+                     SELECT * FROM (
+                         SELECT 0 AS o, title, artists, album, CAST(duration * 1000 AS INTEGER) AS duration_ms
+                         FROM tracks WHERE video_id = ?12
+                         UNION ALL
+                         SELECT 1, title, artists, album, CAST(duration * 1000 AS INTEGER) FROM cached WHERE video_id = ?12
+                         UNION ALL
+                         SELECT 2, title, artists, album, duration_ms FROM listens
+                         WHERE video_id = ?12 AND title IS NOT NULL
+                     ) ORDER BY o LIMIT 1
                  )
                  INSERT INTO listens (video_id, started_at, ms, ended, position_ms, source, shuffled, output,
                                       title, artists, album, duration_ms)
-                 SELECT song.video_id, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                        COALESCE(song.title, ?9), COALESCE(song.artists, ?10), COALESCE(song.album, ?11), song.duration_ms
-                 FROM (SELECT 1) LEFT JOIN song",
+                 SELECT COALESCE(song.video_id, ?12), ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                        COALESCE(song.title, ?9, known.title), COALESCE(song.artists, ?10, known.artists),
+                        COALESCE(song.album, ?11, known.album), COALESCE(song.duration_ms, known.duration_ms)
+                 FROM (SELECT 1) LEFT JOIN song LEFT JOIN known",
             )?;
             for line in text.lines() {
                 let fields: Vec<&str> = line.split('\t').collect();
@@ -171,6 +185,7 @@ impl Library {
                     text(8),
                     artists,
                     text(10),
+                    text(11),
                 ])?;
                 imported += 1;
             }

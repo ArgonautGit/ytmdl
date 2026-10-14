@@ -59,7 +59,9 @@ history: one row per listen, oldest first by id.
   'queue' (queued by hand), 'resumed' (the queue restored after a restart), 'car: playlists' (picked in the
   car, from that list); NULL when not recorded), shuffled (0/1, NULL when not recorded),
   output ('speaker', 'wired', 'bluetooth: <device name>', 'usb', 'car', or NULL when not recorded),
-  video_id (YouTube id), in_library (1 if the song is downloaded now).
+  video_id (YouTube id), in_library (1 if the song is downloaded now). A few early listens have neither
+  title nor video_id (the song was deleted before they were recorded): unknown songs, not one song, so
+  leave them out when looking at songs (WHERE COALESCE(video_id, title) IS NOT NULL).
 library: the downloaded songs: video_id, title, artists (JSON array), album, album_artist, year, duration_s,
   added_local.
 playlist_songs: playlist (name), position, title, artists (JSON array), album, video_id.
@@ -248,14 +250,16 @@ const SUMMARY: &[(&str, &str)] = &[
         "top_songs_90_days",
         "SELECT title, artists, album, SUM(play) AS plays, SUM(ended = 'skipped') AS skipped,
                 MAX(in_library) AS in_library
-         FROM history WHERE started_at >= CAST(strftime('%s', 'now') AS INTEGER) - 90 * 86400
+         FROM history WHERE COALESCE(video_id, title) IS NOT NULL
+           AND started_at >= CAST(strftime('%s', 'now') AS INTEGER) - 90 * 86400
          GROUP BY COALESCE(video_id, title) ORDER BY plays DESC LIMIT 25",
     ),
     (
         "top_songs_all_time",
         "SELECT title, artists, SUM(play) AS plays, MIN(date(started_local)) AS first_played,
                 MAX(date(started_local)) AS last_played
-         FROM history GROUP BY COALESCE(video_id, title) ORDER BY plays DESC LIMIT 25",
+         FROM history WHERE COALESCE(video_id, title) IS NOT NULL
+         GROUP BY COALESCE(video_id, title) ORDER BY plays DESC LIMIT 25",
     ),
     (
         "top_albums_90_days",
@@ -338,7 +342,7 @@ const DETAIL: &[(&str, &str)] = &[
         "most_skipped_songs_90_days",
         "SELECT title, artists, COUNT(*) AS listens, SUM(ended = 'skipped') AS skipped,
                 ROUND(AVG(CASE WHEN ended = 'skipped' THEN position_ms / 1000.0 END)) AS avg_skip_at_s
-         FROM history WHERE ended IS NOT NULL
+         FROM history WHERE ended IS NOT NULL AND COALESCE(video_id, title) IS NOT NULL
            AND started_at >= CAST(strftime('%s', 'now') AS INTEGER) - 90 * 86400
          GROUP BY COALESCE(video_id, title) HAVING skipped >= 2 ORDER BY skipped DESC LIMIT 20",
     ),
@@ -397,7 +401,7 @@ const DETAIL: &[(&str, &str)] = &[
     (
         "songs_on_repeat",
         "SELECT title, artists, date(started_local) AS day, SUM(play) AS plays FROM history
-         GROUP BY COALESCE(video_id, title), day HAVING plays >= 4 ORDER BY plays DESC, day DESC LIMIT 15",
+         WHERE COALESCE(video_id, title) IS NOT NULL GROUP BY COALESCE(video_id, title), day HAVING plays >= 4 ORDER BY plays DESC, day DESC LIMIT 15",
     ),
     (
         "listening_days",

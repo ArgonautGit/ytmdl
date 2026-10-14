@@ -1059,3 +1059,49 @@ fn the_report_kept_as_a_setting_moves_to_the_reports() {
     assert_eq!(lib.reports().unwrap(), [(1, r#"{"made_at": 42, "headline": "h"}"#.to_string())]);
     assert_eq!(lib.setting("insights_report").unwrap(), None);
 }
+
+#[test]
+fn a_listen_of_a_song_gone_before_it_is_read_keeps_its_song() {
+    let tmp = TempDir::new("nameless");
+    let db = tmp.0.join("library.db");
+    let lib = Library::open(&db, &tmp.0.join("art")).unwrap();
+    add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Tune", Some("Record"), &["Band"], Some(1)));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Other", None, &["Solo"], None));
+    let now = now();
+
+    // Played under an id it no longer has, logged with its video id only.
+    let log = tmp.0.join("listens.log");
+    fs::write(&log, format!("{now}\t-7\t60000\tfinished\t60000\tsearch\t0\tspeaker\t\t\t\taaaaaaaaaaa\n")).unwrap();
+    lib.import_listens(&log).unwrap();
+    // And a song deleted before its listen is read, by then only known from
+    // that listen.
+    fs::write(&log, format!("{now}\t{}\t60000\n", b.id)).unwrap();
+    lib.import_listens(&log).unwrap();
+    lib.delete_track(b.id).unwrap();
+    fs::write(&log, format!("{now}\t-8\t60000\tfinished\t60000\tsearch\t0\tspeaker\t\t\t\tbbbbbbbbbbb\n")).unwrap();
+    lib.import_listens(&log).unwrap();
+    let rows = lib.query_history("SELECT video_id, title, artists FROM history ORDER BY id").unwrap();
+    assert_eq!(rows.rows[0], [json!("aaaaaaaaaaa"), json!("Tune"), json!(["Band"])]);
+    assert_eq!(rows.rows[2], [json!("bbbbbbbbbbb"), json!("Other"), json!(["Solo"])]);
+
+    // Listens stored without their song before: the ones it can be told for
+    // get it back, the rest stay out of the songs.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch(&format!(
+        "UPDATE listens SET title = NULL, artists = NULL WHERE id = 3;
+         INSERT INTO listens (video_id, started_at, ms, title, artists) VALUES (NULL, {now}, 60000, 'Tune', '[\"Band\"]');
+         INSERT INTO listens (video_id, started_at, ms) VALUES (NULL, {now}, 60000), (NULL, {now}, 60000);
+         PRAGMA user_version = 15;"
+    ))
+    .unwrap();
+    drop(conn);
+    let lib = Library::open(&db, &tmp.0.join("art")).unwrap();
+    let rows = lib.query_history("SELECT video_id, title FROM history ORDER BY id").unwrap();
+    assert_eq!(rows.rows[2], [json!("bbbbbbbbbbb"), json!("Other")]);
+    assert_eq!(rows.rows[3], [json!("aaaaaaaaaaa"), json!("Tune")]);
+    assert_eq!(rows.rows[4], [json!(null), json!(null)]);
+    let summary = lib.history_summary(true).unwrap();
+    let top = summary["top_songs_all_time"]["rows"].as_array().unwrap();
+    assert_eq!(top.len(), 2);
+    assert!(top.iter().all(|r| r[0].is_string()));
+}
