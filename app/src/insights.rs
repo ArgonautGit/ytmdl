@@ -174,7 +174,13 @@ pub fn api_key(library: &Library) -> Option<String> {
 }
 
 pub fn set_api_key(library: &Library, key: &str) -> ytmdl_library::Result<()> {
-    library.set_setting(KEY, key.trim())
+    library.set_setting(KEY, &clean_key(key))
+}
+
+/// A pasted key without what pasting brings along: spaces and line breaks
+/// from wrapping, invisible characters from rich text.
+pub fn clean_key(key: &str) -> String {
+    key.chars().filter(|c| c.is_ascii_graphic()).collect()
 }
 
 /// "sk-ant-…4f2a".
@@ -319,13 +325,22 @@ impl Claude {
         }
         let answer: Value = serde_json::from_slice(&answer).unwrap_or_default();
         let message = answer["error"]["message"].as_str().unwrap_or("no message");
+        tracing::warn!(target: "ytmdl", "insights: {method} {path} answered {status}: {message}");
         anyhow::bail!(match status {
-            401 => "The API key was refused. Check it in Settings.".to_string(),
+            401 if self.key.starts_with("sk-ant-oat") => {
+                "That is a Claude sign-in token, not an API key. Create an API key at console.anthropic.com (API keys).".to_string()
+            }
+            401 => format!("The API key was refused ({message}). Check it in Settings."),
             403 => format!("The API key may not use this: {message}"),
             429 => format!("Too many requests for now; try again later. ({message})"),
             529 => "Claude is overloaded right now; try again in a while.".to_string(),
             _ => format!("The Claude API answered {status}: {message}"),
         })
+    }
+
+    /// Whether the key works: lists one model, which costs nothing.
+    pub async fn check(&self) -> anyhow::Result<()> {
+        self.request("GET", "/models?limit=1", None, None).await.map(drop)
     }
 
     /// A Messages request. The instructions and tools come first and don't
@@ -936,6 +951,11 @@ mod tests {
         assert_eq!(day_text(now_secs()), "today");
         assert_eq!(day_text(now_secs() - 86_400), "yesterday");
         assert_eq!((count_text(4812), count_text(999), count_text(1_234_567)), ("4,812".into(), "999".into(), "1,234,567".into()));
+    }
+
+    #[test]
+    fn pasted_keys_lose_what_pasting_adds() {
+        assert_eq!(clean_key(" sk-ant-api03-ab\ncd\u{200b}ef \n"), "sk-ant-api03-abcdef");
     }
 
     #[test]

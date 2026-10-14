@@ -87,7 +87,20 @@ impl Ctx {
             return;
         }
         let mut k = self.insights.key;
-        k.set(Some(key.trim().to_string()).filter(|k| !k.is_empty()));
+        k.set(Some(insights::clean_key(&key)).filter(|k| !k.is_empty()));
+        let Some(claude) = self.claude() else { return };
+        let ctx = *self;
+        // The dialog that saved it is gone by now: not its task.
+        dioxus::core::spawn_forever(async move {
+            match claude.check().await {
+                Ok(()) => ctx.notify("The API key works".into()),
+                Err(e) => {
+                    let mut error = ctx.insights.error;
+                    error.set(Some(e.to_string()));
+                    ctx.notify(e.to_string());
+                }
+            }
+        });
     }
 
     fn claude(&self) -> Option<Claude> {
