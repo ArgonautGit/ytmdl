@@ -151,7 +151,8 @@ impl Library {
         }
         fs::copy(&t.path, &to)?;
         let (file_size, file_mtime) = file_stamp(&to)?;
-        self.upsert(&NewTrack {
+        let new = !self.has_video(&t.video_id)?;
+        let track = self.upsert(&NewTrack {
             video_id: t.video_id,
             url: t.url,
             path: to,
@@ -167,6 +168,8 @@ impl Library {
             gain: t.gain,
             file_size,
             file_mtime,
-        })
+        })?;
+        self.join_secondary(&track, new)?;
+        Ok(track)
     }
 }

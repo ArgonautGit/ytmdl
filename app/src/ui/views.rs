@@ -7,7 +7,7 @@ use ytmdl_core::{Channel, Entry, SearchSource, SectionKind, art_url};
 use super::icons::{Icon, Svg};
 use super::sort::SortKey;
 use crate::jobs::{Job, JobState};
-pub use ytmdl_library::Period;
+pub use ytmdl_library::{Period, Role};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tab {
@@ -40,6 +40,92 @@ pub struct SongItem {
     pub playing: bool,
     /// Where the song is in the queue's A-B loop, if it is.
     pub mark: Option<LoopMark>,
+    /// The playlists it is in; None for a song not in the library.
+    pub marks: Option<SongMarks>,
+}
+
+/// Which playlists a library song is in: the two with a role, each marked
+/// whether the song is in it or not, and the others by name.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct SongMarks {
+    /// The track the marks change.
+    pub track: i64,
+    /// None while no playlist has the role.
+    pub secondary: Option<bool>,
+    pub primary: Option<bool>,
+    pub others: Vec<String>,
+}
+
+/// Tapping a song's mark: puts track `.0` in the playlist with the role, or
+/// takes it out. Given as context, so every song list has it.
+#[derive(Clone, Copy)]
+pub struct OnMark(pub EventHandler<(i64, Role)>);
+
+/// A song's buttons for the two playlists with a role: the secondary's flame
+/// and the primary's star, lit when the song is in it.
+#[component]
+fn MarkButtons(marks: SongMarks) -> Element {
+    let onmark = try_use_context::<OnMark>();
+    let track = marks.track;
+    let buttons = [(Role::Secondary, marks.secondary), (Role::Primary, marks.primary)];
+    rsx! {
+        for (role , on) in buttons {
+            if let Some(on) = on {
+                button {
+                    key: "{role:?}",
+                    class: mark_class(role, on),
+                    "aria-label": mark_label(role, on),
+                    "aria-pressed": "{on}",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        if let Some(OnMark(onmark)) = onmark {
+                            onmark.call((track, role));
+                        }
+                    },
+                    Svg { icon: mark_icon(role, on), size: 22 }
+                }
+            }
+        }
+    }
+}
+
+fn mark_class(role: Role, on: bool) -> &'static str {
+    match (role, on) {
+        (Role::Secondary, false) => "icon-btn mark of-secondary",
+        (Role::Secondary, true) => "icon-btn mark of-secondary on",
+        (Role::Primary, false) => "icon-btn mark of-primary",
+        (Role::Primary, true) => "icon-btn mark of-primary on",
+    }
+}
+
+fn mark_label(role: Role, on: bool) -> &'static str {
+    match (role, on) {
+        (Role::Secondary, false) => "Add to the secondary playlist",
+        (Role::Secondary, true) => "Take off the secondary playlist",
+        (Role::Primary, false) => "Add to the primary playlist",
+        (Role::Primary, true) => "Take off the primary playlist",
+    }
+}
+
+pub fn mark_icon(role: Role, on: bool) -> Icon {
+    match (role, on) {
+        (Role::Secondary, false) => Icon::Flame,
+        (Role::Secondary, true) => Icon::FlameFilled,
+        (Role::Primary, false) => Icon::Star,
+        (Role::Primary, true) => Icon::StarFilled,
+    }
+}
+
+/// Small tags naming playlists.
+#[component]
+fn PlaylistTags(names: Vec<String>) -> Element {
+    rsx! {
+        div { class: "tags",
+            for (i , name) in names.into_iter().enumerate() {
+                span { key: "{i}", class: "tag", "{name}" }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -73,6 +159,7 @@ pub struct PlaylistItem {
     pub art: Option<String>,
     /// Follows a YouTube playlist.
     pub synced: bool,
+    pub role: Option<Role>,
 }
 
 /// A synced playlist's state, under its title.
@@ -95,11 +182,13 @@ pub struct MenuItem {
     pub danger: bool,
     /// The current choice (a check mark).
     pub checked: bool,
+    /// Colours the icon as a role's mark.
+    pub role: Option<Role>,
 }
 
 impl MenuItem {
     pub fn new(icon: Icon, label: impl Into<String>) -> Self {
-        MenuItem { icon: Some(icon), label: label.into(), sub: None, danger: false, checked: false }
+        MenuItem { icon: Some(icon), label: label.into(), sub: None, danger: false, checked: false, role: None }
     }
 
     /// A choice in a list, checked when it is the current one.
@@ -171,6 +260,8 @@ pub struct NowItem {
     pub art: Option<String>,
     /// Large cover URL (now playing).
     pub art_large: Option<String>,
+    /// The playlists it is in; None for a song not in the library.
+    pub marks: Option<SongMarks>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -1161,9 +1252,26 @@ fn PlaylistRow(playlist: PlaylistItem, onopen: EventHandler<()>, onmore: EventHa
     let kind = if playlist.synced { "Synced" } else { "Playlist" };
     rsx! {
         li { class: "row tappable song", onclick: move |_| onopen.call(()),
-            Cover { url: playlist.art.clone(), icon: Icon::Playlist }
+            match playlist.role {
+                Some(role) => rsx! {
+                    div { class: "cover-wrap",
+                        Cover { url: playlist.art.clone(), icon: Icon::Playlist }
+                        span { class: if role == Role::Primary { "cover-badge of-primary" } else { "cover-badge of-secondary" },
+                            Svg { icon: mark_icon(role, true), size: 14 }
+                        }
+                    }
+                },
+                None => rsx! { Cover { url: playlist.art.clone(), icon: Icon::Playlist } },
+            }
             div { class: "meta",
-                div { class: "title", "{playlist.name}" }
+                div { class: "title-line",
+                    span { class: "title", "{playlist.name}" }
+                    match playlist.role {
+                        Some(Role::Primary) => rsx! { span { class: "role of-primary", "Primary" } },
+                        Some(Role::Secondary) => rsx! { span { class: "role of-secondary", "Secondary" } },
+                        None => rsx! {},
+                    }
+                }
                 div { class: "sub",
                     if playlist.synced {
                         Svg { icon: Icon::Sync, size: 13 }
@@ -1293,9 +1401,15 @@ fn SongItemRow(
             div { class: "meta",
                 div { class: "title", "{song.title}" }
                 div { class: "sub", "{sub}" }
+                if let Some(marks) = song.marks.as_ref().filter(|m| !m.others.is_empty()) {
+                    PlaylistTags { names: marks.others.clone() }
+                }
             }
             if let Some(badge) = badge {
                 span { class: "loop-badge", "{badge}" }
+            }
+            if let Some(marks) = song.marks.clone() {
+                MarkButtons { marks }
             }
             if let Some(onmore) = onmore {
                 MoreButton { onmore }
@@ -1852,6 +1966,9 @@ pub fn MiniPlayer(
                 div { class: "title", "{now.title}" }
                 div { class: "sub", "{now.artists}" }
             }
+            if let Some(marks) = now.marks.clone() {
+                MarkButtons { marks }
+            }
             button {
                 class: "icon-btn",
                 "aria-label": if playing { "Pause" } else { "Play" },
@@ -2019,8 +2136,18 @@ pub fn NowPlayingPage(
                 None => rsx! { Cover { url: now.art_large.clone(), class: "cover now-cover" } },
             }
             div { class: "now-meta",
-                h1 { "{now.title}" }
-                div { class: "sub", "{sub}" }
+                div { class: "now-title-row",
+                    div { class: "now-titles",
+                        h1 { "{now.title}" }
+                        div { class: "sub", "{sub}" }
+                    }
+                    if let Some(marks) = now.marks.clone() {
+                        div { class: "now-marks", MarkButtons { marks } }
+                    }
+                }
+                if let Some(marks) = now.marks.as_ref().filter(|m| !m.others.is_empty()) {
+                    PlaylistTags { names: marks.others.clone() }
+                }
                 if cached {
                     button { class: "secondary small keep", onclick: move |_| onkeep.call(()),
                         Svg { icon: Icon::Download, size: 18 }
@@ -2243,7 +2370,12 @@ pub fn MenuSheet(head: Option<MenuHead>, items: Vec<MenuItem>, onpick: EventHand
                 for (i , item) in items.into_iter().enumerate() {
                     button {
                         key: "{i}",
-                        class: if item.danger { "menu-item danger" } else { "menu-item" },
+                        class: match (item.danger, item.role) {
+                            (true, _) => "menu-item danger",
+                            (false, Some(Role::Primary)) => "menu-item of-primary",
+                            (false, Some(Role::Secondary)) => "menu-item of-secondary",
+                            (false, None) => "menu-item",
+                        },
                         role: if item.icon.is_some() { "menuitem" } else { "menuitemradio" },
                         "aria-checked": if item.icon.is_none() { Some(item.checked.to_string()) } else { None },
                         onclick: move |_| onpick.call(i),
@@ -2878,9 +3010,64 @@ pub fn SettingsPage(
     cache_used: Option<u64>,
     cache_limit_mb: u64,
     oncache: EventHandler<()>,
+    /// The names of the playlists with a role.
+    #[props(default)]
+    primary: Option<String>,
+    #[props(default)]
+    secondary: Option<String>,
+    /// New songs join the secondary playlist.
+    new_to_secondary: bool,
+    /// Picks the playlist for a role.
+    onrole: EventHandler<Role>,
+    ontogglenew: EventHandler<()>,
 ) -> Element {
+    let new_note = match &secondary {
+        Some(name) => format!("New songs you download land in {name}, not ones that come with a synced playlist"),
+        None => "Once there is a secondary playlist".to_string(),
+    };
     rsx! {
         header { class: "topbar plain", h1 { "Settings" } }
+        section { class: "group",
+            h2 { "Playlists" }
+            div { class: "card",
+                div { class: "item tappable", role: "button", onclick: move |_| onrole.call(Role::Secondary),
+                    span { class: "role-icon of-secondary", Svg { icon: Icon::FlameFilled } }
+                    div { class: "meta",
+                        div { class: "title", "Secondary playlist" }
+                        div { class: "sub",
+                            {dotted([Some(secondary.clone().unwrap_or_else(|| "None".into())), Some("your current favourites".into())])}
+                        }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                }
+                div { class: "item tappable divided", role: "button", onclick: move |_| onrole.call(Role::Primary),
+                    span { class: "role-icon of-primary", Svg { icon: Icon::StarFilled } }
+                    div { class: "meta",
+                        div { class: "title", "Primary playlist" }
+                        div { class: "sub",
+                            {dotted([Some(primary.clone().unwrap_or_else(|| "None".into())), Some("songs worth keeping".into())])}
+                        }
+                    }
+                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                }
+                div { class: "item divided",
+                    Svg { icon: Icon::Download }
+                    div { class: "meta",
+                        div { class: "title", "Downloads go to secondary" }
+                        div { class: "sub", "{new_note}" }
+                    }
+                    button {
+                        class: if new_to_secondary { "switch on" } else { "switch" },
+                        role: "switch",
+                        "aria-checked": "{new_to_secondary}",
+                        "aria-label": "Downloads go to secondary",
+                        onclick: move |_| ontogglenew.call(()),
+                        span { class: "knob" }
+                    }
+                }
+            }
+            p { class: "hint", "Every song shows a flame and a star: tap them to put it on or take it off either playlist. They are separate, so a song can be in either, both or neither." }
+        }
         section { class: "group",
             h2 { "Storage" }
             div { class: "card",

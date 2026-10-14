@@ -462,6 +462,67 @@ button.icon-btn:active { background: var(--press); }
 }
 .row .more { margin: -8px -12px -8px -8px; color: var(--muted); }
 
+/* The two playlists with a role: the secondary's flame (current favourites)
+   and the primary's star (songs worth keeping), lit when a song is in it. */
+:root { --primary: #f5c518; --secondary: #ff7a45; }
+.mark { width: 40px; color: var(--dim); }
+.row .mark { margin: -8px -14px -8px -8px; }
+.row .mark + .mark { margin-left: -4px; }
+.mark.of-primary.on { color: var(--primary); }
+.mark.of-secondary.on { color: var(--secondary); }
+.mini .mark { width: 40px; margin-right: -8px; }
+.tags { display: flex; gap: 4px; margin-top: 4px; overflow: hidden; }
+.tag {
+    flex: none;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 18px;
+    white-space: nowrap;
+}
+.title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.title-line .title { min-width: 0; }
+.role {
+    flex: none;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+}
+.role.of-primary { background: var(--primary); color: #000; }
+.role.of-secondary { background: var(--secondary); color: #000; }
+.cover-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--bg);
+    border-radius: 50%;
+    color: #000;
+}
+.cover-badge.of-primary { background: var(--primary); }
+.cover-badge.of-secondary { background: var(--secondary); }
+.role-icon { display: grid; }
+.menu-item.of-primary > .icon { color: var(--primary); }
+.menu-item.of-secondary > .icon { color: var(--secondary); }
+.role-icon.of-primary { color: var(--primary); }
+.role-icon.of-secondary { color: var(--secondary); }
+.now-title-row { display: flex; align-items: flex-start; gap: 4px; }
+.now-titles { flex: 1; min-width: 0; }
+.now-marks { display: flex; margin: -6px -10px 0 0; }
+.now-marks .mark { width: 44px; height: 44px; }
+.now-meta .tags { margin-top: 10px; }
+.now-meta .tag { height: 22px; padding: 0 9px; font-size: 12px; line-height: 22px; }
+
 /* Swiping a song row (assets/swipe.js): the row's content, and an opaque
    sheet under it, slide by --swipe over the action's colour and name. The
    colour shows once letting go would act. */

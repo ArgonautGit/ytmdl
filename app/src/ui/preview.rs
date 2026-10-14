@@ -217,22 +217,47 @@ fn song_items() -> Vec<SongItem> {
             art: e.thumbnail.clone(),
             playing: i == 1,
             mark: None,
+            marks: Some(sample_marks(i)),
         })
         .collect()
 }
 
+/// A mix of songs in the secondary playlist, the primary, both, neither, and
+/// other playlists.
+fn sample_marks(i: usize) -> SongMarks {
+    let others: &[&str] = match i % 5 {
+        0 => &["Focus"],
+        2 => &["Comedy gold"],
+        4 => &["Focus", "Morning run"],
+        _ => &[],
+    };
+    SongMarks {
+        track: i as i64,
+        secondary: Some(matches!(i % 4, 0 | 2 | 3)),
+        primary: Some(matches!(i % 4, 0 | 1)),
+        others: others.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
 fn playlist_items() -> Vec<PlaylistItem> {
     let songs = &sample().songs;
-    [("Morning run", 18, 3900.0), ("Focus", 42, 9800.0), ("Comedy gold", 7, 1100.0)]
-        .iter()
-        .enumerate()
-        .map(|(i, (name, tracks, secs))| PlaylistItem {
-            name: name.to_string(),
-            tracks: *tracks,
-            duration_secs: *secs,
-            art: songs[(i + 2) % songs.len()].thumbnail.clone(),
-            synced: i == 0,
-        })
+    [
+        ("On repeat", 23, 5200.0, Some(Role::Secondary)),
+        ("Keepers", 41, 9100.0, Some(Role::Primary)),
+        ("Morning run", 18, 3900.0, None),
+        ("Focus", 42, 9800.0, None),
+        ("Comedy gold", 7, 1100.0, None),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, (name, tracks, secs, role))| PlaylistItem {
+        name: name.to_string(),
+        tracks: *tracks,
+        duration_secs: *secs,
+        art: songs[(i + 2) % songs.len()].thumbnail.clone(),
+        synced: i == 2,
+        role: *role,
+    })
         .collect()
 }
 
@@ -531,6 +556,7 @@ fn now_item() -> NowItem {
         album: e.album.clone(),
         art: e.thumbnail.clone(),
         art_large: e.thumbnail.as_deref().map(|u| ytmdl_core::art_url(u, 544)),
+        marks: Some(SongMarks { track: 1, secondary: Some(true), primary: Some(false), others: vec!["Comedy gold".into()] }),
     }
 }
 
@@ -1271,6 +1297,11 @@ fn settings() -> Element {
                 cache_used: Some(38_400_000),
                 cache_limit_mb: 100,
                 oncache: |_| {},
+                primary: Some("Keepers".to_string()),
+                secondary: Some("On repeat".to_string()),
+                new_to_secondary: true,
+                onrole: |_| {},
+                ontogglenew: |_| {},
             }
         },
     )

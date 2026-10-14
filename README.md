@@ -48,7 +48,12 @@ new APK.
   there are downloaded, removed ones leave the playlist (the files stay), and
   the order follows. They can still be edited here: songs added to one stay,
   and songs taken out of one stay out, with nothing sent back to YouTube. They sync when the app starts or returns to the screen
-  (at most every 30 minutes) and from the playlist's menu. yt-dlp is checked
+  (at most every 30 minutes) and from the playlist's menu. Two playlists can
+  have a role, picked in Settings: the secondary holds current favourites,
+  and new downloads land in it; the primary holds the songs worth keeping.
+  Every song shows a flame for the one and a star for the other, lit when it
+  is in it and tapped to put it in or take it out, and tags naming its other
+  playlists. yt-dlp is checked
   for updates once a day (a switch in Settings turns that off); a new build
   loads on the next start. Settings also has the open-source licenses: ytmdl's
   own and those of everything bundled with it. Songs play at an even

@@ -15,6 +15,7 @@ mod listens;
 mod playlists;
 mod progress;
 mod retitle;
+mod roles;
 mod scan;
 mod sections;
 
@@ -38,6 +39,7 @@ pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTra
 pub use playlists::{Playlist, PlaylistEntry};
 pub use progress::{Progress, Rng};
 pub use retitle::Retitle;
+pub use roles::{Role, Roles};
 pub use scan::ScanReport;
 pub use sections::Section;
 
@@ -328,7 +330,10 @@ impl Library {
     /// Records a finished download. Blocking: reads the file's cover art and
     /// writes resized copies, so call it off the UI thread.
     pub fn add_download(&self, done: &Downloaded) -> Result<Track> {
-        self.upsert(&self.downloaded(done)?)
+        let new = !self.has_video(&done.meta.id)?;
+        let track = self.upsert(&self.downloaded(done)?)?;
+        self.join_secondary(&track, new)?;
+        Ok(track)
     }
 
     /// What to store for a finished download.

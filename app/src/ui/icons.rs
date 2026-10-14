@@ -66,7 +66,16 @@ pub enum Icon {
     CheckCircle,
     /// Not picked.
     Circle,
+    /// The primary playlist (songs worth keeping); `StarFilled` when in it.
+    Star,
+    StarFilled,
+    /// The secondary playlist (current favourites); `FlameFilled` when in it.
+    Flame,
+    FlameFilled,
 }
+
+const STAR: &str = "M12 2.8l2.85 5.78 6.37.93-4.61 4.49 1.09 6.35L12 17.35l-5.7 3 1.09-6.35-4.61-4.49 6.37-.93z";
+const FLAME: &str = "M12 2c1 3.5 5 6 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.5C10 9.5 10.5 11 11.5 11.5 11 8 11 4.5 12 2z";
 
 #[component]
 pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
@@ -235,6 +244,18 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         },
         Icon::Circle => rsx! {
             circle { cx: "12", cy: "12", r: "9.5" }
+        },
+        Icon::Star => rsx! {
+            path { d: STAR }
+        },
+        Icon::StarFilled => rsx! {
+            path { d: STAR, fill: "currentColor" }
+        },
+        Icon::Flame => rsx! {
+            path { d: FLAME }
+        },
+        Icon::FlameFilled => rsx! {
+            path { d: FLAME, fill: "currentColor" }
         },
     };
     rsx! {

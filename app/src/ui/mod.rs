@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 use ytmdl_core::titles::song_key;
 use ytmdl_core::{Channel, CollectionKind, Entry, RADIO_SONGS, RadioSeed, Resolved, SearchSource};
-use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, PlayCounts, Playlist, PlaylistEntry, Section, Track};
+use ytmdl_library::{ART_LARGE, ART_SMALL, Album, Artist, Library, PlayCounts, Playlist, PlaylistEntry, Role, Roles, Section, Track};
 
 use crate::jobs::{Job, JobState, Queue, Services, entry_from_track};
 use crate::library::LibraryHandle;
@@ -86,12 +86,103 @@ struct Ctx {
     lyrics_lookup: Signal<bool>,
     /// Songs played without downloading them.
     stream: Stream,
+    /// Which playlists each song is in, for its marks.
+    membership: Memo<Membership>,
+    /// New songs join the secondary playlist.
+    new_to_secondary: Signal<bool>,
+}
+
+/// The playlists with a role, and which playlists each song is in.
+#[derive(Clone, PartialEq, Default)]
+struct Membership {
+    roles: Roles,
+    names: HashMap<i64, String>,
+    of: HashMap<i64, Vec<i64>>,
+    /// Library track ids by video, for songs played from the cache.
+    tracks: HashMap<String, i64>,
+}
+
+impl Membership {
+    fn load(library: &Library) -> Self {
+        let names = library.playlists().unwrap_or_default().into_iter().map(|p| (p.id, p.name)).collect();
+        let tracks = library.tracks().unwrap_or_default().into_iter().map(|t| (t.video_id, t.id)).collect();
+        Membership { roles: library.roles().unwrap_or_default(), names, of: library.memberships().unwrap_or_default(), tracks }
+    }
+
+    fn name(&self, role: Role) -> Option<String> {
+        self.roles.get(role).and_then(|id| self.names.get(&id).cloned())
+    }
+
+    fn contains(&self, track: i64, playlist: i64) -> bool {
+        self.of.get(&track).is_some_and(|l| l.contains(&playlist))
+    }
+
+    /// A song's marks; a cached one has the library's song's, if it has one.
+    fn marks_of(&self, t: &Track) -> Option<SongMarks> {
+        let id = if t.id < 0 { *self.tracks.get(&t.video_id)? } else { t.id };
+        self.marks(id)
+    }
+
+    /// A library song's marks; None for a cached one.
+    fn marks(&self, track: i64) -> Option<SongMarks> {
+        if track < 0 {
+            return None;
+        }
+        let ids = self.of.get(&track).map(Vec::as_slice).unwrap_or_default();
+        let others = ids.iter().filter(|id| self.roles.of(**id).is_none()).filter_map(|id| self.names.get(id).cloned()).collect();
+        Some(SongMarks {
+            track,
+            secondary: self.roles.secondary.map(|p| ids.contains(&p)),
+            primary: self.roles.primary.map(|p| ids.contains(&p)),
+            others,
+        })
+    }
 }
 
 /// The Settings switch for even loudness ("0" is off).
 const NORMALIZE: &str = "normalize";
 
 impl Ctx {
+    /// Puts the song in the playlist with the role, or takes it out.
+    fn toggle_mark(&self, track: i64, role: Role) {
+        let (id, name, inside) = {
+            let m = self.membership.peek();
+            let Some(id) = m.roles.get(role) else { return };
+            (id, m.names.get(&id).cloned().unwrap_or_default(), m.contains(track, id))
+        };
+        let library = self.library.get();
+        let title = library.track(track).ok().flatten().map(|t| t.title).unwrap_or_default();
+        let result = if inside {
+            library.remove_track_from_playlist(id, track).map(|()| format!("“{title}” taken off {name}"))
+        } else {
+            library.add_to_playlist(id, &[track]).map(|_| format!("“{title}” added to {name}"))
+        };
+        match result {
+            Ok(message) => {
+                tracing::info!(target: "ytmdl", "{message}");
+                self.library.changed();
+                self.notify(message);
+            }
+            Err(e) => self.notify(format!("Couldn't change {name}: {e}")),
+        }
+    }
+
+    fn set_role(&self, role: Role, id: Option<i64>) {
+        match self.library.get().set_role(role, id) {
+            Ok(()) => self.library.changed(),
+            Err(e) => self.notify(format!("Couldn't save the setting: {e}")),
+        }
+    }
+
+    fn set_new_to_secondary(&self, on: bool) {
+        if let Err(e) = self.library.get().set_new_to_secondary(on) {
+            self.notify(format!("Couldn't save the setting: {e}"));
+            return;
+        }
+        let mut new_to_secondary = self.new_to_secondary;
+        new_to_secondary.set(on);
+    }
+
     fn set_normalize(&self, on: bool) {
         if let Err(e) = self.library.get().set_setting(NORMALIZE, if on { "1" } else { "0" }) {
             self.notify(format!("Couldn't save the setting: {e}"));
@@ -385,8 +476,11 @@ enum Sheet {
     Entry(Box<Entry>),
     /// Picks a playlist for the songs.
     AddTo(Songs),
-    /// Names a new playlist (holding `songs`), or renames playlist `id`.
-    Name { id: Option<i64>, name: String, songs: Songs },
+    /// Names a new playlist (holding `songs`, and given `role`), or renames
+    /// playlist `id`.
+    Name { id: Option<i64>, name: String, songs: Songs, role: Option<Role> },
+    /// Picks the playlist with the role.
+    Role(Role),
     /// `leave`: the page the songs were on goes too (a whole album).
     DeleteSongs { ids: Vec<i64>, what: String, leave: bool },
     DeletePlaylist { id: i64, name: String, open: bool },
@@ -559,8 +653,11 @@ fn art_src(key: Option<&str>, size: u32) -> Option<String> {
     key.map(|k| format!("/art/{}", Library::art_name(k, size)))
 }
 
+/// A song's row. Its marks come from the app's context, which the calling
+/// component then follows.
 fn song_item(t: &Track, playing: bool) -> SongItem {
     SongItem {
+        marks: try_consume_context::<Ctx>().and_then(|ctx| ctx.membership.read().marks_of(t)),
         key: t.id.to_string(),
         title: t.title.clone(),
         artists: t.artists.join(", "),
@@ -574,6 +671,7 @@ fn song_item(t: &Track, playing: bool) -> SongItem {
 
 fn playlist_item(p: &Playlist) -> PlaylistItem {
     PlaylistItem {
+        role: try_consume_context::<Ctx>().and_then(|ctx| ctx.membership.read().roles.of(p.id)),
         name: p.name.clone(),
         tracks: p.tracks,
         duration_secs: p.duration_secs,
@@ -649,6 +747,11 @@ fn Shell(setup: Setup) -> Element {
     let lyrics_open = use_signal(|| false);
     let lyrics_lookup = use_signal(|| lyrics::lookup_enabled(&setup.library));
     let stream = use_hook(|| Stream::new(setup.dirs.cache.join("songs"), &setup.library));
+    let membership = use_memo(move || {
+        library.subscribe();
+        Membership::load(&library.get())
+    });
+    let new_to_secondary = use_signal(|| setup.library.new_to_secondary().unwrap_or(true));
     let ctx = use_context_provider(|| Ctx {
         boot,
         queue,
@@ -669,7 +772,10 @@ fn Shell(setup: Setup) -> Element {
         lyrics_open,
         lyrics_lookup,
         stream,
+        membership,
+        new_to_secondary,
     });
+    use_context_provider(|| OnMark(EventHandler::new(move |(track, role)| ctx.toggle_mark(track, role))));
 
     let dirs = setup.dirs.clone();
     use_hook(move || spawn(crate::start(boot, dirs, queue)));
@@ -924,6 +1030,7 @@ fn Overlays() -> Element {
 
 fn now_item(t: &Track) -> NowItem {
     NowItem {
+        marks: try_consume_context::<Ctx>().and_then(|ctx| ctx.membership.read().marks_of(t)),
         title: t.title.clone(),
         artists: t.artists.join(", "),
         album: t.album.clone(),
@@ -941,7 +1048,14 @@ fn MiniPlayerBar() -> Element {
     let progress = if duration > 0.0 { player.position_secs() / duration } else { 0.0 };
     rsx! {
         MiniPlayer {
-            now: now_item(&track),
+            // Room for the star only.
+            now: {
+                let mut now = now_item(&track);
+                if let Some(marks) = now.marks.as_mut() {
+                    marks.secondary = None;
+                }
+                now
+            },
             progress,
             playing: player.snapshot().wants_play(),
             ontoggle: move |_| player.toggle(),
@@ -1061,6 +1175,7 @@ fn NowPlayingScreen() -> Element {
             art: e.thumbnail.clone(),
             playing: false,
             mark: None,
+            marks: None,
         })
         .collect();
     let secs = |ms: i64| ms as f64 / 1000.0;
@@ -1269,8 +1384,17 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
         use_memo(move || sort::albums(&all_albums.read(), sorts.read().get(LibraryView::Albums), &plays.read(), &q()));
     let artists =
         use_memo(move || sort::artists(&all_artists.read(), sorts.read().get(LibraryView::Artists), &plays.read(), &q()));
-    let playlists =
-        use_memo(move || sort::playlists(&all_playlists.read(), sorts.read().get(LibraryView::Playlists), &q()));
+    let playlists = use_memo(move || {
+        let mut list = sort::playlists(&all_playlists.read(), sorts.read().get(LibraryView::Playlists), &q());
+        // The two with a role first: the secondary, then the primary.
+        let roles = ctx.membership.read().roles;
+        list.sort_by_key(|p| match roles.of(p.id) {
+            Some(Role::Secondary) => 0,
+            Some(Role::Primary) => 1,
+            None => 2,
+        });
+        list
+    });
     let current = ctx.player.current_id();
     let songs = songs_shown.read().iter().map(|t| song_item(t, current == Some(t.id))).collect();
     rsx! {
@@ -1317,7 +1441,7 @@ fn LibraryScreen(onsearch: EventHandler<()>) -> Element {
                 }
             },
             onnewplaylist: move |_| {
-                ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: Songs::default() }))
+                ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: Songs::default(), role: None }))
             },
             onsearch,
             onfind: move |_| query.set(Some(String::new())),
@@ -1391,6 +1515,10 @@ fn PlaylistScreen(id: i64) -> Element {
         .map(|e| {
             let mut item = song_item(&e.track, current == Some(e.track.id));
             item.key = e.entry_id.to_string();
+            // Every song here is in this one.
+            if let Some(marks) = item.marks.as_mut() {
+                marks.others.retain(|n| *n != p.name);
+            }
             item
         })
         .collect();
@@ -1509,7 +1637,8 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::Playlist { id, open } => rsx! { PlaylistMenu { id, open } },
         Sheet::Entry(entry) => rsx! { EntryMenu { entry: *entry } },
         Sheet::AddTo(songs) => rsx! { AddToPlaylist { songs } },
-        Sheet::Name { id, name, songs } => rsx! { NameDialog { id, name, songs } },
+        Sheet::Name { id, name, songs, role } => rsx! { NameDialog { id, name, songs, role } },
+        Sheet::Role(role) => rsx! { RoleMenu { role } },
         Sheet::DeleteSongs { ids, what, leave } => rsx! { DeleteSongsDialog { ids, what, leave } },
         Sheet::DeletePlaylist { id, name, open } => rsx! { DeletePlaylistDialog { id, name, open } },
         Sheet::Sort(view) => rsx! { SortMenu { view } },
@@ -1799,6 +1928,8 @@ enum SongAction {
     Delete,
     /// A cached song into the library.
     Keep,
+    /// Into the playlist with the role, or out of it.
+    Mark(Role),
 }
 
 #[component]
@@ -1807,6 +1938,28 @@ fn SongMenu(track: Track, from: From) -> Element {
     // A cached song since added to the library: the library's.
     let track = if track.id < 0 { ctx.library.get().track_by_video(&track.video_id).ok().flatten().unwrap_or(track) } else { track };
     let mut items = Vec::new();
+    // The two playlists with a role first: the menu says what a tap on the
+    // song's flame or star would do.
+    if track.id > 0 {
+        let m = ctx.membership.read();
+        let marks = m.marks(track.id).unwrap_or_default();
+        for (role, on) in [(Role::Secondary, marks.secondary), (Role::Primary, marks.primary)] {
+            let (Some(on), Some(name)) = (on, m.name(role)) else { continue };
+            // Keeping a favourite doesn't take it off the secondary, and taking
+            // a kept song off the secondary doesn't take it off the primary.
+            let other = match role {
+                Role::Primary if !on && marks.secondary == Some(true) => m.name(Role::Secondary),
+                Role::Secondary if on && marks.primary == Some(true) => m.name(Role::Primary),
+                _ => None,
+            };
+            let item = MenuItem {
+                sub: other.map(|o| format!("Stays in {o}")),
+                role: Some(role),
+                ..MenuItem::new(mark_icon(role, !on), if on { format!("Take off {name}") } else { format!("Add to {name}") })
+            };
+            items.push((item, SongAction::Mark(role)));
+        }
+    }
     let mut add = |icon, label: &str, action| items.push((MenuItem::new(icon, label), action));
     if !matches!(from, From::Queue(_)) {
         add(Icon::ListStart, "Play next", SongAction::PlayNext);
@@ -1889,6 +2042,10 @@ fn SongMenu(track: Track, from: From) -> Element {
                     SongAction::Keep => {
                         ctx.nav.back();
                         ctx.keep_cached(t, None);
+                    }
+                    SongAction::Mark(role) => {
+                        ctx.nav.back();
+                        ctx.toggle_mark(t.id, role);
                     }
                 }
             },
@@ -2070,7 +2227,7 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
                     ctx.sync_playlist(id, true);
                 }
                 Some(PlaylistAction::Rename) => {
-                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), songs: Songs::default() }))
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: Some(id), name: playlist.name.clone(), songs: Songs::default(), role: None }))
                 }
                 Some(PlaylistAction::StopSyncing) => {
                     ctx.nav.back();
@@ -2088,6 +2245,46 @@ fn PlaylistMenu(id: i64, open: bool) -> Element {
                     ctx.nav.replace(Overlay::Sheet(Sheet::DeletePlaylist { id, name: playlist.name.clone(), open }))
                 }
                 None => {}
+            },
+        }
+    }
+}
+
+/// Picks the playlist with the role: one of the playlists, a new one, or none.
+#[component]
+fn RoleMenu(role: Role) -> Element {
+    let ctx = use_context::<Ctx>();
+    let current = ctx.membership.peek().roles.get(role);
+    let playlists: Vec<Playlist> = ctx.library.get().playlists().unwrap_or_default();
+    let (title, sub) = match role {
+        Role::Secondary => ("Secondary playlist", "Your current favourites, where new songs land"),
+        Role::Primary => ("Primary playlist", "The songs worth keeping"),
+    };
+    let items = [MenuItem::new(Icon::Plus, "New playlist"), MenuItem::choice("None", current.is_none())]
+        .into_iter()
+        .chain(playlists.iter().map(|p| MenuItem {
+            sub: Some(plural(p.tracks as usize, "song", "songs")),
+            ..MenuItem::choice(p.name.clone(), current == Some(p.id))
+        }))
+        .collect();
+    rsx! {
+        MenuSheet {
+            head: MenuHead { title: title.into(), sub: sub.into(), art: None, icon: mark_icon(role, true) },
+            items,
+            onclose: move |_| ctx.nav.back(),
+            onpick: move |i: usize| match i {
+                0 => ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: Songs::default(), role: Some(role) })),
+                1 => {
+                    ctx.nav.back();
+                    ctx.set_role(role, None);
+                }
+                i => {
+                    ctx.nav.back();
+                    if let Some(p) = playlists.get(i - 2) {
+                        tracing::info!(target: "ytmdl", "{p_name} is the {role:?} playlist", p_name = p.name);
+                        ctx.set_role(role, Some(p.id));
+                    }
+                }
             },
         }
     }
@@ -2115,7 +2312,7 @@ fn AddToPlaylist(songs: Songs) -> Element {
             onclose: move |_| ctx.nav.back(),
             onpick: move |i: usize| {
                 let Some(p) = i.checked_sub(1).and_then(|i| playlists.get(i)) else {
-                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: songs.clone() }));
+                    ctx.nav.replace(Overlay::Sheet(Sheet::Name { id: None, name: String::new(), songs: songs.clone(), role: None }));
                     return;
                 };
                 ctx.nav.back();
@@ -2127,7 +2324,7 @@ fn AddToPlaylist(songs: Songs) -> Element {
 
 /// Names a new playlist, or renames one.
 #[component]
-fn NameDialog(id: Option<i64>, name: String, songs: Songs) -> Element {
+fn NameDialog(id: Option<i64>, name: String, songs: Songs, role: Option<Role>) -> Element {
     let ctx = use_context::<Ctx>();
     let mut value = use_signal(|| name.clone());
     rsx! {
@@ -2144,7 +2341,12 @@ fn NameDialog(id: Option<i64>, name: String, songs: Songs) -> Element {
                 ctx.nav.back();
                 let result = match id {
                     Some(id) => library.rename_playlist(id, &name).map(|_| ctx.library.changed()),
-                    None => library.create_playlist(&name).map(|id| ctx.add_to_playlist(id, &name, &songs, true)),
+                    None => library.create_playlist(&name).map(|id| {
+                        if let Some(role) = role {
+                            ctx.set_role(role, Some(id));
+                        }
+                        ctx.add_to_playlist(id, &name, &songs, true)
+                    }),
                 };
                 if let Err(e) = result {
                     ctx.notify(format!("Couldn't save the playlist: {e}"));
@@ -2556,6 +2758,11 @@ fn SettingsScreen() -> Element {
             cache_used,
             cache_limit_mb: (ctx.stream.limit_mb)(),
             oncache: move |_| ctx.nav.push(Overlay::Sheet(Sheet::Cache)),
+            primary: ctx.membership.read().name(Role::Primary),
+            secondary: ctx.membership.read().name(Role::Secondary),
+            new_to_secondary: (ctx.new_to_secondary)(),
+            onrole: move |role| ctx.nav.push(Overlay::Sheet(Sheet::Role(role))),
+            ontogglenew: move |_| ctx.set_new_to_secondary(!*ctx.new_to_secondary.peek()),
         }
     }
 }

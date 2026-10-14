@@ -317,6 +317,61 @@ fn songs_join_playlists_once_downloaded() {
 }
 
 #[test]
+fn new_songs_join_the_secondary_playlist() {
+    let tmp = TempDir::new("roles");
+    let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
+    let titles = |id| lib.playlist_tracks(id).unwrap().into_iter().map(|e| e.track.title).collect::<Vec<_>>();
+    // No secondary yet: nothing to join.
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "A", None, &["X"], None));
+    let keepers = lib.create_playlist("Keepers").unwrap();
+    let repeat = lib.create_playlist("On repeat").unwrap();
+    lib.set_role(Role::Primary, Some(keepers)).unwrap();
+    lib.set_role(Role::Secondary, Some(repeat)).unwrap();
+    assert_eq!(lib.roles().unwrap(), Roles { primary: Some(keepers), secondary: Some(repeat) });
+    assert_eq!(lib.roles().unwrap().of(repeat), Some(Role::Secondary));
+    assert!(titles(repeat).is_empty());
+
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    assert_eq!(titles(repeat), ["B"]);
+    assert!(titles(keepers).is_empty());
+    // Kept, it stays a favourite; taken off, a download again doesn't bring it back.
+    lib.add_to_playlist(keepers, &[b.id]).unwrap();
+    assert_eq!(lib.memberships().unwrap()[&b.id], [keepers, repeat]);
+    lib.remove_track_from_playlist(repeat, b.id).unwrap();
+    add(&lib, &tmp.0, meta("bbbbbbbbbbb", "B", None, &["X"], None));
+    assert!(titles(repeat).is_empty());
+    assert_eq!(lib.memberships().unwrap()[&b.id], [keepers]);
+    assert!(!lib.memberships().unwrap().contains_key(&a.id));
+
+    // A cached song kept into the library is new to it too.
+    let cache = tmp.0.join("cache");
+    fs::create_dir_all(&cache).unwrap();
+    let path = cache.join("ccccccccccc.m4a");
+    fs::write(&path, b"x").unwrap();
+    let c = lib.add_cached(&Downloaded { path, meta: meta("ccccccccccc", "C", None, &["X"], None), tagged: false }).unwrap();
+    lib.keep_cached(c.id, &tmp.0.join("Music")).unwrap();
+    assert_eq!(titles(repeat), ["C"]);
+
+    // Songs of a synced playlist come with it, not as favourites.
+    let synced = lib.create_synced_playlist("Road trip", "https://music.youtube.com/playlist?list=PL1").unwrap();
+    lib.sync_playlist(synced, &["ddddddddddd".into()]).unwrap();
+    add(&lib, &tmp.0, meta("ddddddddddd", "D", None, &["X"], None));
+    assert_eq!(titles(repeat), ["C"]);
+
+    // Turned off, new songs stay out.
+    lib.set_new_to_secondary(false).unwrap();
+    assert!(!lib.new_to_secondary().unwrap());
+    add(&lib, &tmp.0, meta("eeeeeeeeeee", "E", None, &["X"], None));
+    assert_eq!(titles(repeat), ["C"]);
+
+    // One role per playlist, and a deleted playlist loses its role.
+    lib.set_role(Role::Primary, Some(repeat)).unwrap();
+    assert_eq!(lib.roles().unwrap(), Roles { primary: Some(repeat), secondary: None });
+    lib.delete_playlist(repeat).unwrap();
+    assert_eq!(lib.roles().unwrap(), Roles::default());
+}
+
+#[test]
 fn saves_download_queue() {
     let tmp = TempDir::new("jobs");
     let lib = Library::open_in_memory(&tmp.0.join("art")).unwrap();
