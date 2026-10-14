@@ -90,8 +90,12 @@ new APK.
   settings. A report either runs now, Claude querying the history itself
   through a read-only SQL tool (`crates/library/src/history.rs`), or goes
   through the Batch API at half price, from a fuller summary, and is collected
-  when done. Ask is a chat about the history with the same tool, kept only
-  while its page is open. Requests are prompt-cached, so each turn of a
+  when done. Every report is kept (`crates/library/src/reports.rs`), so the
+  next one says what changed since the last, and follows a habit from report
+  to report; Habits over time charts a few measures month by month (minutes a
+  day, skips, new music, top songs' share, the car, late nights), from the
+  history itself. Ask is a chat about the history with the same tool, kept only
+  while its page is open, that also sees the past reports. Requests are prompt-cached, so each turn of a
   report or chat reads the ones before it from the cache.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and

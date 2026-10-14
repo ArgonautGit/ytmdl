@@ -1006,3 +1006,56 @@ fn keeps_listen_details_for_insights() {
     let mem = Library::open_in_memory(&tmp.0.join("art2")).unwrap();
     assert_eq!(mem.query_history("SELECT COUNT(*) FROM history").unwrap().rows[0][0], json!(0));
 }
+
+#[test]
+fn keeps_reports_and_measures_habits_by_month() {
+    let tmp = TempDir::new("habits");
+    let lib = Library::open(&tmp.0.join("library.db"), &tmp.0.join("art")).unwrap();
+    assert!(lib.habit_months().unwrap().is_empty());
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Tune", None, &["Band"], None));
+    let b = add(&lib, &tmp.0, meta("bbbbbbbbbbb", "Other", None, &["Band"], None));
+    let now = now();
+    let log = tmp.0.join("listens.log");
+    fs::write(
+        &log,
+        format!(
+            "{now}\t{a}\t180000\tfinished\t180000\thome\t0\tcar\tTune\tBand\t\n\
+             {now}\t{a}\t120000\tfinished\t120000\thome\t0\tspeaker\tTune\tBand\t\n\
+             {now}\t{b}\t5000\tskipped\t5000\thome\t0\tspeaker\tOther\tBand\t\n",
+            a = a.id,
+            b = b.id,
+        ),
+    )
+    .unwrap();
+    lib.import_listens(&log).unwrap();
+    let months = lib.habit_months().unwrap();
+    assert_eq!(months.len(), 1);
+    let m = &months[0];
+    assert_eq!(m.plays, 2);
+    assert_eq!((m.skipped, m.new, m.top_songs, m.car), (Some(1.0 / 3.0), None, Some(1.0), Some(0.5)));
+    assert!((m.minutes_a_day - 305_000.0 / 60_000.0).abs() < 1e-9, "{}", m.minutes_a_day);
+
+    let first = lib.add_report(100, r#"{"headline": "old", "observations": [{"title": "t", "thread": "x"}]}"#).unwrap();
+    let second = lib.add_report(200, r#"{"headline": "new"}"#).unwrap();
+    let ids: Vec<i64> = lib.reports().unwrap().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(ids, [second, first]);
+    let rows = lib.query_history("SELECT headline, observations FROM reports ORDER BY id").unwrap();
+    assert_eq!(rows.rows[0], [json!("old"), json!([{ "title": "t", "thread": "x" }])]);
+}
+
+#[test]
+fn the_report_kept_as_a_setting_moves_to_the_reports() {
+    let tmp = TempDir::new("report-setting");
+    let db = tmp.0.join("library.db");
+    {
+        let lib = Library::open(&db, &tmp.0.join("art")).unwrap();
+        lib.set_setting("insights_report", r#"{"made_at": 42, "headline": "h"}"#).unwrap();
+    }
+    // As a library from before the reports table: the migration runs again.
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch("DROP TABLE insight_reports; PRAGMA user_version = 14;").unwrap();
+    drop(conn);
+    let lib = Library::open(&db, &tmp.0.join("art")).unwrap();
+    assert_eq!(lib.reports().unwrap(), [(1, r#"{"made_at": 42, "headline": "h"}"#.to_string())]);
+    assert_eq!(lib.setting("insights_report").unwrap(), None);
+}

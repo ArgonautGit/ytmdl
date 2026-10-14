@@ -34,7 +34,10 @@ use artist::{OpenArtist, OpenList, RemoteArtistScreen, RemoteListScreen};
 use duplicates::DuplicatesScreen;
 use home::HomeScreen;
 use icons::Icon;
-use insights::{ApiKeyDialog, AskScreen, FrequencyMenu, Insights, InsightsScreen, InsightsSettings, ModelMenu};
+use insights::{
+    ApiKeyDialog, AskScreen, FrequencyMenu, HabitScreen, HabitsScreen, Insights, InsightsScreen, InsightsSettings, ModelMenu,
+    PastReportsScreen, ReportScreen,
+};
 use licenses::{LicenseScreen, LicensesScreen, Notice};
 use lyrics::LyricsCache;
 pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
@@ -465,6 +468,13 @@ enum Overlay {
     License(Notice),
     /// Claude's read on the listening history.
     Insights,
+    /// An earlier report, by id.
+    InsightsReport(i64),
+    PastReports,
+    /// The habits over time, month by month.
+    Habits,
+    /// One habit (a thread) through the reports that named it.
+    Habit(String),
     /// A chat about it, not kept.
     Ask,
     /// A menu or dialog over the page below.
@@ -1037,6 +1047,10 @@ fn Overlays() -> Element {
                             Overlay::Licenses => rsx! { LicensesScreen {} },
                             Overlay::License(notice) => rsx! { LicenseScreen { notice } },
                             Overlay::Insights => rsx! { InsightsScreen {} },
+                            Overlay::InsightsReport(id) => rsx! { ReportScreen { id } },
+                            Overlay::PastReports => rsx! { PastReportsScreen {} },
+                            Overlay::Habits => rsx! { HabitsScreen {} },
+                            Overlay::Habit(thread) => rsx! { HabitScreen { thread } },
                             Overlay::Ask => rsx! { AskScreen {} },
                             Overlay::Sheet(_) => rsx! {},
                         }

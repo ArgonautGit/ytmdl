@@ -15,6 +15,7 @@ mod home;
 mod listens;
 mod playlists;
 mod progress;
+mod reports;
 mod retitle;
 mod roles;
 mod scan;
@@ -40,6 +41,7 @@ pub use home::Home;
 pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
 pub use playlists::{Playlist, PlaylistEntry};
 pub use progress::{Progress, Rng};
+pub use reports::HabitMonth;
 pub use retitle::Retitle;
 pub use roles::{Role, Roles};
 pub use scan::ScanReport;
@@ -219,6 +221,19 @@ UPDATE listens SET title = t.title, artists = t.artists, album = t.album, durati
 FROM tracks t WHERE t.video_id = listens.video_id;
 UPDATE listens SET title = c.title, artists = c.artists, album = c.album, duration_ms = CAST(c.duration * 1000 AS INTEGER)
 FROM cached c WHERE c.video_id = listens.video_id AND listens.title IS NULL;
+"#, r#"
+-- Every listening insights report (see reports.rs), as the app's JSON; the one
+-- kept as a setting before moves in.
+CREATE TABLE insight_reports (
+    id      INTEGER PRIMARY KEY,
+    made_at INTEGER NOT NULL,                -- unix seconds
+    report  TEXT NOT NULL
+);
+CREATE INDEX insight_reports_made ON insight_reports (made_at);
+INSERT INTO insight_reports (made_at, report)
+SELECT json_extract(value, '$.made_at'), value FROM settings
+WHERE key = 'insights_report' AND json_valid(value) AND json_extract(value, '$.made_at') IS NOT NULL;
+DELETE FROM settings WHERE key = 'insights_report';
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =

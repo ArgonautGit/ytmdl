@@ -6,13 +6,14 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use ytmdl_core::{Entry, SearchSource};
-use ytmdl_library::Library;
+use ytmdl_library::{HabitMonth, Library};
 
 use super::icons::{Icon, Svg};
 use super::views::{Cover, Dialog, MenuHead, MenuItem, MenuSheet, TrackState, dotted, plural};
 use super::{Ctx, Overlay, Sheet, Songs, Tab, track_states, with_states};
 use crate::insights::{
-    self, Chat, Claude, Effort, Frequency, Model, Outcome, Pending, Pick, Report, Settings, Step, api_key, masked_key,
+    self, Chat, Claude, Effort, Frequency, Habit, Model, Observation, Outcome, Pending, Pick, Report, Settings, Step, api_key,
+    masked_key,
 };
 use crate::platform;
 
@@ -20,7 +21,8 @@ use crate::platform;
 #[derive(Clone, Copy)]
 pub(super) struct Insights {
     settings: Signal<Settings>,
-    report: Signal<Option<Report>>,
+    /// Every report, newest first.
+    reports: Signal<Vec<Report>>,
     /// A report sent to the Batch API.
     pending: Signal<Option<Pending>>,
     key: Signal<Option<String>>,
@@ -37,11 +39,11 @@ impl Insights {
         if let Ok(offset) = library.utc_offset() {
             insights::set_utc_offset(offset);
         }
-        let (settings, report, pending, key) =
-            (Settings::load(library), Report::load(library), Pending::load(library), api_key(library));
+        let (settings, reports, pending, key) =
+            (Settings::load(library), Report::all(library), Pending::load(library), api_key(library));
         Insights {
             settings: Signal::new(settings),
-            report: Signal::new(report),
+            reports: Signal::new(reports),
             pending: Signal::new(pending),
             key: Signal::new(key),
             running: Signal::new(None),
@@ -128,7 +130,7 @@ impl Ctx {
         }
         let ctx = *self;
         let settings = s.settings.peek().clone();
-        let (mut running, mut error, mut report, mut pending) = (s.running, s.error, s.report, s.pending);
+        let (mut running, mut error, mut reports, mut pending) = (s.running, s.error, s.reports, s.pending);
         running.set(Some("Reading your history…".into()));
         error.set(None);
         spawn(async move {
@@ -144,7 +146,7 @@ impl Ctx {
             let result = insights::refresh(svc.dl.runtime().clone(), ctx.library.get(), &settings, &mut on_step).await;
             running.set(None);
             match result {
-                Ok(Outcome::Made(r)) => report.set(Some(r)),
+                Ok(Outcome::Made(r)) => reports.write().insert(0, r),
                 Ok(Outcome::Sent(p)) => pending.set(Some(p)),
                 Err(e) => {
                     tracing::warn!(target: "ytmdl", "insights: {e:#}");
@@ -162,7 +164,7 @@ impl Ctx {
         }
         let Some(svc) = self.services() else { return };
         let ctx = *self;
-        let (mut running, mut error, mut report, mut pending) = (s.running, s.error, s.report, s.pending);
+        let (mut running, mut error, mut reports, mut pending) = (s.running, s.error, s.reports, s.pending);
         running.set(Some("Checking on the batch…".into()));
         spawn(async move {
             let result = insights::poll(svc.dl.runtime().clone(), ctx.library.get()).await;
@@ -170,7 +172,7 @@ impl Ctx {
             match result {
                 Ok(None) => {}
                 Ok(Some(r)) => {
-                    report.set(Some(r));
+                    reports.write().insert(0, r);
                     pending.set(None);
                     if *ctx.tab.peek() != Tab::Settings {
                         ctx.notify("Your listening insights are ready".into());
@@ -195,7 +197,7 @@ impl Ctx {
             return;
         }
         let settings = s.settings.peek().clone();
-        let due = insights::due(&settings, s.report.peek().as_ref(), false, insights::now_secs());
+        let due = insights::due(&settings, s.reports.peek().first(), false, insights::now_secs());
         if due && s.key.peek().is_some() && s.error.peek().is_none() && (!settings.wifi_only || platform::unmetered_network()) {
             tracing::info!(target: "ytmdl", "insights: a {} report is due", settings.frequency.label().to_lowercase());
             self.refresh_insights();
@@ -226,7 +228,7 @@ pub(super) fn InsightsSettings() -> Element {
     let s = ctx.insights;
     let settings = (s.settings)();
     let key = (s.key)();
-    let report = (s.report)();
+    let report = s.reports.read().first().cloned();
     let switch = |on: bool, label: &'static str, onclick: EventHandler<()>| {
         rsx! {
             button {
@@ -475,7 +477,7 @@ pub(super) fn InsightsTeaser() -> Element {
     if !(s.settings)().enabled {
         return rsx! {};
     }
-    let report = (s.report)();
+    let report = s.reports.read().first().cloned();
     let pending = (s.pending)().is_some() || (s.running)().is_some();
     rsx! {
         div { class: "insight-teaser tappable", role: "button", onclick: move |_| ctx.nav.push(Overlay::Insights),
@@ -552,11 +554,12 @@ fn best_match(pick: &Pick, entries: Vec<Entry>) -> Option<Entry> {
     entries.into_iter().nth(i)
 }
 
+/// The latest report, and the way to the earlier ones and the habits over time.
 #[component]
 pub(super) fn InsightsScreen() -> Element {
     let ctx = use_context::<Ctx>();
     let s = ctx.insights;
-    let report = (s.report)();
+    let reports = (s.reports)();
     let pending = (s.pending)();
     let running = (s.running)();
     let error = (s.error)();
@@ -573,17 +576,6 @@ pub(super) fn InsightsScreen() -> Element {
             }
         })
     });
-    let picks = report.as_ref().map(|r| r.songs.clone()).unwrap_or_default();
-    let found = use_found(ctx, picks);
-    let states = track_states(&ctx.queue.jobs().read(), &ctx.owned.read());
-    let entries: Vec<Entry> = found.iter().filter_map(|(_, f)| f.clone().flatten()).collect();
-    let rows: Vec<(Pick, Option<Option<(Entry, TrackState)>>)> = found
-        .into_iter()
-        .map(|(p, f)| {
-            let f = f.map(|e| e.map(|e| with_states(vec![e], &states, &ctx.keys.read()).remove(0)));
-            (p, f)
-        })
-        .collect();
     let busy = running.is_some() || pending.is_some();
     let status = match (&running, &pending) {
         (Some(text), _) => Some(text.clone()),
@@ -593,8 +585,12 @@ pub(super) fn InsightsScreen() -> Element {
         )),
         _ => None,
     };
-    let play_all = entries.clone();
-    let save_all = entries.clone();
+    let report = reports.first().cloned();
+    let past = (reports.len() > 1).then(|| {
+        let oldest = reports.last().map_or(0, |r| r.made_at);
+        let cost: f64 = reports.iter().map(|r| r.cost).sum();
+        format!("{} since {} · {} in all", reports.len(), insights::month_year(oldest), cost_text(cost))
+    });
     rsx! {
         div { class: "insights",
             header { class: "topbar",
@@ -611,14 +607,7 @@ pub(super) fn InsightsScreen() -> Element {
                     }
                 }
                 if let Some(r) = &report {
-                    div { class: "sub",
-                        {dotted([
-                            Some(format!("From {} {}", insights::count_text(r.listens), if r.listens == 1 { "listen" } else { "listens" })),
-                            Some(insights::day_text(r.made_at)),
-                            Some(model_text(r.model, r.effort)),
-                            Some(format!("{}{}", cost_text(r.cost), if r.batch { " (batch)" } else { "" })),
-                        ])}
-                    }
+                    div { class: "sub", {report_meta(r)} }
                 }
             }
             if let Some(text) = status {
@@ -646,40 +635,26 @@ pub(super) fn InsightsScreen() -> Element {
                     }
                 },
                 Some(r) => rsx! {
-                    p { class: "insights-headline", "{r.headline}" }
+                    ReportBody { report: r, reports: reports.clone() }
                     section { class: "group",
-                        h2 { "Your habits" }
+                        h2 { "Over time" }
                         div { class: "card",
-                            for (i , o) in r.observations.iter().enumerate() {
-                                div { key: "{i}", class: "fact",
-                                    span { class: "f-ic", Svg { icon: kind_icon(&o.kind), size: 22 } }
-                                    div {
-                                        div { class: "title", "{o.title}" }
-                                        div { class: "sub", "{o.body}" }
+                            div { class: "item tappable", role: "button", onclick: move |_| ctx.nav.push(Overlay::Habits),
+                                Svg { icon: Icon::Chart }
+                                div { class: "meta",
+                                    div { class: "title", "Your habits over time" }
+                                    div { class: "sub wrap", "Listening, skips, new music, the car… month by month" }
+                                }
+                                span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
+                            }
+                            if let Some(sub) = past {
+                                div { class: "item tappable divided", role: "button", onclick: move |_| ctx.nav.push(Overlay::PastReports),
+                                    Svg { icon: Icon::Resume }
+                                    div { class: "meta",
+                                        div { class: "title", "Past reports" }
+                                        div { class: "sub", "{sub}" }
                                     }
-                                }
-                            }
-                        }
-                    }
-                    section { class: "group",
-                        h2 { "Songs for you" }
-                        div { class: "card recs",
-                            for (i , (pick , found)) in rows.into_iter().enumerate() {
-                                PickRow { key: "{i}", pick, found }
-                            }
-                        }
-                        if !entries.is_empty() {
-                            div { class: "actions",
-                                button { class: "secondary", onclick: move |_| ctx.play_entries(play_all.clone(), 0),
-                                    {format!("Play all {}", play_all.len())}
-                                }
-                                button {
-                                    class: "secondary",
-                                    onclick: move |_| {
-                                        let songs = Songs { tracks: Vec::new(), entries: save_all.clone() };
-                                        ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: "Songs for you".into(), songs, role: None }));
-                                    },
-                                    "Save as playlist"
+                                    span { class: "chevron", Svg { icon: Icon::ChevronRight, size: 20 } }
                                 }
                             }
                         }
@@ -691,6 +666,465 @@ pub(super) fn InsightsScreen() -> Element {
                     Svg { icon: Icon::Chat, size: 20 }
                     "Ask about your listening"
                 }
+            }
+        }
+    }
+}
+
+/// "From 4,812 listens · today · Sonnet 5.5, high · 4¢ (batch)"
+fn report_meta(r: &Report) -> String {
+    dotted([
+        Some(format!("From {} {}", insights::count_text(r.listens), if r.listens == 1 { "listen" } else { "listens" })),
+        Some(insights::day_text(r.made_at)),
+        Some(model_text(r.model, r.effort)),
+        Some(format!("{}{}", cost_text(r.cost), if r.batch { " (batch)" } else { "" })),
+    ])
+}
+
+/// A report from before, as it was made.
+#[component]
+pub(super) fn ReportScreen(id: i64) -> Element {
+    let ctx = use_context::<Ctx>();
+    let reports = (ctx.insights.reports)();
+    let report = reports.iter().find(|r| r.id == id).cloned();
+    rsx! {
+        div { class: "insights",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| ctx.nav.back(),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 {
+                        match &report {
+                            Some(r) => format!("Report of {}", insights::day_text(r.made_at)),
+                            None => "Report".to_string(),
+                        }
+                    }
+                }
+                if let Some(r) = &report {
+                    div { class: "sub", {report_meta(r)} }
+                }
+            }
+            match report {
+                Some(r) => rsx! { ReportBody { report: r, reports } },
+                None => rsx! { div { class: "empty", p { "This report is gone." } } },
+            }
+        }
+    }
+}
+
+/// What a report says: its headline, what changed, the habits (each with
+/// the earlier reports that saw it) and the songs.
+#[component]
+fn ReportBody(report: Report, reports: Vec<Report>) -> Element {
+    let ctx = use_context::<Ctx>();
+    let picks = report.songs.clone();
+    let found = use_found(ctx, picks);
+    let states = track_states(&ctx.queue.jobs().read(), &ctx.owned.read());
+    let entries: Vec<Entry> = found.iter().filter_map(|(_, f)| f.clone().flatten()).collect();
+    let rows: Vec<(Pick, Option<Option<(Entry, TrackState)>>)> = found
+        .into_iter()
+        .map(|(p, f)| {
+            let f = f.map(|e| e.map(|e| with_states(vec![e], &states, &ctx.keys.read()).remove(0)));
+            (p, f)
+        })
+        .collect();
+    let before = reports.iter().find(|r| r.made_at < report.made_at || (r.made_at == report.made_at && r.id < report.id));
+    let facts: Vec<(Observation, Option<String>)> = report
+        .observations
+        .iter()
+        .map(|o| {
+            let seen: Vec<i64> =
+                reports.iter().filter(|r| r.observations.iter().any(|x| x.thread == o.thread)).map(|r| r.made_at).collect();
+            let chip = match seen.len() {
+                0 | 1 if before.is_some() => Some(String::new()),
+                0 | 1 => None,
+                n => Some(format!("Seen in {n} reports, since {}", insights::month_year(*seen.iter().min().unwrap_or(&0)))),
+            };
+            (o.clone(), chip)
+        })
+        .collect();
+    let play_all = entries.clone();
+    let save_all = entries.clone();
+    rsx! {
+        p { class: "insights-headline", "{report.headline}" }
+        if let (Some(b), false) = (before, report.changes.is_empty()) {
+            section { class: "group",
+                h2 { {format!("Since {}", insights::day_text(b.made_at))} }
+                div { class: "card",
+                    for (i , c) in report.changes.iter().enumerate() {
+                        div { key: "{i}", class: "fact",
+                            span { class: "chg-ic {c.direction}", Svg { icon: change_icon(&c.direction), size: 14 } }
+                            div {
+                                div { class: "title", "{c.title}" }
+                                div { class: "sub", "{c.body}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        section { class: "group",
+            h2 { "Your habits" }
+            div { class: "card",
+                for (i , (o , chip)) in facts.into_iter().enumerate() {
+                    div { key: "{i}", class: "fact",
+                        span { class: "f-ic", Svg { icon: kind_icon(&o.kind), size: 22 } }
+                        div {
+                            div { class: "title", "{o.title}" }
+                            div { class: "sub", "{o.body}" }
+                            match chip {
+                                Some(text) if text.is_empty() => rsx! { span { class: "thread new", "New this time" } },
+                                Some(text) => {
+                                    let thread = o.thread.clone();
+                                    rsx! {
+                                        button { class: "thread", onclick: move |_| ctx.nav.push(Overlay::Habit(thread.clone())),
+                                            "{text}"
+                                            Svg { icon: Icon::ChevronRight, size: 14 }
+                                        }
+                                    }
+                                }
+                                None => rsx! {},
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        section { class: "group",
+            h2 { "Songs for you" }
+            div { class: "card recs",
+                for (i , (pick , found)) in rows.into_iter().enumerate() {
+                    PickRow { key: "{i}", pick, found }
+                }
+            }
+            if !entries.is_empty() {
+                div { class: "actions",
+                    button { class: "secondary", onclick: move |_| ctx.play_entries(play_all.clone(), 0),
+                        {format!("Play all {}", play_all.len())}
+                    }
+                    button {
+                        class: "secondary",
+                        onclick: move |_| {
+                            let songs = Songs { tracks: Vec::new(), entries: save_all.clone() };
+                            ctx.nav.push(Overlay::Sheet(Sheet::Name { id: None, name: "Songs for you".into(), songs, role: None }));
+                        },
+                        "Save as playlist"
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn change_icon(direction: &str) -> Icon {
+    match direction {
+        "up" => Icon::ArrowUp,
+        "down" => Icon::ArrowDown,
+        "new" => Icon::Plus,
+        _ => Icon::Minus,
+    }
+}
+
+/// Every report, by month, newest first.
+#[component]
+pub(super) fn PastReportsScreen() -> Element {
+    let ctx = use_context::<Ctx>();
+    let reports = (ctx.insights.reports)();
+    let cost: f64 = reports.iter().map(|r| r.cost).sum();
+    let songs: usize = reports.iter().map(|r| r.songs.len()).sum();
+    let mut months: Vec<(String, Vec<Report>)> = Vec::new();
+    for r in reports.iter().cloned() {
+        let month = insights::month_year(r.made_at);
+        match months.last_mut() {
+            Some((m, list)) if *m == month => list.push(r),
+            _ => months.push((month, vec![r])),
+        }
+    }
+    rsx! {
+        div { class: "insights",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| ctx.nav.back(),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Past reports" }
+                }
+                div { class: "sub",
+                    {dotted([
+                        Some(plural(reports.len(), "report", "reports")),
+                        Some(format!("{} suggested", plural(songs, "song", "songs"))),
+                        Some(format!("{} in all", cost_text(cost))),
+                    ])}
+                }
+            }
+            for (month , list) in months {
+                div { key: "{month}",
+                    h2 { class: "month-h", "{month}" }
+                    for r in list {
+                        PastReport { key: "{r.id}", report: r }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PastReport(report: Report) -> Element {
+    let ctx = use_context::<Ctx>();
+    let id = report.id;
+    let meta = dotted([
+        report.batch.then(|| "Batch".to_string()),
+        Some(model_text(report.model, report.effort)),
+        Some(plural(report.observations.len(), "habit", "habits")),
+        Some(plural(report.songs.len(), "song", "songs")),
+        Some(cost_text(report.cost)),
+    ]);
+    rsx! {
+        div { class: "past tappable", role: "button", onclick: move |_| ctx.nav.push(Overlay::InsightsReport(id)),
+            div { class: "p-date", {insights::day_text(report.made_at)} }
+            div { class: "p-head", "{report.headline}" }
+            div { class: "sub", "{meta}" }
+        }
+    }
+}
+
+/// One habit through the reports that named it, with its number when it has one.
+#[component]
+pub(super) fn HabitScreen(thread: String) -> Element {
+    let ctx = use_context::<Ctx>();
+    let reports = (ctx.insights.reports)();
+    let steps: Vec<(Report, Observation)> = reports
+        .iter()
+        .filter_map(|r| r.observations.iter().find(|o| o.thread == thread).map(|o| (r.clone(), o.clone())))
+        .collect();
+    let title = steps.first().map(|(_, o)| o.title.clone()).unwrap_or_default();
+    let habit = steps.iter().find_map(|(_, o)| Habit::from_key(&o.metric));
+    let sub = match steps.last() {
+        Some((first, _)) => format!(
+            "Named in {}, since {}",
+            plural(steps.len(), "report", "reports"),
+            insights::day_text(first.made_at)
+        ),
+        None => String::new(),
+    };
+    let months = use_habit_months(ctx);
+    let marks: Vec<String> = steps.iter().map(|(r, _)| insights::month_key(r.made_at)).collect();
+    rsx! {
+        div { class: "insights",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| ctx.nav.back(),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "{title}" }
+                }
+                div { class: "sub", "{sub}" }
+            }
+            if let (Some(habit), Some(months)) = (habit, months) {
+                section { class: "group",
+                    div { class: "card", HabitCard { habit, months: last_months(&months, 12), marks } }
+                }
+            }
+            section { class: "group",
+                h2 { "What the reports said" }
+                div { class: "timeline",
+                    for (i , (r , o)) in steps.into_iter().enumerate() {
+                        div {
+                            key: "{r.id}",
+                            class: if i == 0 { "step now tappable" } else { "step tappable" },
+                            role: "button",
+                            onclick: move |_| ctx.nav.push(Overlay::InsightsReport(r.id)),
+                            span { class: "dot" }
+                            div { class: "s-date", {insights::day_text(r.made_at)} }
+                            div { class: "title", "{o.title}" }
+                            div { class: "sub", "{o.body}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The habits month by month, measured from the history; `None` while they load.
+fn use_habit_months(ctx: Ctx) -> Option<Vec<HabitMonth>> {
+    let lib = ctx.library;
+    let months = use_resource(move || {
+        lib.subscribe_listens();
+        let library = lib.get();
+        async move { crate::blocking(move || library.habit_months()).await }
+    });
+    let out = match &*months.read() {
+        Some(Ok(Ok(m))) => Some(m.clone()),
+        Some(Ok(Err(e))) => {
+            tracing::warn!(target: "ytmdl", "habits: {e}");
+            Some(Vec::new())
+        }
+        Some(Err(e)) => {
+            tracing::warn!(target: "ytmdl", "habits: {e:#}");
+            Some(Vec::new())
+        }
+        None => None,
+    };
+    out
+}
+
+fn last_months(months: &[HabitMonth], n: usize) -> Vec<HabitMonth> {
+    months[months.len().saturating_sub(n)..].to_vec()
+}
+
+/// The habits over time, measured from every listen.
+#[component]
+pub(super) fn HabitsScreen() -> Element {
+    let ctx = use_context::<Ctx>();
+    let lib = ctx.library;
+    // What the player logged since the app last looked.
+    use_hook(move || spawn(lib.import_listens()));
+    let mut range = use_signal(|| Some(12usize));
+    let months = use_habit_months(ctx);
+    let marks: Vec<String> = ctx.insights.reports.read().iter().map(|r| insights::month_key(r.made_at)).collect();
+    let ranges = [("6 months", Some(6)), ("1 year", Some(12)), ("All", None)];
+    rsx! {
+        div { class: "insights",
+            header { class: "topbar",
+                div { class: "title-row",
+                    button { class: "icon-btn", "aria-label": "Back", onclick: move |_| ctx.nav.back(),
+                        Svg { icon: Icon::Back }
+                    }
+                    h1 { "Habits over time" }
+                }
+                div { class: "sub wrap",
+                    if marks.is_empty() { "Measured from every listen, month by month" } else { "Measured from every listen, month by month. Dots: a report" }
+                }
+                div { class: "chips",
+                    for (label , n) in ranges {
+                        button {
+                            key: "{label}",
+                            class: if range() == n { "chip selected" } else { "chip" },
+                            onclick: move |_| range.set(n),
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            match months {
+                None => rsx! { div { class: "spinner" } },
+                Some(months) if months.is_empty() => rsx! {
+                    div { class: "empty",
+                        Svg { icon: Icon::Chart, size: 48 }
+                        p { "Play some music and your habits show up here." }
+                    }
+                },
+                Some(months) => {
+                    let shown = match range() {
+                        Some(n) => last_months(&months, n),
+                        None => months,
+                    };
+                    rsx! {
+                        section { class: "group",
+                            div { class: "card",
+                                for habit in Habit::ALL {
+                                    HabitCard { key: "{habit.key()}", habit, months: shown.clone(), marks: marks.clone() }
+                                }
+                            }
+                        }
+                        p { class: "hint",
+                            "How songs ended, where they were played from and through what are logged from October 2026; times, songs and artists go back to your first listen."
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One habit's number now, how it moved, and its chart; `marks`: the months
+/// with a report, dotted.
+#[component]
+fn HabitCard(habit: Habit, months: Vec<HabitMonth>, marks: Vec<String>) -> Element {
+    let values: Vec<Option<f64>> = months.iter().map(|m| habit.value(m)).collect();
+    let first = months.iter().zip(&values).find_map(|(m, v)| v.map(|v| (m.month.clone(), v)));
+    let last = values.iter().rev().find_map(|v| *v);
+    let (now, delta) = match (first, last) {
+        (Some((month, then)), Some(now)) => {
+            let since = insights::month_label(&month, false);
+            let delta = if values.iter().filter(|v| v.is_some()).count() < 2 {
+                format!("Measured from {}", insights::month_label(&month, true))
+            } else {
+                let diff = now - then;
+                let (amount, same) = match habit {
+                    Habit::Listening => (habit.text(diff.abs()), diff.abs() < 0.5),
+                    _ => (plural((diff.abs() * 100.0).round() as usize, "point", "points"), (diff.abs() * 100.0).round() == 0.0),
+                };
+                if same {
+                    format!("Same as in {since}")
+                } else {
+                    format!("{} {amount} since {since}", if diff > 0.0 { "▲" } else { "▼" })
+                }
+            };
+            (habit.text(now), delta)
+        }
+        _ => ("–".to_string(), "Not logged in these months".to_string()),
+    };
+    let labels: Vec<String> = months.iter().map(|m| insights::month_label(&m.month, false)).collect();
+    let dots: Vec<bool> = months.iter().map(|m| marks.contains(&m.month)).collect();
+    rsx! {
+        div { class: "metric",
+            div { class: "m-head",
+                span { class: "m-title", {habit.label()} }
+                span { class: "m-now", "{now}" }
+            }
+            div { class: "m-delta", "{delta}" }
+            if values.iter().filter(|v| v.is_some()).count() > 1 {
+                Trend { values, labels, dots }
+            }
+        }
+    }
+}
+
+/// A line over the months, broken where there's no value.
+#[component]
+fn Trend(values: Vec<Option<f64>>, labels: Vec<String>, dots: Vec<bool>) -> Element {
+    const W: f64 = 300.0;
+    const H: f64 = 44.0;
+    const PAD: f64 = 8.0;
+    let known: Vec<f64> = values.iter().flatten().copied().collect();
+    let lo = known.iter().copied().fold(f64::INFINITY, f64::min).min(0.0);
+    let hi = known.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let span = if hi - lo > 1e-9 { hi - lo } else { 1.0 };
+    let n = values.len();
+    let x = |i: usize| if n < 2 { W / 2.0 } else { PAD + i as f64 * (W - 2.0 * PAD) / (n - 1) as f64 };
+    let y = |v: f64| H - 4.0 - (v - lo) / span * (H - 10.0);
+    let mut lines: Vec<String> = Vec::new();
+    let mut run = String::new();
+    for (i, v) in values.iter().enumerate() {
+        match v {
+            Some(v) => run.push_str(&format!("{:.1},{:.1} ", x(i), y(*v))),
+            None if !run.is_empty() => lines.push(std::mem::take(&mut run)),
+            None => {}
+        }
+    }
+    if !run.is_empty() {
+        lines.push(run);
+    }
+    let points: Vec<(f64, f64, bool)> =
+        values.iter().enumerate().filter_map(|(i, v)| v.map(|v| (x(i), y(v), dots.get(i).copied().unwrap_or(false)))).collect();
+    // Every month labelled while they fit, else every few.
+    let every = n.div_ceil(7).max(1);
+    let shown: Vec<(f64, String)> =
+        labels.iter().enumerate().filter(|(i, _)| (n - 1 - i) % every == 0).map(|(i, l)| (x(i), l.clone())).collect();
+    rsx! {
+        svg { class: "trend", view_box: "0 0 {W} {H + 16.0}", width: "100%",
+            for (i , pts) in lines.iter().enumerate() {
+                polyline { key: "{i}", points: "{pts}", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linejoin: "round" }
+            }
+            for (i , (cx , cy , dot)) in points.into_iter().enumerate() {
+                circle { key: "{i}", class: if dot { "report" } else { "" }, cx: "{cx:.1}", cy: "{cy:.1}", r: if dot { "4" } else { "2.5" } }
+            }
+            for (lx , label) in shown {
+                text { key: "{label}{lx}", x: "{lx:.1}", y: "{H + 13.0}", text_anchor: "middle", "{label}" }
             }
         }
     }
@@ -813,7 +1247,7 @@ pub(super) fn AskScreen() -> Element {
         draft.set(String::new());
         bubbles.write().push(Bubble { me: true, text: question.clone(), songs: Vec::new(), error: false });
         thinking.set(Some("Thinking…".into()));
-        let report = ctx.insights.report.peek().clone();
+        let report = ctx.insights.reports.peek().first().cloned();
         spawn(async move {
             let _ = document::eval("setTimeout(() => document.querySelector('.msgs-end')?.scrollIntoView({behavior: 'smooth'}), 50)");
             let mut current = match chat.write().take() {
@@ -1002,7 +1436,9 @@ pub(super) fn use_play_source(ctx: Ctx) {
                 format!("playlist: {name}")
             }
             Some(Overlay::Stats) => "stats".into(),
-            Some(Overlay::Insights) => "insights".into(),
+            Some(Overlay::Insights | Overlay::InsightsReport(_) | Overlay::PastReports | Overlay::Habits | Overlay::Habit(_)) => {
+                "insights".into()
+            }
             Some(Overlay::Ask) => "insights chat".into(),
             Some(Overlay::Duplicates | Overlay::Titles) => "library".into(),
             Some(_) => "other".into(),

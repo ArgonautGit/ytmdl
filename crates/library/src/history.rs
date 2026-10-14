@@ -7,6 +7,7 @@
 //! - `history`: one row per listen (see [`VIEWS`]).
 //! - `library`: the downloaded songs.
 //! - `playlist_songs`: each playlist's songs, in order.
+//! - `reports`: the insights reports made so far.
 
 use std::fs;
 use std::path::Path;
@@ -38,6 +39,11 @@ FROM main.tracks;
 CREATE TEMP VIEW playlist_songs AS
 SELECT p.name AS playlist, pt.position, t.title, t.artists, t.album, t.video_id
 FROM main.playlists p JOIN main.playlist_tracks pt ON pt.playlist_id = p.id JOIN main.tracks t ON t.id = pt.track_id;
+CREATE TEMP VIEW reports AS
+SELECT id, datetime(made_at, 'unixepoch', 'localtime') AS made_local, json_extract(report, '$.headline') AS headline,
+       json_extract(report, '$.changes') AS changes, json_extract(report, '$.observations') AS observations,
+       json_extract(report, '$.songs') AS songs
+FROM main.insight_reports;
 ";
 
 /// The views as the model is told about them (with the SQL tool).
@@ -56,7 +62,10 @@ history: one row per listen, oldest first by id.
   video_id (YouTube id), in_library (1 if the song is downloaded now).
 library: the downloaded songs: video_id, title, artists (JSON array), album, album_artist, year, duration_s,
   added_local.
-playlist_songs: playlist (name), position, title, artists (JSON array), album, video_id.";
+playlist_songs: playlist (name), position, title, artists (JSON array), album, video_id.
+reports: the insights reports made so far, the listener's to look back on: id, made_local, headline,
+  changes (JSON array: what changed since the report before), observations (JSON array of title, body, kind,
+  thread: the same habit across reports shares a thread), songs (JSON array: the songs suggested).";
 
 /// What a query returned.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -135,7 +144,7 @@ impl Library {
     }
 
     /// A read-only connection with the views.
-    fn reader(&self) -> Result<Connection> {
+    pub(crate) fn reader(&self) -> Result<Connection> {
         let conn = match &self.0.path {
             Some(path) => Connection::open_with_flags(
                 path,

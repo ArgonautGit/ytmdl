@@ -72,6 +72,10 @@ pub enum Icon {
     /// The secondary playlist (current favourites); `FlameFilled` when in it.
     Flame,
     FlameFilled,
+    /// What changed between insights reports.
+    ArrowUp,
+    ArrowDown,
+    Minus,
     Chat,
     Send,
 }
@@ -258,6 +262,15 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         },
         Icon::StarFilled => rsx! {
             path { d: STAR, fill: "currentColor" }
+        },
+        Icon::ArrowUp => rsx! {
+            path { d: "M12 19V5M5 12l7-7 7 7" }
+        },
+        Icon::ArrowDown => rsx! {
+            path { d: "M12 5v14M5 12l7 7 7-7" }
+        },
+        Icon::Minus => rsx! {
+            path { d: "M5 12h14" }
         },
         Icon::Flame => rsx! {
             path { d: FLAME }

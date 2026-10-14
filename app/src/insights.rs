@@ -3,13 +3,19 @@
 //! says what stands out in it, with songs to try; and answers questions about
 //! it in a chat that isn't kept.
 //!
+//! Every report is kept. Each is given the ones before, so it says what
+//! changed, and links each habit to the earlier reports' observations of it
+//! (a thread), to follow it through them.
+//!
 //! Requests go to the Claude API with the user's own key, through Python's
 //! HTTPS (the downloader's runtime), so this needs the downloader up.
+
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ytmdl_core::Runtime;
-use ytmdl_library::{Library, VIEW_DOCS};
+use ytmdl_library::{HabitMonth, Library, VIEW_DOCS};
 
 const API: &str = "https://api.anthropic.com/v1";
 /// Requests may think for minutes at high effort.
@@ -22,7 +28,6 @@ const MAX_TURNS: usize = 24;
 /// Settings keys.
 const SETTINGS: &str = "insights";
 const KEY: &str = "anthropic_key";
-const REPORT: &str = "insights_report";
 const PENDING: &str = "insights_batch";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +203,9 @@ pub fn masked_key(key: &str) -> String {
 /// What a run found.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Report {
+    /// Its row in the library, once kept.
+    #[serde(skip)]
+    pub id: i64,
     /// Unix seconds.
     pub made_at: i64,
     pub model: Model,
@@ -208,6 +216,9 @@ pub struct Report {
     /// Listens in the history then.
     pub listens: i64,
     pub headline: String,
+    /// What changed since the report before; none in the first.
+    #[serde(default)]
+    pub changes: Vec<Change>,
     pub observations: Vec<Observation>,
     pub songs: Vec<Pick>,
     /// What the run cost, in US dollars (at list prices).
@@ -220,6 +231,87 @@ pub struct Observation {
     pub body: String,
     /// time | skips | loyalty | discovery | place | mood | other: picks the icon.
     pub kind: String,
+    /// The habit it is about, across reports: observations of the same habit
+    /// in different reports share it.
+    #[serde(default)]
+    pub thread: String,
+    /// The [`Habit`] it is about, by key, if one is ("none" or empty if not).
+    #[serde(default)]
+    pub metric: String,
+}
+
+/// Something that changed since the report before.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Change {
+    /// up | down | new (a habit not seen before) | gone (one that faded).
+    pub direction: String,
+    pub title: String,
+    pub body: String,
+}
+
+/// A habit measured month by month (ytmdl_library::HabitMonth), which an
+/// observation can be about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Habit {
+    Listening,
+    Skips,
+    New,
+    TopSongs,
+    Car,
+    LateNight,
+}
+
+impl Habit {
+    pub const ALL: [Habit; 6] = [Habit::Listening, Habit::Skips, Habit::New, Habit::TopSongs, Habit::Car, Habit::LateNight];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Habit::Listening => "listening",
+            Habit::Skips => "skips",
+            Habit::New => "new",
+            Habit::TopSongs => "top_songs",
+            Habit::Car => "car",
+            Habit::LateNight => "late_night",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Habit> {
+        Habit::ALL.into_iter().find(|h| h.key() == key)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Habit::Listening => "Listening a day",
+            Habit::Skips => "Skipped",
+            Habit::New => "New to you",
+            Habit::TopSongs => "Top 10 songs' share",
+            Habit::Car => "In the car",
+            Habit::LateNight => "After midnight",
+        }
+    }
+
+    /// Minutes a day, or a share from 0 to 1.
+    pub fn value(self, m: &HabitMonth) -> Option<f64> {
+        match self {
+            Habit::Listening => (m.plays > 0 || m.minutes_a_day > 0.0).then_some(m.minutes_a_day),
+            Habit::Skips => m.skipped,
+            Habit::New => m.new,
+            Habit::TopSongs => m.top_songs,
+            Habit::Car => m.car,
+            Habit::LateNight => m.late_night,
+        }
+    }
+
+    /// "1 h 52 min", "18%".
+    pub fn text(self, value: f64) -> String {
+        match self {
+            Habit::Listening => {
+                let minutes = value.round() as i64;
+                if minutes >= 60 { format!("{} h {} min", minutes / 60, minutes % 60) } else { format!("{minutes} min") }
+            }
+            _ => format!("{:.0}%", value * 100.0),
+        }
+    }
 }
 
 /// A song to try.
@@ -231,12 +323,45 @@ pub struct Pick {
 }
 
 impl Report {
-    pub fn load(library: &Library) -> Option<Report> {
-        library.setting(REPORT).ok().flatten().and_then(|s| serde_json::from_str(&s).ok())
+    /// Every kept report, newest first.
+    pub fn all(library: &Library) -> Vec<Report> {
+        let rows = library.reports().unwrap_or_else(|e| {
+            tracing::warn!(target: "ytmdl", "insights: reports couldn't be read: {e}");
+            Vec::new()
+        });
+        rows.into_iter()
+            .filter_map(|(id, json)| {
+                let mut report: Report = serde_json::from_str(&json)
+                    .map_err(|e| tracing::warn!(target: "ytmdl", "insights: report {id} couldn't be read: {e}"))
+                    .ok()?;
+                report.id = id;
+                // Reports from before threads: each observation its own.
+                for (i, o) in report.observations.iter_mut().enumerate() {
+                    if o.thread.is_empty() {
+                        o.thread = format!("{}-{i}", report.made_at);
+                    }
+                }
+                Some(report)
+            })
+            .collect()
     }
 
-    pub fn save(&self, library: &Library) -> ytmdl_library::Result<()> {
-        library.set_setting(REPORT, &serde_json::to_string(self).expect("plain data"))
+    /// Keeps it, as a new report.
+    pub fn save(&mut self, library: &Library) -> ytmdl_library::Result<()> {
+        self.id = library.add_report(self.made_at, &serde_json::to_string(self).expect("plain data"))?;
+        Ok(())
+    }
+
+    /// Gives each observation its thread: the earlier one it continues (the
+    /// model names it), or a new one.
+    fn link(&mut self, previous: &[Report]) {
+        let known: HashSet<&str> = previous.iter().flat_map(|r| r.observations.iter().map(|o| o.thread.as_str())).collect();
+        let mut taken = HashSet::new();
+        for (i, o) in self.observations.iter_mut().enumerate() {
+            if !known.contains(o.thread.as_str()) || !taken.insert(o.thread.clone()) {
+                o.thread = format!("{}-{i}", self.made_at);
+            }
+        }
     }
 }
 
@@ -442,49 +567,50 @@ impl Claude {
         anyhow::bail!("Claude didn't finish its answer.")
     }
 
-    /// The first message of a report: the history's summary, and what the
-    /// last report said, so it isn't said again.
-    async fn report_prompt(&self, previous: Option<&Report>, detailed: bool) -> anyhow::Result<(String, i64)> {
+    /// The first message of a report: the history's summary, the habits month
+    /// by month, and the reports before (`previous`, newest first), to say what
+    /// changed and follow habits through them.
+    async fn report_prompt(&self, previous: &[Report], detailed: bool) -> anyhow::Result<(String, i64)> {
         let library = self.library.clone();
-        let (summary, info) =
-            crate::blocking(move || anyhow::Ok((library.history_summary(detailed)?, library.history_info()?))).await??;
+        let (summary, info, months) = crate::blocking(move || {
+            anyhow::Ok((library.history_summary(detailed)?, library.history_info()?, library.habit_months()?))
+        })
+        .await??;
         let mut prompt = format!("Here is a summary of my listening history, as JSON tables (columns and rows):\n\n{summary}\n\n");
+        let recent = &months[months.len().saturating_sub(13)..];
+        prompt.push_str(&format!(
+            "My habits month by month (local time; minutes_a_day, then shares of 0 to 1: skipped of the listens \
+             whose end was logged, new = plays of songs first played that month, top_songs = plays of the month's 10 \
+             most played, car of the plays whose output was logged, late_night = plays from midnight to 5; null \
+             where there was nothing to count; the last month is still going):\n{}\n\n",
+            serde_json::to_string(recent)?
+        ));
+        prompt.push_str(&previous_reports(previous));
         prompt.push_str(if detailed {
             "Give me your report."
         } else {
             "Look into it, with queries where the summary isn't enough, and give me your report."
         });
-        if let Some(p) = previous {
-            let songs: Vec<String> = p.songs.iter().map(|s| format!("{} by {}", s.title, s.artist)).collect();
-            let seen: Vec<&str> = p.observations.iter().map(|o| o.title.as_str()).collect();
-            prompt.push_str(&format!(
-                "\n\nYour last report ({}) said: {}. Its observations were titled: {}. It suggested: {}. \
-                 Don't suggest those songs again, and only repeat an observation if something about it changed \
-                 (then say what).",
-                days_ago(p.made_at),
-                p.headline,
-                seen.join("; "),
-                songs.join("; ")
-            ));
-        }
         Ok((prompt, info.listens))
     }
 
     /// A new report now, the model looking into the history with its own
     /// queries.
-    pub async fn report(&self, previous: Option<&Report>, on_step: &mut dyn FnMut(Step)) -> anyhow::Result<Report> {
+    pub async fn report(&self, previous: &[Report], on_step: &mut dyn FnMut(Step)) -> anyhow::Result<Report> {
         let (prompt, listens) = self.report_prompt(previous, false).await?;
         let mut messages = vec![json!({ "role": "user", "content": prompt })];
         let mut usage = Usage::default();
         let system = system(REPORT_SYSTEM, QUERIES);
         self.run(&system, &mut messages, &[query_tool()], Some(&report_format()), &mut usage, on_step).await?;
         let found = found(messages.last().expect("the model's answer"))?;
-        Ok(self.made(found, listens, false, usage))
+        let mut report = self.made(found, listens, false, usage);
+        report.link(previous);
+        Ok(report)
     }
 
     /// Sends a report to the Batch API, from a fuller summary as the model
     /// can't query there; [`Claude::collect`] gets it when it's done.
-    pub async fn submit(&self, previous: Option<&Report>) -> anyhow::Result<Pending> {
+    pub async fn submit(&self, previous: &[Report]) -> anyhow::Result<Pending> {
         let (prompt, listens) = self.report_prompt(previous, true).await?;
         let messages = [json!({ "role": "user", "content": prompt })];
         let mut params = self.params(&system(REPORT_SYSTEM, SUMMARY_ONLY), &messages, &[], Some(&report_format()));
@@ -542,8 +668,14 @@ impl Claude {
             effort: self.effort,
             batch,
             listens,
+            id: 0,
             headline: found.headline,
-            observations: found.observations,
+            changes: found.changes,
+            observations: found
+                .observations
+                .into_iter()
+                .map(|o| Observation { title: o.title, body: o.body, kind: o.kind, thread: o.continues, metric: o.metric })
+                .collect(),
             songs: found.songs,
             cost: usage.cost(self.model, batch),
         }
@@ -563,8 +695,22 @@ fn check_stop(message: &Value) -> anyhow::Result<()> {
 #[derive(Deserialize)]
 struct Found {
     headline: String,
-    observations: Vec<Observation>,
+    #[serde(default)]
+    changes: Vec<Change>,
+    observations: Vec<FoundObservation>,
     songs: Vec<Pick>,
+}
+
+#[derive(Deserialize)]
+struct FoundObservation {
+    title: String,
+    body: String,
+    kind: String,
+    /// The thread of an earlier report's observation this one follows, or "".
+    #[serde(default)]
+    continues: String,
+    #[serde(default)]
+    metric: String,
 }
 
 /// The report in the assistant message `message`.
@@ -597,10 +743,11 @@ impl Chat {
         let mut context = format!("A summary of my listening history, as JSON tables:\n{summary}");
         if let Some(r) = report {
             context.push_str(&format!(
-                "\n\nYour latest insights report, which I may ask about: {}",
+                "\n\nYour latest insights report, which I may ask about (earlier ones are in the reports view): {}",
                 serde_json::to_string(&json!({
                     "made": days_ago(r.made_at),
                     "headline": r.headline,
+                    "changes": r.changes,
                     "observations": r.observations,
                     "songs": r.songs,
                 }))?
@@ -680,20 +827,23 @@ pub enum Outcome {
 /// keeps what comes of it.
 pub async fn refresh(rt: Runtime, library: Library, settings: &Settings, on_step: &mut dyn FnMut(Step)) -> anyhow::Result<Outcome> {
     let lib = library.clone();
-    let (key, previous) = crate::blocking(move || (api_key(&lib), Report::load(&lib))).await?;
+    let (key, previous) = crate::blocking(move || (api_key(&lib), Report::all(&lib))).await?;
     let key = key.ok_or_else(|| anyhow::anyhow!("Add your Claude API key in Settings first."))?;
     let claude = Claude { rt, library: library.clone(), key, model: settings.model, effort: settings.effort };
     if settings.batch {
-        let pending = claude.submit(previous.as_ref()).await?;
+        let pending = claude.submit(&previous).await?;
         tracing::info!(id = %pending.id, model = pending.model.id(), "insights: report sent as a batch");
         let saved = pending.clone();
         crate::blocking(move || saved.save(&library)).await??;
         return Ok(Outcome::Sent(pending));
     }
-    let report = claude.report(previous.as_ref(), on_step).await?;
+    let report = claude.report(&previous, on_step).await?;
     tracing::info!(model = report.model.id(), cost = report.cost, "insights: report made");
-    let saved = report.clone();
-    crate::blocking(move || saved.save(&library)).await??;
+    let report = crate::blocking(move || {
+        let mut report = report;
+        report.save(&library).map(|()| report)
+    })
+    .await??;
     Ok(Outcome::Made(report))
 }
 
@@ -715,10 +865,11 @@ pub async fn poll(rt: Runtime, library: Library) -> anyhow::Result<Option<Report
         }
         Some(Ok(report)) => {
             tracing::info!(id = %pending.id, cost = report.cost, "insights: batched report back");
-            let saved = report.clone();
-            crate::blocking(move || {
-                saved.save(&library)?;
-                Pending::clear(&library)
+            let report = crate::blocking(move || {
+                let mut report = report;
+                report.link(&Report::all(&library));
+                report.save(&library)?;
+                Pending::clear(&library).map(|()| report)
             })
             .await??;
             Ok(Some(report))
@@ -737,6 +888,43 @@ pub fn due(settings: &Settings, last: Option<&Report>, pending: bool, now: i64) 
         (true, Some(every)) if !pending => last.is_none_or(|r| now - r.made_at >= every),
         _ => false,
     }
+}
+
+/// The reports before a new one, for its prompt: the last in full, the
+/// earlier ones' headlines and habits, and the songs they suggested.
+fn previous_reports(previous: &[Report]) -> String {
+    let Some((last, earlier)) = previous.split_first() else {
+        return "This is your first report: leave changes empty, and continues \"\" in every observation.\n\n".into();
+    };
+    let mut out = String::from(
+        "Your reports so far, newest first, with each habit's thread id in brackets. Say in changes what changed \
+         since the last one, and slower drifts you see across the earlier ones. An observation about a habit one of \
+         them already named continues its thread (put that id in continues; at most one observation per thread); \
+         only bring a habit back when something about it is new or changed, and say what.\n\n",
+    );
+    out.push_str(&format!("{} ({}): {}\n", iso_day(last.made_at), days_ago(last.made_at), last.headline));
+    for o in &last.observations {
+        out.push_str(&format!("  [{}] {}: {}\n", o.thread, o.title, o.body));
+    }
+    for r in earlier.iter().take(11) {
+        out.push_str(&format!("{}: {}\n", iso_day(r.made_at), r.headline));
+        for o in &r.observations {
+            out.push_str(&format!("  [{}] {}\n", o.thread, o.title));
+        }
+    }
+    let songs: Vec<String> =
+        previous.iter().take(6).flat_map(|r| r.songs.iter().map(|s| format!("{} by {}", s.title, s.artist))).collect();
+    if !songs.is_empty() {
+        out.push_str(&format!("\nYou suggested these songs before; don't suggest them again: {}.\n", songs.join("; ")));
+    }
+    out.push('\n');
+    out
+}
+
+/// "2026-10-14", local, for the model.
+fn iso_day(secs: i64) -> String {
+    let (y, m, d) = civil(local_day(secs) * 86_400);
+    format!("{y}-{m:02}-{d:02}")
 }
 
 /// "3 days ago", for the model.
@@ -779,6 +967,18 @@ pub fn day_text(secs: i64) -> String {
 pub fn month_year(secs: i64) -> String {
     let (y, m, _) = civil(local_day(secs) * 86_400);
     format!("{} {y}", MONTHS[m as usize - 1])
+}
+
+/// "2026-10": the local month of unix time `secs`, as HabitMonth has it.
+pub fn month_key(secs: i64) -> String {
+    let (y, m, _) = civil(local_day(secs) * 86_400);
+    format!("{y}-{m:02}")
+}
+
+/// "Oct", or "Oct 2026", of a "2026-10" month.
+pub fn month_label(month: &str, year: bool) -> String {
+    let m: usize = month.get(5..7).and_then(|m| m.parse().ok()).filter(|m| (1..=12).contains(m)).unwrap_or(1);
+    if year { format!("{} {}", MONTHS[m - 1], month.get(..4).unwrap_or_default()) } else { MONTHS[m - 1].to_string() }
 }
 
 /// "4,812".
@@ -868,6 +1068,19 @@ fn report_format() -> Value {
             "type": "object",
             "properties": {
                 "headline": { "type": "string" },
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "direction": { "type": "string", "enum": ["up", "down", "new", "gone"] },
+                            "title": { "type": "string" },
+                            "body": { "type": "string" },
+                        },
+                        "required": ["direction", "title", "body"],
+                        "additionalProperties": false,
+                    },
+                },
                 "observations": {
                     "type": "array",
                     "items": {
@@ -876,8 +1089,13 @@ fn report_format() -> Value {
                             "title": { "type": "string" },
                             "body": { "type": "string" },
                             "kind": { "type": "string", "enum": ["time", "skips", "loyalty", "discovery", "place", "mood", "other"] },
+                            "continues": { "type": "string" },
+                            "metric": {
+                                "type": "string",
+                                "enum": ["listening", "skips", "new", "top_songs", "car", "late_night", "none"],
+                            },
                         },
-                        "required": ["title", "body", "kind"],
+                        "required": ["title", "body", "kind", "continues", "metric"],
                         "additionalProperties": false,
                     },
                 },
@@ -895,7 +1113,7 @@ fn report_format() -> Value {
                     },
                 },
             },
-            "required": ["headline", "observations", "songs"],
+            "required": ["headline", "changes", "observations", "songs"],
             "additionalProperties": false,
         },
     })
@@ -919,11 +1137,19 @@ suggest songs for them.
 what they come back to, what they have drifted from, how they find new music, how the car or the time of day \
 changes what they play. Every observation rests on numbers you saw; give the numbers.
 
+They keep every report to see how their habits change over time, so say how things moved, not only where \
+they stand.
+
 Write to them as \"you\", plainly and warmly, without flattery. The report:
 - headline: the single most interesting thing, one sentence of under 30 words.
+- changes: when there are earlier reports, 2 to 5 things that changed since the last one, the biggest first: a \
+habit that grew (up), shrank (down), appeared (new) or faded (gone), or a slow drift across several reports. \
+title under 6 words; body one sentence under 35 words with the numbers then and now. Empty for a first report.
 - observations: 5 to 7, the most surprising first. title under 6 words; body one or two sentences, under 45 \
 words, with the numbers. kind picks its icon: time (when they listen), skips, loyalty (what they come back to), \
-discovery (new music), place (where, or what it plays through), mood, other.
+discovery (new music), place (where, or what it plays through), mood, other. continues: the thread id of an \
+earlier report's habit this one is about, or \"\" for a new one. metric: the monthly habit number it is about, if \
+one is (listening, skips, new, top_songs, car, late_night), else none.
 - songs: 10 to 12 songs that are on YouTube Music, not in their history: deeper cuts by artists they love and \
 artists new to them close to what they play most, and a few that fit a habit you found. why: under 15 words, \
 tied to their listening. Name real songs by their exact title and main artist.";
@@ -984,12 +1210,14 @@ mod tests {
     fn reports_come_when_due() {
         let on = Settings { enabled: true, ..Settings::default() };
         let report = |made_at| Report {
+            id: 0,
             made_at,
             model: Model::Sonnet,
             effort: Effort::Medium,
             batch: false,
             listens: 1,
             headline: String::new(),
+            changes: Vec::new(),
             observations: Vec::new(),
             songs: Vec::new(),
             cost: 0.0,
@@ -1019,5 +1247,50 @@ mod tests {
         assert!(system(REPORT_SYSTEM, SUMMARY_ONLY).contains("Everything you know"));
         assert!(!system(CHAT_SYSTEM, "").contains("{ABOUT}"));
         assert_eq!(masked_key("sk-ant-api03-abcdef1234"), "sk-ant-…1234");
+    }
+
+    #[test]
+    fn habits_follow_on_across_reports() {
+        let observation = |title: &str, thread: &str| Observation {
+            title: title.into(),
+            body: String::new(),
+            kind: "time".into(),
+            thread: thread.into(),
+            metric: "late_night".into(),
+        };
+        let report = |made_at, observations| Report {
+            id: 0,
+            made_at,
+            model: Model::Sonnet,
+            effort: Effort::High,
+            batch: false,
+            listens: 1,
+            headline: format!("h{made_at}"),
+            changes: Vec::new(),
+            observations,
+            songs: vec![Pick { title: "S".into(), artist: "A".into(), why: String::new() }],
+            cost: 0.0,
+        };
+        let earlier = report(100, vec![observation("Night owl", "100-0"), observation("Radio", "100-1")]);
+        let mut new = report(200, vec![
+            observation("Late nights faded", "100-0"),
+            observation("Twice", "100-0"),
+            observation("Made up", "7-7"),
+            observation("New", ""),
+        ]);
+        new.link(std::slice::from_ref(&earlier));
+        let threads: Vec<&str> = new.observations.iter().map(|o| o.thread.as_str()).collect();
+        assert_eq!(threads, ["100-0", "200-1", "200-2", "200-3"]);
+
+        let prompt = previous_reports(&[new, earlier]);
+        assert!(prompt.contains("[100-0] Late nights faded: "), "{prompt}");
+        assert!(prompt.contains("[100-1] Radio\n"), "{prompt}");
+        assert!(prompt.contains("S by A; S by A"), "{prompt}");
+        assert!(previous_reports(&[]).contains("first report"));
+
+        assert_eq!(Habit::from_key("top_songs"), Some(Habit::TopSongs));
+        assert_eq!(Habit::from_key("none"), None);
+        assert_eq!((Habit::Listening.text(112.4), Habit::Skips.text(0.184)), ("1 h 52 min".into(), "18%".into()));
+        assert_eq!((month_label("2026-10", false), month_label("2027-03", true)), ("Oct".into(), "Mar 2027".into()));
     }
 }
