@@ -373,6 +373,7 @@ pub(super) fn ModelMenu() -> Element {
                 Effort::Low => "Effort: quickest",
                 Effort::Medium => "Effort: recommended",
                 Effort::High => "Effort: thinks longer, costs more",
+                Effort::ExtraHigh => "Effort: thinks longer still",
                 Effort::Max => "Effort: thinks longest, costs most",
             }
             .into(),
