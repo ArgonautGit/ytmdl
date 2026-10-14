@@ -1331,6 +1331,8 @@ pub fn SongList(
     #[props(default)] onmore: Option<EventHandler<usize>>,
     #[props(default)] numbered: bool,
     #[props(default)] handles: bool,
+    /// The handles' room left empty, to line up with a list above that has them.
+    #[props(default)] handle_room: bool,
     #[props(default)] swipe: Option<Swipe>,
     #[props(default)] onswipe: Option<EventHandler<usize>>,
 ) -> Element {
@@ -1343,6 +1345,7 @@ pub fn SongList(
                     song,
                     index: numbered.then_some(i + 1),
                     handle: handles,
+                    handle_room,
                     onplay: move |_| onplay.call(i),
                     onmore: onmore.map(|m| EventHandler::new(move |_| m.call(i))),
                     onswipe: onswipe.map(|m| EventHandler::new(move |_| m.call(i))),
@@ -1357,6 +1360,7 @@ fn SongItemRow(
     song: SongItem,
     index: Option<usize>,
     handle: bool,
+    handle_room: bool,
     onplay: EventHandler<()>,
     onmore: Option<EventHandler<()>>,
     onswipe: Option<EventHandler<()>>,
@@ -1422,6 +1426,9 @@ fn SongItemRow(
                     onclick: move |e| e.stop_propagation(),
                     Svg { icon: Icon::Grip, size: 20 }
                 }
+            }
+            if handle_room {
+                span { class: "icon-btn handle-room" }
             }
             if let Some(onswipe) = onswipe {
                 // assets/swipe.js clicks it when the row is swiped; the ⋮ menu
@@ -2043,7 +2050,7 @@ pub fn NowPlayingPage(
     /// A queue row swiped away.
     onremove: EventHandler<usize>,
     /// The rest of a list played without downloading it: not in the queue yet,
-    /// fetched as the player gets near.
+    /// fetched as the player gets near. Listed after the queue's songs.
     #[props(default)]
     upcoming: Vec<SongItem>,
     /// An upcoming row tapped: plays the list from there.
@@ -2052,6 +2059,9 @@ pub fn NowPlayingPage(
     /// An upcoming row's menu.
     #[props(default)]
     onupcomingmore: EventHandler<usize>,
+    /// An upcoming row swiped away.
+    #[props(default)]
+    onupcomingremove: EventHandler<usize>,
     /// The queue loop button: starts picking, or cancels or stops the loop.
     onqueueloop: EventHandler<()>,
     /// The sleep timer's time left ("23 min", "End of song") while it is set.
@@ -2100,6 +2110,7 @@ pub fn NowPlayingPage(
     };
     let sub = dotted([Some(now.artists.clone()), now.album.clone().filter(|a| *a != now.title)]);
     let parse = |v: String| v.parse::<f64>().ok();
+    let picking = matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB);
     rsx! {
         div { class: "now",
             div { class: "now-backdrop",
@@ -2266,7 +2277,7 @@ pub fn NowPlayingPage(
                 "Queue"
                 span { class: "section-note",
                     match queue_loop {
-                        QueueLoopView::Off => plural(queue.len(), "song", "songs"),
+                        QueueLoopView::Off => plural(queue.len() + upcoming.len(), "song", "songs"),
                         QueueLoopView::PickA => "Tap the song to loop back to (A)".into(),
                         QueueLoopView::PickB => "Tap the last song of the loop (B)".into(),
                         QueueLoopView::Looping { first, last } if first == last => format!("Looping song {first}"),
@@ -2281,16 +2292,18 @@ pub fn NowPlayingPage(
                     }
                 }
             }
-            div { class: if matches!(queue_loop, QueueLoopView::PickA | QueueLoopView::PickB) { "queue picking" } else { "queue" },
+            div { class: if picking { "queue picking" } else { "queue" },
                 SongList { songs: queue, onplay: onskip, onmore, handles: true, swipe: Swipe::Remove, onswipe: onremove }
-            }
-            if !upcoming.is_empty() {
-                h2 { class: "section",
-                    "Up next"
-                    span { class: "section-note", {plural(upcoming.len(), "song", "songs")} }
-                }
-                div { class: "upcoming",
-                    SongList { songs: upcoming, onplay: onupcoming, onmore: onupcomingmore }
+                if !upcoming.is_empty() {
+                    // Not fetched yet, so they can't be dragged in among the songs above.
+                    SongList {
+                        songs: upcoming,
+                        onplay: move |i| if !picking { onupcoming.call(i) },
+                        onmore: onupcomingmore,
+                        handle_room: true,
+                        swipe: Swipe::Remove,
+                        onswipe: onupcomingremove,
+                    }
                 }
             }
         }

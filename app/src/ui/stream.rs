@@ -143,6 +143,12 @@ impl Ctx {
         next
     }
 
+    /// Takes the `i`th song of the list's rest out of it.
+    pub(super) fn drop_pending(&self, i: usize) {
+        let mut pending = self.stream.pending;
+        pending.write().remove(i);
+    }
+
     /// Fetches the next song of the list and queues it.
     fn fetch_next(&self) {
         let ctx = *self;

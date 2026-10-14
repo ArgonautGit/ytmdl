@@ -576,6 +576,10 @@ button.icon-btn:active { background: var(--press); }
     white-space: nowrap;
 }
 .queue.picking .row:not(.loop) .title { color: var(--muted); }
+/* The rest of a list being streamed follows the queue's rows as one list. */
+.queue > .list:has(+ .list) { padding-bottom: 0; }
+.queue > .list + .list { padding-top: 0; }
+.row .handle-room { margin: -8px -12px -8px -4px; visibility: hidden; }
 .cover-wrap { position: relative; flex: none; }
 .cover-eq {
     position: absolute;

@@ -1316,6 +1316,7 @@ fn NowPlayingScreen() -> Element {
                     ctx.entry_menu(e.clone());
                 }
             },
+            onupcomingremove: move |i: usize| ctx.drop_pending(i),
             onqueueloop: move |_| {
                 if picking.peek().is_some() {
                     picking.set(None);
