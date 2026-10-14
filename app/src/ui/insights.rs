@@ -892,7 +892,9 @@ pub(super) fn AskScreen() -> Element {
                 class: "composer",
                 onsubmit: move |e| {
                     e.prevent_default();
-                    send(draft.peek().clone());
+                    // Read first: the borrow would last through send, which clears the draft.
+                    let question = draft.peek().clone();
+                    send(question);
                 },
                 input {
                     class: "field",
