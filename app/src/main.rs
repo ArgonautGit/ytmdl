@@ -1,5 +1,6 @@
 //! ytmdl: search YouTube Music and download tagged tracks (Dioxus; desktop and Android).
 
+mod insights;
 mod jobs;
 mod library;
 mod platform;

@@ -131,6 +131,12 @@ pub struct Player {
     /// Next `n` for entry keys; kept past the keys the service reports, which
     /// can come from an earlier run of the app.
     serial: CopyValue<u64>,
+    /// What songs played now are played from ("album: Mordechai"), for the
+    /// listening log; the UI keeps it to the page on top.
+    from: CopyValue<String>,
+    /// What the queue was last started from, for the rest of a list that
+    /// joins it as it is fetched.
+    list_from: CopyValue<String>,
     library: LibraryHandle,
 }
 
@@ -145,6 +151,8 @@ impl Player {
             loop_start: Signal::new(None),
             playlist: Signal::new(None),
             serial: CopyValue::new(0),
+            from: CopyValue::new(String::new()),
+            list_from: CopyValue::new(String::new()),
             library,
         };
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -259,7 +267,7 @@ impl Player {
         let (index, position) = current.map_or((0, 0), |i| (i, saved.position_ms));
         let mut playlist = self.playlist;
         playlist.set(saved.playlist);
-        backend::set_queue(&self.items(&tracks).0, index, position, false);
+        backend::set_queue(&self.items(&tracks, "resumed", false).0, index, position, false);
     }
 
     /// A service that kept its queue across the app's restart: it is a
@@ -287,7 +295,8 @@ impl Player {
     }
 
     /// Queue entries as YtmdlPlayer takes them, with new keys; and the keys.
-    fn items(&self, tracks: &[Track]) -> (String, Vec<String>) {
+    /// `from` and `shuffled` go to the listening log.
+    fn items(&self, tracks: &[Track], from: &str, shuffled: bool) -> (String, Vec<String>) {
         let library = self.library.get();
         let mut serial = self.serial;
         let mut keys = Vec::with_capacity(tracks.len());
@@ -307,6 +316,8 @@ impl Player {
                     "art": art.map(|p| p.display().to_string()).unwrap_or_default(),
                     "gain": t.gain.map(|g| g.gain_db),
                     "peak": t.gain.map(|g| g.peak),
+                    "from": from,
+                    "shuffled": shuffled,
                 })
             })
             .collect();
@@ -315,6 +326,14 @@ impl Player {
 
     // ---- commands ----
 
+    /// Sets what songs played from now on are played from, for the listening log.
+    pub fn set_from(&self, from: String) {
+        let mut current = self.from;
+        if *current.peek() != from {
+            current.set(from);
+        }
+    }
+
     /// Plays `tracks` from `start`, replacing the queue.
     pub fn play(&self, tracks: Vec<Track>, start: usize) {
         self.play_keyed(tracks, start);
@@ -322,11 +341,18 @@ impl Player {
 
     /// [`Player::play`], returning the entries' keys.
     pub fn play_keyed(&self, tracks: Vec<Track>, start: usize) -> Vec<String> {
+        self.start(tracks, start, false)
+    }
+
+    fn start(&self, tracks: Vec<Track>, start: usize, shuffled: bool) -> Vec<String> {
         if tracks.is_empty() {
             return Vec::new();
         }
         let start = start.min(tracks.len() - 1);
-        let (items, keys) = self.items(&tracks);
+        let from = self.from.peek().clone();
+        let mut list_from = self.list_from;
+        list_from.set(from.clone());
+        let (items, keys) = self.items(&tracks, &from, shuffled);
         let mut playlist = self.playlist;
         playlist.set(None);
         backend::set_queue(&items, start, 0, true);
@@ -336,7 +362,7 @@ impl Player {
     /// Plays `tracks` in random order.
     pub fn shuffle(&self, mut tracks: Vec<Track>) {
         shuffle(&mut tracks);
-        self.play(tracks, 0);
+        self.start(tracks, 0, true);
     }
 
     /// Plays playlist `id` (its `tracks`, in order) from `start`.
@@ -373,7 +399,7 @@ impl Player {
         if let Err(e) = self.library.get().set_playlist_progress(id, &progress) {
             tracing::warn!(target: "ytmdl", "saving playlist progress: {e}");
         }
-        let (items, _) = self.items(&queue);
+        let (items, _) = self.items(&queue, &self.from.peek(), progress.shuffled);
         let mut playlist = self.playlist;
         playlist.set(Some(id));
         backend::set_queue(&items, progress.index, progress.position_ms, true);
@@ -382,7 +408,7 @@ impl Player {
     /// Queues `tracks` right after the current song.
     pub fn play_next(&self, tracks: &[Track]) {
         if !tracks.is_empty() {
-            backend::insert(&self.items(tracks).0, true);
+            backend::insert(&self.items(tracks, "queue", false).0, true);
         }
     }
 
@@ -391,7 +417,18 @@ impl Player {
         if tracks.is_empty() {
             return Vec::new();
         }
-        let (items, keys) = self.items(tracks);
+        let (items, keys) = self.items(tracks, "queue", false);
+        backend::insert(&items, false);
+        keys
+    }
+
+    /// Queues `tracks` at the end as more of the list the queue was started
+    /// from. Returns the entries' keys.
+    pub fn add_from_list(&self, tracks: &[Track]) -> Vec<String> {
+        if tracks.is_empty() {
+            return Vec::new();
+        }
+        let (items, keys) = self.items(tracks, &self.list_from.peek(), false);
         backend::insert(&items, false);
         keys
     }

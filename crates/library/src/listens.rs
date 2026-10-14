@@ -2,11 +2,14 @@
 //!
 //! The player runs in its own process (and keeps playing with the app closed),
 //! so it can't write here. It appends one line per song it played to a log
-//! instead, `<started, unix s>\t<track id>\t<ms played>`, and
-//! [`Library::import_listens`] moves the lines into the database.
+//! instead, and [`Library::import_listens`] moves the lines into the database.
+//! A line is `<started, unix s>\t<track id>\t<ms played>`, then (since
+//! listening insights) `\t<how it ended>\t<position, ms>\t<source>\t<shuffled
+//! 0|1>\t<output>\t<title>\t<artist>\t<album>`; the tags are for a song deleted
+//! before its listen is read, as the library's are copied in otherwise.
 //!
-//! Every listen is kept with the time actually played; one counts as a play
-//! once it reaches 30 seconds, or half of a song shorter than a minute.
+//! Every listen is kept with the time actually played, skips too; one counts as
+//! a play once it reaches 30 seconds, or half of a song shorter than a minute.
 
 use std::collections::HashMap;
 use std::fs;
@@ -126,23 +129,50 @@ impl Library {
         let tx = db.transaction()?;
         let mut imported = 0;
         {
-            // Negative ids are cached songs (see cache.rs).
+            // Negative ids are cached songs (see cache.rs). The song's tags
+            // are copied from the library, or the log for a song gone from it.
             let mut insert = tx.prepare(
-                "INSERT INTO listens (video_id, started_at, ms)
-                 VALUES (CASE WHEN ?1 < 0 THEN (SELECT video_id FROM cached WHERE id = -?1)
-                              ELSE (SELECT video_id FROM tracks WHERE id = ?1) END, ?2, ?3)",
+                "WITH song AS (
+                     SELECT video_id, title, artists, album, CAST(duration * 1000 AS INTEGER) AS duration_ms
+                     FROM tracks WHERE id = ?1 AND ?1 >= 0
+                     UNION ALL
+                     SELECT video_id, title, artists, album, CAST(duration * 1000 AS INTEGER)
+                     FROM cached WHERE id = -?1 AND ?1 < 0
+                 )
+                 INSERT INTO listens (video_id, started_at, ms, ended, position_ms, source, shuffled, output,
+                                      title, artists, album, duration_ms)
+                 SELECT song.video_id, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                        COALESCE(song.title, ?9), COALESCE(song.artists, ?10), COALESCE(song.album, ?11), song.duration_ms
+                 FROM (SELECT 1) LEFT JOIN song",
             )?;
             for line in text.lines() {
                 let fields: Vec<&str> = line.split('\t').collect();
-                let [started, track, ms] = fields.as_slice() else { continue };
-                let (Ok(started), Ok(track), Ok(ms)) = (started.parse::<i64>(), track.parse::<i64>(), ms.parse::<i64>())
-                else {
+                let (Some(started), Some(track), Some(ms)) = (
+                    fields.first().and_then(|f| f.parse::<i64>().ok()),
+                    fields.get(1).and_then(|f| f.parse::<i64>().ok()),
+                    fields.get(2).and_then(|f| f.parse::<i64>().ok()),
+                ) else {
                     continue;
                 };
-                if ms > 0 {
-                    insert.execute(params![track, started, ms])?;
-                    imported += 1;
+                if ms <= 0 {
+                    continue;
                 }
+                let text = |i: usize| fields.get(i).map(|f| f.trim()).filter(|f| !f.is_empty());
+                let artists = text(9).map(|a| serde_json::to_string(&[a])).transpose()?;
+                insert.execute(params![
+                    track,
+                    started,
+                    ms,
+                    text(3),
+                    text(4).and_then(|f| f.parse::<i64>().ok()),
+                    text(5),
+                    text(6).map(|f| f == "1"),
+                    text(7),
+                    text(8),
+                    artists,
+                    text(10),
+                ])?;
+                imported += 1;
             }
         }
         tx.commit()?;

@@ -5,6 +5,7 @@ mod artist;
 mod duplicates;
 mod home;
 mod icons;
+mod insights;
 mod licenses;
 mod lyrics;
 #[cfg(test)]
@@ -33,6 +34,7 @@ use artist::{OpenArtist, OpenList, RemoteArtistScreen, RemoteListScreen};
 use duplicates::DuplicatesScreen;
 use home::HomeScreen;
 use icons::Icon;
+use insights::{ApiKeyDialog, AskScreen, FrequencyMenu, Insights, InsightsScreen, InsightsSettings, ModelMenu};
 use licenses::{LicenseScreen, LicensesScreen, Notice};
 use lyrics::LyricsCache;
 pub(crate) use lyrics::lookup_enabled as lyrics_lookup_enabled;
@@ -90,6 +92,7 @@ struct Ctx {
     membership: Memo<Membership>,
     /// New songs join the secondary playlist.
     new_to_secondary: Signal<bool>,
+    insights: Insights,
 }
 
 /// The playlists with a role, and which playlists each song is in.
@@ -460,6 +463,10 @@ enum Overlay {
     /// Open-source licenses, from Settings.
     Licenses,
     License(Notice),
+    /// Claude's read on the listening history.
+    Insights,
+    /// A chat about it, not kept.
+    Ask,
     /// A menu or dialog over the page below.
     Sheet(Sheet),
 }
@@ -467,6 +474,10 @@ enum Overlay {
 #[derive(Clone, PartialEq)]
 enum Sheet {
     Song { track: Box<Track>, from: From },
+    /// Insights' settings.
+    InsightsModel,
+    InsightsFrequency,
+    ApiKey,
     Album { title: String, artist: String },
     /// An artist in the library.
     Artist(String),
@@ -752,6 +763,7 @@ fn Shell(setup: Setup) -> Element {
         Membership::load(&library.get())
     });
     let new_to_secondary = use_signal(|| setup.library.new_to_secondary().unwrap_or(true));
+    let insights = use_hook(|| Insights::load(&setup.library));
     let ctx = use_context_provider(|| Ctx {
         boot,
         queue,
@@ -774,6 +786,7 @@ fn Shell(setup: Setup) -> Element {
         stream,
         membership,
         new_to_secondary,
+        insights,
     });
     use_context_provider(|| OnMark(EventHandler::new(move |(track, role)| ctx.toggle_mark(track, role))));
 
@@ -804,6 +817,7 @@ fn Shell(setup: Setup) -> Element {
     });
     downloads_notification(queue, stream);
     use_background_work(ctx);
+    insights::use_play_source(ctx);
     use_stream(ctx);
     use_shared_links(ctx);
     // Install themselves once; the lists that allow swiping say so, and rows
@@ -867,13 +881,15 @@ fn Shell(setup: Setup) -> Element {
 
 /// What runs once the downloader is up, whenever the app comes back to the
 /// screen, and every ten minutes while it is on screen: syncing playlists
-/// whose last sync is old, the daily yt-dlp update check, and reading
-/// the player's listening log (also whenever the song changes).
+/// whose last sync is old, the daily yt-dlp update check, insights when
+/// they are due (or a batched report to collect), and reading the player's
+/// listening log (also whenever the song changes).
 fn use_background_work(ctx: Ctx) {
     use_effect(move || {
         if matches!(*ctx.boot.read(), Boot::Ready(_)) {
             ctx.sync_stale();
             ctx.auto_update_ytdlp();
+            ctx.insights_tick();
         }
     });
     use_hook(move || {
@@ -892,6 +908,7 @@ fn use_background_work(ctx: Ctx) {
                 if ctx.services().is_some() {
                     ctx.sync_stale();
                     ctx.auto_update_ytdlp();
+                    ctx.insights_tick();
                 }
             }
         })
@@ -1019,6 +1036,8 @@ fn Overlays() -> Element {
                             Overlay::Titles => rsx! { TitlesScreen {} },
                             Overlay::Licenses => rsx! { LicensesScreen {} },
                             Overlay::License(notice) => rsx! { LicenseScreen { notice } },
+                            Overlay::Insights => rsx! { InsightsScreen {} },
+                            Overlay::Ask => rsx! { AskScreen {} },
                             Overlay::Sheet(_) => rsx! {},
                         }
                     }
@@ -1648,6 +1667,9 @@ fn SheetScreen(sheet: Sheet) -> Element {
         Sheet::SectionName { id, name, video_id, a, b } => rsx! { SectionNameDialog { id, name, video_id, a, b } },
         Sheet::Duplicate { entry, existing } => rsx! { DuplicateDialog { entry: *entry, existing: *existing } },
         Sheet::Cache => rsx! { CacheMenu {} },
+        Sheet::InsightsModel => rsx! { ModelMenu {} },
+        Sheet::InsightsFrequency => rsx! { FrequencyMenu {} },
+        Sheet::ApiKey => rsx! { ApiKeyDialog {} },
     }
 }
 
@@ -2763,6 +2785,7 @@ fn SettingsScreen() -> Element {
             new_to_secondary: (ctx.new_to_secondary)(),
             onrole: move |role| ctx.nav.push(Overlay::Sheet(Sheet::Role(role))),
             ontogglenew: move |_| ctx.set_new_to_secondary(!*ctx.new_to_secondary.peek()),
+            InsightsSettings {}
         }
     }
 }

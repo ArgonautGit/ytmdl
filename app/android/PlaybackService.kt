@@ -3,6 +3,9 @@ package dev.nick.ytmdl
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -55,7 +58,9 @@ import kotlin.math.pow
  * plays it, though.
  *
  * Every song played is logged to `files/listens.log` for the app's listening
- * stats (see crates/library/src/listens.rs), since the app may not be running.
+ * stats and insights (see crates/library/src/listens.rs), since the app may
+ * not be running: how long it played, how it ended and where, what it was
+ * played from (the queue entry's "from" extra) and what it played through.
  *
  * Cars (Android Auto) and other media browsers browse the library here and
  * play from it (see Browse), also without the app running.
@@ -75,12 +80,16 @@ class PlaybackService : MediaLibraryService() {
         /** A song's ReplayGain (dB) and peak, in its metadata extras. */
         const val GAIN = "gain"
         const val PEAK = "peak"
+        /** What a queue entry was played from ("playlist: Gym"), and whether
+         * its queue was shuffled, in its metadata extras, for the listening log. */
+        const val FROM = "from"
+        const val SHUFFLED = "shuffled"
 
         private const val TAG = "ytmdl"
         /** The sleep timer fades the music out over its last seconds. */
         private const val FADE_MS = 15_000L
-        /** Shorter listens (skips) aren't logged. */
-        private const val MIN_LISTEN_MS = 1_000L
+        /** Android Auto, whose connection means the music plays in the car. */
+        private const val ANDROID_AUTO = "com.google.android.projection.gearhead"
         /**
          * Added to the ReplayGain, which aims at -18 LUFS: -14 LUFS is what
          * streaming services play at. The gain only ever turns songs down
@@ -121,11 +130,16 @@ class PlaybackService : MediaLibraryService() {
     /** Songs play at an even loudness (the app's setting, kept for restarts). */
     private var normalize = true
 
-    /** The song being listened to, for the log: its media id, when it started
-     * (wall clock) and how long it has played so far. */
-    private var listenId: String? = null
+    /** The song being listened to, for the log: its queue entry, when it
+     * started (wall clock), how long it has played so far, and what it plays
+     * through. */
+    private var listenItem: MediaItem? = null
     private var listenStart = 0L
     private var listenedMs = 0L
+    private var listenOutput: String? = null
+    /** Where the song left by the last transition was (ms), read before the
+     * transition is reported. */
+    private var leftAtMs = -1L
     /** elapsedRealtime of the last count while playing; -1 while not. */
     private var playingSince = -1L
 
@@ -185,7 +199,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         Log.i(TAG, "player: service stopped")
         io.shutdown()
-        finishListen()
+        finishListen("stopped")
         main.removeCallbacks(sleepTick)
         loopMessages.forEach { it.cancel() }
         session?.run {
@@ -657,9 +671,12 @@ class PlaybackService : MediaLibraryService() {
     private val listenListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
-                if (listenId == null) startListen(player?.currentMediaItem?.mediaId)
+                if (listenItem == null) startListen(player?.currentMediaItem)
                 // A song queued a while before it plays started listening now.
-                if (listenedMs == 0L) listenStart = System.currentTimeMillis()
+                if (listenedMs == 0L) {
+                    listenStart = System.currentTimeMillis()
+                    listenOutput = output()
+                }
                 playingSince = SystemClock.elapsedRealtime()
             } else {
                 countListen()
@@ -667,7 +684,26 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        override fun onMediaItemTransition(item: MediaItem?, reason: Int) = startListen(item?.mediaId)
+        override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+            if (old.mediaItemIndex != new.mediaItemIndex || reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                leftAtMs = old.positionMs
+            }
+        }
+
+        override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+            finishListen(
+                when (reason) {
+                    Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> "finished"
+                    Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> "skipped"
+                    else -> "replaced"
+                }
+            )
+            startListen(item)
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_ENDED) finishListen("finished")
+        }
     }
 
     private fun countListen() {
@@ -677,25 +713,76 @@ class PlaybackService : MediaLibraryService() {
         playingSince = now
     }
 
-    private fun startListen(id: String?) {
-        finishListen()
-        listenId = id
+    private fun startListen(item: MediaItem?) {
+        finishListen("replaced")
+        listenItem = item
         listenStart = System.currentTimeMillis()
+        listenOutput = output()
     }
 
-    /** Logs the song being listened to: `<started, unix s>\t<track id>\t<ms>`. */
-    private fun finishListen() {
+    /**
+     * Logs the song being listened to, if it played at all: `<started, unix s>
+     * \t<track id>\t<ms>\t<ended>\t<position ms>\t<from>\t<shuffled>\t<output>
+     * \t<title>\t<artist>\t<album>`.
+     */
+    private fun finishListen(ended: String) {
         countListen()
-        val id = listenId
+        val item = listenItem
         val ms = listenedMs
-        listenId = null
+        val position = if (leftAtMs >= 0) leftAtMs else player?.currentPosition ?: 0L
+        listenItem = null
         listenedMs = 0L
-        if (id == null || ms < MIN_LISTEN_MS) return
-        val line = "${listenStart / 1000}\t${id.substringBefore('.')}\t$ms\n"
+        leftAtMs = -1L
+        if (item == null || ms <= 0L) return
+        val meta = item.mediaMetadata
+        fun field(text: CharSequence?) = text?.toString()?.replace(Regex("[\\t\\n\\r]"), " ")?.trim().orEmpty()
+        val fields = listOf(
+            "${listenStart / 1000}",
+            item.mediaId.substringBefore('.'),
+            "$ms",
+            ended,
+            "$position",
+            field(meta.extras?.getString(FROM)),
+            if (meta.extras?.getBoolean(SHUFFLED) == true) "1" else "0",
+            field(listenOutput),
+            field(meta.title),
+            field(meta.artist),
+            field(meta.albumTitle),
+        )
         try {
-            FileOutputStream(File(filesDir, "listens.log"), true).use { it.write(line.toByteArray()) }
+            FileOutputStream(File(filesDir, "listens.log"), true).use { it.write((fields.joinToString("\t") + "\n").toByteArray()) }
         } catch (e: IOException) {
             Log.w(TAG, "logging a listen", e)
+        }
+    }
+
+    /** What music plays through now: "car" with Android Auto connected, else
+     * the device Android routes media to. */
+    private fun output(): String? {
+        if (session?.connectedControllers?.any { it.packageName == ANDROID_AUTO } == true) return "car"
+        val audio = getSystemService(AudioManager::class.java) ?: return null
+        val device = if (Build.VERSION.SDK_INT >= 33) {
+            val media = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).build()
+            audio.getAudioDevicesForAttributes(media).firstOrNull()
+        } else {
+            // The device Android would pick: Bluetooth, then a cable, then the speaker.
+            val outputs = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val order = listOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+            )
+            order.firstNotNullOfOrNull { type -> outputs.firstOrNull { it.type == type } }
+        } ?: return null
+        return when (device.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_BLE_BROADCAST, AudioDeviceInfo.TYPE_BLUETOOTH_SCO ->
+                device.productName?.toString()?.takeIf { it.isNotBlank() }?.let { "bluetooth: $it" } ?: "bluetooth"
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "usb"
+            AudioDeviceInfo.TYPE_HDMI, AudioDeviceInfo.TYPE_HDMI_ARC, AudioDeviceInfo.TYPE_HDMI_EARC -> "hdmi"
+            AudioDeviceInfo.TYPE_REMOTE_SUBMIX -> "cast"
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "speaker"
+            else -> "other"
         }
     }
 

@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ytmdl-core.workspace = true
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty.workspace = true
 serde.workspace = true

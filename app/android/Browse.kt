@@ -61,8 +61,12 @@ class Browse(private val context: Context) {
             art: Uri?,
             gain: Double?,
             peak: Double?,
+            from: String?,
+            shuffled: Boolean,
         ): MediaItem {
             val extras = Bundle()
+            if (!from.isNullOrEmpty()) extras.putString(PlaybackService.FROM, from)
+            if (shuffled) extras.putBoolean(PlaybackService.SHUFFLED, true)
             if (gain != null) {
                 extras.putDouble(PlaybackService.GAIN, gain)
                 extras.putDouble(PlaybackService.PEAK, peak ?: 1.0)
@@ -308,9 +312,21 @@ class Browse(private val context: Context) {
         return MediaItem.Builder().setMediaId("$listId|${t.id}").setMediaMetadata(meta).build()
     }
 
-    private fun queueItem(t: Track, n: Long): MediaItem = queueItem(
+    /** [from]: what it was played from, for the listening log. */
+    private fun queueItem(t: Track, n: Long, from: String, shuffled: Boolean = false): MediaItem = queueItem(
         "${t.id}.$n", t.path, t.title, t.artists.joinToString(", "), t.album, art(t.art, ART_LARGE), t.gain, t.peak,
+        from, shuffled,
     )
+
+    /** What a pick in the car (or another browser) plays from: "car: playlists". */
+    private fun from(item: MediaItem): String {
+        val id = item.mediaId
+        val list = if (id.isEmpty()) SEARCH else id.substringBeforeLast('|', id)
+        return "car: " + list.substringBefore(':')
+    }
+
+    private fun shuffled(item: MediaItem) =
+        item.mediaId.startsWith(SHUFFLE) || (item.mediaId.isEmpty() && item.requestMetadata.searchQuery.isNullOrBlank())
 
     fun root(): MediaItem = folder(ROOT, "ytmdl", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
 
@@ -398,7 +414,9 @@ class Browse(private val context: Context) {
         if (items.size == 1) {
             val (tracks, index) = expand(items[0]) ?: return null
             if (tracks.isEmpty()) return null
-            val queue = tracks.mapIndexed { i, t -> queueItem(t, serial + i) }
+            val from = from(items[0])
+            val shuffled = shuffled(items[0])
+            val queue = tracks.mapIndexed { i, t -> queueItem(t, serial + i, from, shuffled) }
             // The position asked for is in the song picked.
             return MediaItemsWithStartPosition(queue, index, positionMs)
         }
@@ -420,7 +438,8 @@ class Browse(private val context: Context) {
             } else {
                 expand(item)?.first.orEmpty()
             }
-            tracks.map { queueItem(it, n++) }
+            val from = from(item)
+            tracks.map { queueItem(it, n++, from, shuffled(item)) }
         }
     }
 
@@ -440,7 +459,7 @@ class Browse(private val context: Context) {
     /** The queue the app last had, to pick up where it left off. */
     fun resumption(serial: Long): MediaItemsWithStartPosition? {
         val (tracks, index, position) = savedQueue() ?: return null
-        return MediaItemsWithStartPosition(tracks.mapIndexed { i, t -> queueItem(t, serial + i) }, index, position)
+        return MediaItemsWithStartPosition(tracks.mapIndexed { i, t -> queueItem(t, serial + i, "resumed") }, index, position)
     }
 }
 

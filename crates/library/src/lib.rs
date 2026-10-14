@@ -10,6 +10,7 @@
 mod art;
 mod cache;
 mod duplicates;
+mod history;
 mod home;
 mod listens;
 mod playlists;
@@ -34,6 +35,7 @@ pub use art::{ART_LARGE, ART_SMALL};
 use art::ArtCache;
 use cache::CACHED_COLUMNS;
 pub use duplicates::Duplicates;
+pub use history::{HistoryInfo, QueryResult, VIEW_DOCS};
 pub use home::Home;
 pub use listens::{Bucket, Period, PlayCounts, Stats, TopAlbum, TopArtist, TopTrack};
 pub use playlists::{Playlist, PlaylistEntry};
@@ -201,6 +203,22 @@ CREATE TABLE playlist_wanted (
     PRIMARY KEY (playlist_id, video_id)
 );
 CREATE INDEX playlist_wanted_video ON playlist_wanted (video_id);
+"#, r#"
+-- More of each listen, for listening insights (see listens.rs and insights.rs).
+-- The song's tags are copied in, so a listen keeps them after the song goes.
+ALTER TABLE listens ADD COLUMN title       TEXT;
+ALTER TABLE listens ADD COLUMN artists     TEXT;        -- JSON array
+ALTER TABLE listens ADD COLUMN album       TEXT;
+ALTER TABLE listens ADD COLUMN duration_ms INTEGER;
+ALTER TABLE listens ADD COLUMN ended       TEXT;        -- finished | skipped | replaced | stopped; NULL before this was logged
+ALTER TABLE listens ADD COLUMN position_ms INTEGER;     -- where in the song it ended
+ALTER TABLE listens ADD COLUMN source      TEXT;        -- what it was played from: "playlist: Gym", "radio: Song", "car: Albums"
+ALTER TABLE listens ADD COLUMN shuffled    INTEGER;     -- the queue was shuffled
+ALTER TABLE listens ADD COLUMN output      TEXT;        -- speaker | wired | bluetooth: <device> | usb | car | cast
+UPDATE listens SET title = t.title, artists = t.artists, album = t.album, duration_ms = CAST(t.duration * 1000 AS INTEGER)
+FROM tracks t WHERE t.video_id = listens.video_id;
+UPDATE listens SET title = c.title, artists = c.artists, album = c.album, duration_ms = CAST(c.duration * 1000 AS INTEGER)
+FROM cached c WHERE c.video_id = listens.video_id AND listens.title IS NULL;
 "#];
 
 pub(crate) const TRACK_COLUMNS: &str =
@@ -291,6 +309,8 @@ pub struct Library(Arc<Inner>);
 
 struct Inner {
     db: Mutex<Connection>,
+    /// The database file; `None` in memory.
+    path: Option<PathBuf>,
     art: ArtCache,
 }
 
@@ -302,20 +322,21 @@ impl Library {
         let conn = Connection::open(db)?;
         conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get::<_, String>(0))?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        Self::init(conn, art_dir)
+        Self::init(conn, Some(db.to_owned()), art_dir)
     }
 
     /// A throwaway library (tests and previews).
     pub fn open_in_memory(art_dir: &Path) -> Result<Library> {
-        Self::init(Connection::open_in_memory()?, art_dir)
+        Self::init(Connection::open_in_memory()?, None, art_dir)
     }
 
-    fn init(mut conn: Connection, art_dir: &Path) -> Result<Library> {
+    fn init(mut conn: Connection, path: Option<PathBuf>, art_dir: &Path) -> Result<Library> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         migrate(&mut conn)?;
         Ok(Library(Arc::new(Inner {
             db: Mutex::new(conn),
+            path,
             art: ArtCache::new(art_dir.to_owned()),
         })))
     }

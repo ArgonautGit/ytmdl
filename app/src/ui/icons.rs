@@ -72,6 +72,8 @@ pub enum Icon {
     /// The secondary playlist (current favourites); `FlameFilled` when in it.
     Flame,
     FlameFilled,
+    Chat,
+    Send,
 }
 
 const STAR: &str = "M12 2.8l2.85 5.78 6.37.93-4.61 4.49 1.09 6.35L12 17.35l-5.7 3 1.09-6.35-4.61-4.49 6.37-.93z";
@@ -241,6 +243,12 @@ pub fn Svg(icon: Icon, #[props(default = 24)] size: u32) -> Element {
         Icon::CheckCircle => rsx! {
             circle { cx: "12", cy: "12", r: "9.5" }
             path { d: "m8 12.3 2.8 2.7L16 9.5" }
+        },
+        Icon::Chat => rsx! {
+            path { d: "M20.5 12a8.5 8.5 0 0 1-12.3 7.6L3.5 20.5l1-4.6A8.5 8.5 0 1 1 20.5 12z" }
+        },
+        Icon::Send => rsx! {
+            path { d: "M4 19.5 20.5 12 4 4.5l1.8 7.5zM5.8 12h7" }
         },
         Icon::Circle => rsx! {
             circle { cx: "12", cy: "12", r: "9.5" }

@@ -613,6 +613,25 @@ def fetch(url, max_bytes, headers_json="{}", missing_ok=False):
     return data
 
 
+def http(method, url, headers_json, body, timeout):
+    """An HTTPS request with an optional JSON body (the Claude API, for listening
+    insights). Returns [status, body], error answers included, so the caller can
+    read them."""
+    import urllib.error
+
+    headers = json.loads(headers_json)
+    data = None
+    if body is not None:
+        headers.setdefault("Content-Type", "application/json")
+        data = body.encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            return [resp.status, resp.read()]
+    except urllib.error.HTTPError as e:
+        return [e.code, e.read()]
+
+
 # --- updater (stdlib only: runs before yt-dlp is imported) ---------------------
 
 _REPOS = {"stable": "yt-dlp/yt-dlp", "nightly": "yt-dlp/yt-dlp-nightly-builds"}

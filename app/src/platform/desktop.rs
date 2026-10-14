@@ -66,6 +66,10 @@ pub fn request_storage_access() {}
 
 pub fn media_scan(_path: &Path) {}
 
+pub fn unmetered_network() -> bool {
+    true
+}
+
 /// No playback on desktop (the app is only built there for checks); the player
 /// never reports a state, so the UI shows no player.
 pub mod player {

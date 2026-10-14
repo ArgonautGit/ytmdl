@@ -3,6 +3,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use image::{ImageFormat, Rgb, RgbImage};
+use serde_json::json;
 use ytmdl_core::tag::{Cover, write_tags};
 use ytmdl_core::{Downloaded, Entry, TrackMeta};
 
@@ -942,4 +943,66 @@ fn recent_playlists_put_the_last_played_first() {
     lib.set_playlist_progress(old, &Progress::in_order(&[a.id], 0, None)).unwrap();
     assert_eq!(names(&lib), ["Old", "New"]);
     assert_eq!(lib.home().unwrap().playlists.len(), 2);
+}
+
+#[test]
+fn keeps_listen_details_for_insights() {
+    let tmp = TempDir::new("history");
+    let db = tmp.0.join("library.db");
+    let lib = Library::open(&db, &tmp.0.join("art")).unwrap();
+    let a = add(&lib, &tmp.0, meta("aaaaaaaaaaa", "Tune", Some("Record"), &["Band", "Guest"], Some(1)));
+    let gone = add(&lib, &tmp.0, meta("ccccccccccc", "Gone", None, &["Solo"], None));
+    let now = now();
+
+    // Old lines, new ones, and a new one of a song deleted before the import,
+    // which keeps the tags the player logged.
+    let log = tmp.0.join("listens.log");
+    let text = format!(
+        "{now}\t{a}\t180000\n\
+         {now}\t{a}\t4000\tskipped\t4000\tplaylist: Gym\t1\tbluetooth: Car Audio\tTune\tBand, Guest\tRecord\n\
+         {now}\t{gone}\t60000\tfinished\t60000\talbum: Gone\t0\tspeaker\tGone\tSolo\t\n",
+        a = a.id,
+        gone = gone.id,
+    );
+    fs::write(&log, text).unwrap();
+    lib.delete_track(gone.id).unwrap();
+    assert_eq!(lib.import_listens(&log).unwrap(), 3);
+    assert_eq!(lib.history_info().unwrap().listens, 3);
+
+    let rows = lib
+        .query_history("SELECT title, artists, ended, source, shuffled, output, play, in_library FROM history ORDER BY id")
+        .unwrap();
+    assert_eq!(rows.columns.len(), 8);
+    assert_eq!(rows.rows[0], [json!("Tune"), json!(["Band", "Guest"]), json!(null), json!(null), json!(null), json!(null), json!(1), json!(1)]);
+    assert_eq!(
+        rows.rows[1],
+        [json!("Tune"), json!(["Band", "Guest"]), json!("skipped"), json!("playlist: Gym"), json!(1), json!("bluetooth: Car Audio"), json!(0), json!(1)]
+    );
+    assert_eq!(rows.rows[2][..4], [json!("Gone"), json!(["Solo"]), json!("finished"), json!("album: Gone")]);
+    assert_eq!(rows.rows[2][7], json!(0));
+
+    // Only reads.
+    for sql in ["DELETE FROM listens", "PRAGMA query_only = 0", "ATTACH 'x.db' AS x", "WITH x AS (SELECT 1) DELETE FROM listens"] {
+        assert!(lib.query_history(sql).is_err(), "{sql}");
+    }
+    assert_eq!(lib.history_info().unwrap().listens, 3);
+    let many = lib.query_history("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n LIMIT 500) SELECT i FROM n").unwrap();
+    assert!(many.truncated && many.rows.len() == 200);
+
+    let summary = lib.history_summary(false).unwrap();
+    assert_eq!(summary["today"]["rows"][0][2], json!(3));
+    assert_eq!(summary["sources_90_days"]["rows"].as_array().unwrap().len(), 2);
+    assert!(summary.get("rising_artists").is_none());
+    let detailed = lib.history_summary(true).unwrap();
+    assert_eq!(detailed["listening_days"]["rows"][0][0], json!(1));
+    assert!(detailed["longest_sessions_90_days"]["rows"].as_array().unwrap().len() >= 1);
+
+    let out = tmp.0.join("export/listens.json");
+    assert_eq!(lib.export_history(&out).unwrap(), 3);
+    let exported: serde_json::Value = serde_json::from_slice(&fs::read(&out).unwrap()).unwrap();
+    assert_eq!(exported[1]["output"], json!("bluetooth: Car Audio"));
+
+    // In memory too (tests, previews).
+    let mem = Library::open_in_memory(&tmp.0.join("art2")).unwrap();
+    assert_eq!(mem.query_history("SELECT COUNT(*) FROM history").unwrap().rows[0][0], json!(0));
 }

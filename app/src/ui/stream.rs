@@ -175,7 +175,7 @@ impl Ctx {
             match result {
                 Ok(track) => {
                     failures.set(0);
-                    let keys = ctx.player.add_to_queue(&[track]);
+                    let keys = ctx.player.add_from_list(&[track]);
                     tail.set(keys.last().map(|k| (k.clone(), Instant::now())));
                 }
                 // Nothing is wrong with the app or the network: the song is just gone.

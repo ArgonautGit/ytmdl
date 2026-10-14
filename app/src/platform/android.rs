@@ -219,6 +219,23 @@ pub fn request_storage_access() {
     }
 }
 
+/// Whether the network in use isn't metered (Wi-Fi, usually), for work that
+/// waits for one. False without a network.
+pub fn unmetered_network() -> bool {
+    with_env(|env, activity| {
+        let name = env.new_string("connectivity")?;
+        let cm = env
+            .call_method(activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[JValue::Object(&name)])?
+            .l()?;
+        let network = env.call_method(&cm, "getActiveNetwork", "()Landroid/net/Network;", &[])?.l()?;
+        if network.is_null() {
+            return Ok(false);
+        }
+        Ok(!env.call_method(&cm, "isActiveNetworkMetered", "()Z", &[])?.z()?)
+    })
+    .unwrap_or(false)
+}
+
 /// Asks MediaStore to index a finished download so music apps see it, or to
 /// forget a deleted one.
 pub fn media_scan(path: &Path) {

@@ -111,8 +111,9 @@ object YtmdlPlayer {
     }
 
     /**
-     * `[{id, path, title, artist, album, art, gain, peak}]`, art being a cover
-     * file path or "", gain (dB) and peak the song's ReplayGain or null.
+     * `[{id, path, title, artist, album, art, gain, peak, from, shuffled}]`,
+     * art being a cover file path or "", gain (dB) and peak the song's
+     * ReplayGain or null, from what it is played from (for the listening log).
      */
     private fun mediaItems(json: String): List<MediaItem> {
         val list = JSONArray(json)
@@ -131,6 +132,8 @@ object YtmdlPlayer {
                 art,
                 if (o.isNull("gain")) null else o.getDouble("gain"),
                 o.optDouble("peak", 1.0),
+                o.optString("from"),
+                o.optBoolean("shuffled"),
             )
         }
     }

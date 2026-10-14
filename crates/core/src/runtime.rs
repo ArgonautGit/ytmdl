@@ -153,6 +153,8 @@ struct Inner {
     version: VersionInfo,
     meta: Lane,
     downloads: Lane,
+    /// Long API calls (listening insights), apart from searches and downloads.
+    api: Lane,
 }
 
 /// Handle to the process-wide yt-dlp runtime. Cheap to clone.
@@ -198,6 +200,7 @@ impl Runtime {
         let bridge = Arc::new(bridge);
         Ok(Runtime(Arc::new(Inner {
             meta: Lane::spawn("meta", 1, bridge.clone()),
+            api: Lane::spawn("api", 1, bridge.clone()),
             downloads: Lane::spawn("dl", config.download_workers, bridge),
             config,
             ytdlp_zip,
@@ -315,6 +318,30 @@ impl Runtime {
             }
             let bytes = data.cast::<PyBytes>().map_err(|e| Error::Python(e.to_string()))?;
             Ok(Some(bytes.as_bytes().to_vec()))
+        })
+        .await
+    }
+
+    /// An HTTPS request to `url` (`method` GET, POST…, with `body` as JSON),
+    /// waiting up to `timeout_secs`; returns the HTTP status and the answer's
+    /// body, for error answers too. Runs apart from searches and downloads.
+    pub async fn http(
+        &self,
+        method: &'static str,
+        url: String,
+        headers: Vec<(String, String)>,
+        body: Option<String>,
+        timeout_secs: u64,
+    ) -> Result<(u16, Vec<u8>)> {
+        self.run(&self.0.api, move |py, bridge| {
+            let headers: std::collections::HashMap<String, String> = headers.into_iter().collect();
+            let answer = bridge
+                .call_method1("http", (method, url, serde_json::to_string(&headers)?, body, timeout_secs))
+                .map_err(|e| py_error(py, e))?;
+            let status: u16 = answer.get_item(0).and_then(|v| v.extract()).map_err(|e| py_error(py, e))?;
+            let data = answer.get_item(1).map_err(|e| py_error(py, e))?;
+            let bytes = data.cast::<PyBytes>().map_err(|e| Error::Python(e.to_string()))?;
+            Ok((status, bytes.as_bytes().to_vec()))
         })
         .await
     }

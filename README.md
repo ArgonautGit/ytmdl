@@ -77,7 +77,22 @@ new APK.
   app's cache and played, and the songs after it in the list are fetched two
   ahead of the one playing. "Add to library" in Now Playing (or downloading
   it) copies a cached song into the music folder. The cache holds 100 MB
-  unless Settings → Song cache says otherwise.
+  unless Settings → Song cache says otherwise. Every listen is kept: when,
+  how long it played, how it ended (finished, skipped, replaced by another
+  list, stopped), what it was played from (a playlist, album, radio, search,
+  the car…), whether it was shuffled and what it played through (speaker,
+  headphones, a Bluetooth device, the car), with the song's tags, so it
+  outlives the song; Settings exports it as JSON. Listening insights, off
+  until turned on in Settings, have Claude (the Claude API, with the user's
+  own key) read the history and say what stands out in it, with songs to try
+  from YouTube Music, on a schedule (daily, weekly, monthly, checked while the
+  app is open, on Wi-Fi only if asked) or on demand; model and effort are
+  settings. A report either runs now, Claude querying the history itself
+  through a read-only SQL tool (`crates/library/src/history.rs`), or goes
+  through the Batch API at half price, from a fuller summary, and is collected
+  when done. Ask is a chat about the history with the same tool, kept only
+  while its page is open. Requests are prompt-cached, so each turn of a
+  report or chat reads the ones before it from the cache.
 - `app/android`: Kotlin driven from Rust over JNI. Playback is a Media3
   ExoPlayer service in its own `:player` process (notification, lock screen and
   headset controls), which also runs the A-B loops and the sleep timer so they

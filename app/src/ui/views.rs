@@ -378,7 +378,7 @@ fn mb(bytes: u64) -> String {
 }
 
 /// "a • b • c", skipping missing and empty parts.
-fn dotted<const N: usize>(parts: [Option<String>; N]) -> String {
+pub(super) fn dotted<const N: usize>(parts: [Option<String>; N]) -> String {
     parts.into_iter().flatten().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" • ")
 }
 
@@ -3020,6 +3020,8 @@ pub fn SettingsPage(
     /// Picks the playlist for a role.
     onrole: EventHandler<Role>,
     ontogglenew: EventHandler<()>,
+    /// More sections, before About.
+    children: Element,
 ) -> Element {
     let new_note = match &secondary {
         Some(name) => format!("New songs you download land in {name}, not ones that come with a synced playlist"),
@@ -3218,6 +3220,7 @@ pub fn SettingsPage(
                 }
             }
         }
+        {children}
         section { class: "group",
             h2 { "About" }
             div { class: "card",
@@ -3298,6 +3301,8 @@ pub fn StatsPage(
     onsong: EventHandler<usize>,
     onartist: EventHandler<usize>,
     onalbum: EventHandler<usize>,
+    /// Under the period chips (the latest insight).
+    children: Element,
 ) -> Element {
     let periods = [("7 days", Period::Week), ("30 days", Period::Month), ("12 months", Period::Year), ("All time", Period::All)];
     rsx! {
@@ -3320,6 +3325,7 @@ pub fn StatsPage(
                     }
                 }
             }
+            {children}
             match stats {
                 None => rsx! {
                     div { class: "empty", div { class: "spinner" } }

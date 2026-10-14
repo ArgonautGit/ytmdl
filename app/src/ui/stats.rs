@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use ytmdl_library::{ART_LARGE, ART_SMALL, Bucket, Period, Stats};
 
 use super::views::{Bar, RankItem, StatsPage, StatsView, plural};
+use super::insights::InsightsTeaser;
 use super::{Ctx, Overlay, art_src, dotted_text};
 
 #[component]
@@ -53,6 +54,7 @@ pub(super) fn StatsScreen() -> Element {
                     ctx.nav.push(Overlay::Album { title: a.title.clone(), artist: a.artist.clone() });
                 }
             },
+            InsightsTeaser {}
         }
     }
 }
